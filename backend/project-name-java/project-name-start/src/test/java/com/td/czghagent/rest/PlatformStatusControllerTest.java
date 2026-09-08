@@ -4,7 +4,10 @@
 package com.td.czghagent.rest;
 
 import com.td.czghagent.domain.model.PlatformClaims;
+import com.td.czghagent.domain.model.S2SToken;
+import com.td.czghagent.domain.model.TenantScope;
 import com.td.czghagent.domain.port.OidcGateway;
+import com.td.czghagent.domain.port.S2STokenMinter;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -111,14 +114,14 @@ class PlatformStatusControllerTest {
     private static PlatformStatusController controller(
             boolean mock, boolean oidcEnabled, String stage) {
         return new PlatformStatusController(
-                new StubGateway(mock), "v1.2.3", stage, oidcEnabled,
+                new StubGateway(mock), new StubMinter(false), "v1.2.3", stage, oidcEnabled,
                 "https://accounts.vxture.com", false,
                 "", "", "");
     }
 
     private static PlatformStatusController controllerWithSecretsConfigured() {
         return new PlatformStatusController(
-                new StubGateway(false), "v1.2.3", "production", true,
+                new StubGateway(false), new StubMinter(true), "v1.2.3", "production", true,
                 "https://accounts.vxture.com", false,
                 "http://platform-api.internal", SECRET, "http://atlas.internal");
     }
@@ -139,6 +142,36 @@ class PlatformStatusControllerTest {
                 .filter(item -> code.equals(item.get("code")))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("自证端点漏报了通道 " + code));
+    }
+
+    /** C1b 的状态跟着换票器走，与身份网关是两条独立的判据。 */
+    @Test
+    void reportsTheS2sChannelSeparatelyFromIdentity() {
+        assertThat(channelState(controller(true, false).status(), "C1b"))
+                .isEqualTo("not_configured");
+        assertThat(channelState(controllerWithSecretsConfigured().status(), "C1b"))
+                .isEqualTo("configured");
+    }
+
+    private record StubMinter(boolean configured) implements S2STokenMinter {
+        @Override
+        public S2SToken onBehalfOf(String audience, String userAccessToken) {
+            throw new UnsupportedOperationException("本用例不铸票");
+        }
+
+        @Override
+        public S2SToken forService(String audience, TenantScope tenant) {
+            throw new UnsupportedOperationException("本用例不铸票");
+        }
+
+        @Override
+        public void invalidate(S2SToken token) {
+        }
+
+        @Override
+        public boolean isConfigured() {
+            return configured;
+        }
     }
 
     private record StubGateway(boolean mock) implements OidcGateway {

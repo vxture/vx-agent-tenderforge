@@ -6,6 +6,7 @@ package com.td.czghagent.rest;
 import com.td.czghagent.domain.model.DeployStage;
 import com.td.czghagent.domain.model.ProductIdentity;
 import com.td.czghagent.domain.port.OidcGateway;
+import com.td.czghagent.domain.port.S2STokenMinter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -34,6 +35,7 @@ import java.util.Map;
 public class PlatformStatusController {
 
     private final OidcGateway oidcGateway;
+    private final S2STokenMinter s2sTokenMinter;
     private final String version;
     private final DeployStage deployStage;
     private final boolean oidcEnabled;
@@ -45,6 +47,7 @@ public class PlatformStatusController {
 
     public PlatformStatusController(
             OidcGateway oidcGateway,
+            S2STokenMinter s2sTokenMinter,
             @Value("${app.version:dev}") String version,
             @Value("${app.deploy-stage:local}") String deployStage,
             @Value("${app.oidc.enabled:false}") boolean oidcEnabled,
@@ -55,6 +58,7 @@ public class PlatformStatusController {
             @Value("${app.atlas.api-url:}") String atlasApiUrl
     ) {
         this.oidcGateway = oidcGateway;
+        this.s2sTokenMinter = s2sTokenMinter;
         this.version = version;
         this.deployStage = DeployStage.parse(deployStage);
         this.oidcEnabled = oidcEnabled;
@@ -75,8 +79,10 @@ public class PlatformStatusController {
         body.put("degraded", oidcGateway.isMock());
         body.put("channels", List.of(
                 channel("C1", "身份（OIDC RP）", oidcChannelState(), oidcDetail()),
-                channel("C1b", "S2S 换票", "not_implemented",
-                        "凭据即 C1 的 client 对，无需另行申请"),
+                channel("C1b", "S2S 换票",
+                        s2sTokenMinter.isConfigured() ? "configured" : "not_configured",
+                        "RFC 8693；凭据即 C1 的 client 对，无需另行申请。"
+                                + "票只活 300 秒且不可刷新，每次调用现铸"),
                 channel("C2", "权益", platformApiConfigured ? "configured" : "not_configured",
                         "GET /platform/entitlements；45 秒短缓存、不落库"),
                 channel("C3-up", "用量上报", platformApiConfigured ? "configured" : "not_configured",

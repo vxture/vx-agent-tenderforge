@@ -4,11 +4,13 @@
 package com.td.czghagent.infrastructure.oidc;
 
 import com.td.czghagent.domain.port.OidcGateway;
+import com.td.czghagent.domain.port.S2STokenMinter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.web.client.RestClient;
 
 /**
  * 阶段守卫：决定用真实身份服务还是 mock。
@@ -25,6 +27,23 @@ import org.springframework.context.annotation.Configuration;
 public class OidcGatewayConfiguration {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(OidcGatewayConfiguration.class);
+
+    /**
+     * S2S 换票器。
+     *
+     * <p>与身份网关共用同一份配置判据：能不能登录和能不能换票，取决于同一对
+     * client 凭据。分开判会得到「登录用真的、换票用替身」这种半真半假的状态，
+     * 而它在界面上完全看不出来。
+     */
+    @Bean
+    public S2STokenMinter s2sTokenMinter(RestClient.Builder builder, OidcProperties properties,
+                                         OidcDiscovery discovery) {
+        if (properties.isConfigured()) {
+            return new PlatformS2STokenMinter(builder, properties, discovery);
+        }
+        LOGGER.info("S2S 换票未配置，使用替身——它铸的票在任何真实被调方那里都会被拒");
+        return new MockS2STokenMinter();
+    }
 
     @Bean
     public OidcGateway oidcGateway(OidcProperties properties, OidcDiscovery discovery,
