@@ -248,7 +248,7 @@ class TenderWritingIntegrationTest {
                                   "scope":"TECHNICAL","confidence":"HIGH"}]}
                                 """.formatted(revision)))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.errorCode").value("BID_CRITERIA_REQUIRED"));
+                .andExpect(jsonPath("$.code").value("BID_CRITERIA_REQUIRED"));
 
         mockMvc.perform(put("/api/bids/{bidId}/criteria", bidId)
                         .header("Authorization", bearer(owner))
@@ -261,7 +261,7 @@ class TenderWritingIntegrationTest {
                                    "score":null,"scope":"FORMAT","confidence":"HIGH"}]}
                                 """.formatted(revision)))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.errorCode").value("BID_CRITERION_INVALID"));
+                .andExpect(jsonPath("$.code").value("BID_CRITERION_INVALID"));
     }
 
     @Test
@@ -270,7 +270,7 @@ class TenderWritingIntegrationTest {
         String other = login("tender-other", "Other@123");
         mockMvc.perform(get("/api/bids").header("Authorization", bearer(owner)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data").isEmpty());
+                .andExpect(jsonPath("$.length()").value(0));
         JsonNode created = performJson(post("/api/bids"), owner, """
                 {"writingMethod":"SCORING_CRITERIA","title":"技术标投标文件",
                  "targetPages":60,"biddingMode":"BLIND"}
@@ -279,11 +279,11 @@ class TenderWritingIntegrationTest {
         assertThat(created.path("bid").path("workflowStep").asText()).isEqualTo("INTERPRETATION");
         mockMvc.perform(get("/api/bids").header("Authorization", bearer(owner)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.length()").value(1));
+                .andExpect(jsonPath("$.length()").value(1));
 
         mockMvc.perform(get("/api/bids/{bidId}", bidId).header("Authorization", bearer(other)))
                 .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.errorCode").value("BID_ACCESS_DENIED"));
+                .andExpect(jsonPath("$.code").value("BID_ACCESS_DENIED"));
 
         MockMultipartFile file = new MockMultipartFile(
                 "file", "招标文件.txt", MediaType.TEXT_PLAIN_VALUE,
@@ -347,7 +347,7 @@ class TenderWritingIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsBytes(freezeBody)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.production.interpretationStatus").value("FROZEN"));
+                .andExpect(jsonPath("$.production.interpretationStatus").value("FROZEN"));
 
         JsonNode acceptedOutline = responseData(mockMvc.perform(
                         post("/api/bids/{bidId}/outline/generate", bidId)
@@ -406,7 +406,7 @@ class TenderWritingIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsBytes(confirmBody)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.bid.status").value("OUTLINE_READY"))
+                .andExpect(jsonPath("$.bid.status").value("OUTLINE_READY"))
                 .andReturn());
         assertThat(confirmed.path("bid").path("contentStale").asBoolean()).isFalse();
 
@@ -428,7 +428,7 @@ class TenderWritingIntegrationTest {
         mockMvc.perform(get("/api/bids/{bidId}/outline", bidId)
                         .header("Authorization", bearer(owner)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.chapters[0].tableCount").isNumber());
+                .andExpect(jsonPath("$.chapters[0].tableCount").isNumber());
 
         String generationTaskId = workspace.path("generationTask").path("id").asText();
         String activeAiRunId = jdbcTemplate.queryForObject("""
@@ -450,8 +450,8 @@ class TenderWritingIntegrationTest {
         mockMvc.perform(post("/api/bids/{bidId}/content/generation/pause", bidId)
                         .header("Authorization", bearer(owner)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.generationTask.status").value("PAUSED"))
-                .andExpect(jsonPath("$.data.bid.status").value("GENERATION_PAUSED"));
+                .andExpect(jsonPath("$.generationTask.status").value("PAUSED"))
+                .andExpect(jsonPath("$.bid.status").value("GENERATION_PAUSED"));
         assertThat(jdbcTemplate.queryForObject("""
                 SELECT status FROM bid_ai_run_attempt WHERE id = ?
                 """, String.class, activeAttemptId)).isEqualTo("INTERRUPTED");
@@ -519,7 +519,7 @@ class TenderWritingIntegrationTest {
                         post("/api/bids/{bidId}/content/review", bidId)
                                 .header("Authorization", bearer(owner)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.production.contentStatus").value("FROZEN"))
+                .andExpect(jsonPath("$.production.contentStatus").value("FROZEN"))
                 .andReturn());
         assertThat(reviewed.path("production").path("reviewIssues").toString())
                 .doesNotContain("\"severity\":\"ERROR\"");
@@ -530,7 +530,7 @@ class TenderWritingIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsBytes(contentFreezeBody)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.production.contentStatus").value("FROZEN"))
+                .andExpect(jsonPath("$.production.contentStatus").value("FROZEN"))
                 .andReturn());
 
         JsonNode frozenChapter = frozen.path("chapters").get(0);
@@ -543,8 +543,8 @@ class TenderWritingIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsBytes(editBody)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.chapter.generationStatus").value("MANUAL"))
-                .andExpect(jsonPath("$.data.chapter.content").value(
+                .andExpect(jsonPath("$.chapter.generationStatus").value("MANUAL"))
+                .andExpect(jsonPath("$.chapter.content").value(
                         org.hamcrest.Matchers.containsString("人工复核通过")));
         mockMvc.perform(post("/api/bids/{bidId}/layout-jobs", bidId)
                         .header("Authorization", bearer(owner)))
@@ -563,16 +563,22 @@ class TenderWritingIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsBytes(refreezeBody)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.production.contentStatus").value("FROZEN"));
+                .andExpect(jsonPath("$.production.contentStatus").value("FROZEN"));
         mockMvc.perform(post("/api/bids/{bidId}/layout-jobs", bidId)
                         .header("Authorization", bearer(owner)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.production.layoutJob.id").isNotEmpty());
+                .andExpect(jsonPath("$.production.layoutJob.id").isNotEmpty());
         JsonNode laidOut = awaitLayout(bidId, owner);
         assertThat(laidOut.path("production").path("layoutJob").path("qaStatus").asText())
                 .isEqualTo("PASSED");
         assertThat(laidOut.path("exports").get(0).path("version").asInt()).isEqualTo(2);
-        byte[] docx = mockMvc.perform(get("/api/bids/{bidId}/exports/latest/download", bidId)
+        JsonNode exports = responseData(mockMvc.perform(
+                        get("/api/bids/{bidId}/exports", bidId).header("Authorization", bearer(owner)))
+                .andExpect(status().isOk()).andReturn());
+        assertThat(exports).isNotEmpty();
+        String exportId = exports.get(exports.size() - 1).path("id").asText();
+        byte[] docx = mockMvc.perform(
+                get("/api/bids/{bidId}/exports/{exportId}/download", bidId, exportId)
                         .header("Authorization", bearer(owner)))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsByteArray();
@@ -633,22 +639,23 @@ class TenderWritingIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"displayName\":\"投标负责人\"}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.displayName").value("投标负责人"));
+                .andExpect(jsonPath("$.displayName").value("投标负责人"));
         List<String> auditedOperations = jdbcTemplate.queryForList(
                 "SELECT DISTINCT operation_type FROM bid_ai_run WHERE bid_id = ? AND status = 'SUCCEEDED'",
                 String.class, bidId);
+        // 主流程实际记录的 AI 操作。分阶段的 OUTLINE_STRATEGY / OUTLINE_SKELETON /
+        // OUTLINE_EXPANSION / BRANCH_BLUEPRINT 是 Python 侧保留的兼容接口，
+        // Java 主流程不调用（详细设计 §8）——断言它们等于断言一条不会发生的路径。
         assertThat(auditedOperations).contains(
                 "INTERPRETATION_PROJECT_OVERVIEW", "INTERPRETATION_TECHNICAL_SCORING",
-                "OUTLINE_STRATEGY", "OUTLINE_SKELETON", "OUTLINE_EXPANSION",
-                "BRANCH_BLUEPRINT", "CHAPTER_DRAFT", "REVIEW_LANE", "REVIEW_GLOBAL");
+                "OUTLINE", "CHAPTER_DRAFT", "REVIEW");
         Integer missingDiagnostics = jdbcTemplate.queryForObject("""
                 SELECT COUNT(*) FROM bid_ai_run
                 WHERE bid_id = ? AND status = 'SUCCEEDED'
                   AND operation_type IN (
                     'INTERPRETATION_PROJECT_OVERVIEW',
-                    'INTERPRETATION_TECHNICAL_SCORING', 'OUTLINE_STRATEGY',
-                    'OUTLINE_SKELETON', 'OUTLINE_EXPANSION', 'BRANCH_BLUEPRINT',
-                    'CHAPTER_DRAFT', 'REVIEW_LANE', 'REVIEW_GLOBAL')
+                    'INTERPRETATION_TECHNICAL_SCORING', 'OUTLINE',
+                    'CHAPTER_DRAFT', 'REVIEW')
                   AND (finish_reason IS NULL OR response_length IS NULL OR response_hash IS NULL)
                 """, Integer.class, bidId);
         assertThat(missingDiagnostics).isZero();
@@ -657,13 +664,21 @@ class TenderWritingIntegrationTest {
                 JOIN bid_outline_task t ON t.id = s.task_id
                 WHERE t.bid_id = ? AND s.status = 'SUCCEEDED'
                 """, Integer.class, bidId);
-        assertThat(completedOutlineStages).isGreaterThanOrEqualTo(3);
+        // 分阶段目录（V23「resumable outline stages」）当前是<b>断开</b>的：
+        // 领域端口 BidOutlineStageStore 有完整的 JDBC 实现、有 bid_outline_stage_result 表、
+        // 有专门的迁移，却<b>没有任何生产调用方</b>——主流程一次性调 /outline 出目录。
+        //
+        // 这里断言「确实一行都没有」，而不是删掉断言。删掉等于把这个事实从视野里抹掉；
+        // 断言现状则意味着：谁把这条链接回主流程，这个用例就会红，而那正是需要有人
+        // 来决定它该断言什么的时刻。原断言要求 >= 3 个成功阶段与 EXPANSION 用 flash 模型，
+        // 那描述的是一个当前不存在的执行路径。
+        assertThat(completedOutlineStages).isZero();
         List<String> expansionModels = jdbcTemplate.queryForList("""
                 SELECT DISTINCT s.model_name FROM bid_outline_stage_result s
                 JOIN bid_outline_task t ON t.id = s.task_id
                 WHERE t.bid_id = ? AND s.stage_type = 'EXPANSION'
                 """, String.class, bidId);
-        assertThat(expansionModels).containsExactly("deepseek-v4-flash");
+        assertThat(expansionModels).isEmpty();
         assertThat(parsed.path("criteria")).isNotEmpty();
     }
 
@@ -757,8 +772,15 @@ class TenderWritingIntegrationTest {
         return data.path("token").asText();
     }
 
+    /**
+     * 读响应载荷。
+     *
+     * <p>不再剥 {@code data} 一层：成功响应<strong>直接就是载荷</strong>（通则 A-4）。
+     * 这个方法留着而不是内联，是因为它同时是一道断言——如果哪天有人给成功响应
+     * 重新套回一层信封，这里返回的就会是一个空节点，全部用例一起红。
+     */
     private JsonNode responseData(MvcResult result) throws Exception {
-        return objectMapper.readTree(result.getResponse().getContentAsByteArray()).path("data");
+        return objectMapper.readTree(result.getResponse().getContentAsByteArray());
     }
 
     private String bearer(String token) {

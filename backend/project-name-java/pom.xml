@@ -87,5 +87,52 @@
                 </plugin>
             </plugins>
         </pluginManagement>
+
+        <!--
+            覆盖率。JaCoCo 装在父 pom 上而不是逐模块装：六个模块各配一次，
+            早晚会有一个新模块漏配，而漏配的表现是「那个模块的覆盖率看起来是 100%」
+            ——因为它根本没被统计。
+        -->
+        <plugins>
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>0.8.13</version>
+                <executions>
+                    <execution>
+                        <id>prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
     </build>
+
+    <!--
+        跨模块汇总报告。
+        单模块报告回答不了「整个后端覆盖了多少」——测试几乎全在 project-name-start，
+        而被测代码在另外五个模块里，逐模块看会得到「start 覆盖率很高、其余为零」
+        这种既真实又毫无用处的结论。
+    -->
+    <profiles>
+        <profile>
+            <id>coverage-report</id>
+            <!--
+                汇总模块只在这个 profile 下进反应堆：它是一个纯构建期制品，
+                没有理由让镜像构建为它多跑一遍解析。
+            -->
+            <modules>
+                <module>project-name-coverage</module>
+            </modules>
+        </profile>
+    </profiles>
 </project>

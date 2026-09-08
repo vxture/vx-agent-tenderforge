@@ -84,3 +84,9 @@ test/*apiKey*.csv
 backend/project-name-java/data/
 backend/project-name-java/project-name-start/data/
 frontend/project-name-web/.test-dist/
+
+# 覆盖率产物，不入仓
+.coverage
+coverage.json
+coverage-summary.json
+htmlcov/

@@ -13,7 +13,9 @@
     "build:dev": "tsc -b && vite build --mode dev",
     "build:beta": "tsc -b && vite build --mode beta",
     "build:prod": "tsc -b && vite build --mode prod",
-    "test": "tsc -p tsconfig.test.json && node --test tests/*.test.mjs",
+    "test": "tsc -p tsconfig.test.json && node --test tests/*.test.mjs && vitest run",
+    "test:unit": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "lint": "eslint . --fix --cache",
     "preview": "vite preview",
     "format": "prettier --write src/"
@@ -41,6 +43,7 @@
     "@types/react": "^19.2.5",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
+    "@vitest/coverage-v8": "^3.2.7",
     "@vue/eslint-config-prettier": "^10.2.0",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
@@ -51,6 +54,7 @@
     "tailwindcss": "4.2.1",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.46.4",
-    "vite": "^7.2.4"
+    "vite": "^7.2.4",
+    "vitest": "^3.2.7"
   }
 }
