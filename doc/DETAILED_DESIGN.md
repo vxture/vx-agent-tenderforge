@@ -90,8 +90,8 @@ Web，并将 `WEB_HOST` 收回 `127.0.0.1`、在 `CORS_ALLOWED_ORIGINS` 中配�
 | --- | --- |
 | 契约层（X-1 封套、X-2 task_id、X-3 审计字段、A-2/3/4 形状、B-1/3/4 动词） | 已落地 |
 | 租户轴（`TenantScope`，见 §10.0） | 写入已落地；读过滤待 OIDC 切换 |
-| C1 身份（OIDC 授权码 + PKCE，两个 client） | 未接入，仍走本地口令登录 |
-| C1b S2S 换票（RFC 8693，每次调用现铸） | 未接入 |
+| C1 身份（OIDC 授权码 + PKCE，服务端会话，反向登出验签） | **代码已落地**，等平台凭证做活体验证；未配置时走替身，部署态拒绝以替身启动 |
+| C1b S2S 换票（RFC 8693，每次调用现铸） | **代码已落地**，同上 |
 | C2 权益（`GET /platform/entitlements`，45s 缓存不落库） | 未接入 |
 | C3 上行（`POST /usage/consume`，缓冲 + 冲洗，永远 200） | 未接入 |
 | C3 下发（provisioning webhook，HMAC 原始字节验签） | 未接入 |
@@ -417,7 +417,11 @@ Compose 中 `api` 只提交工作流，`worker` 注册四个队列并执行 Acti
 | --- | --- | --- |
 | `POST` | `/api/auth/login` | 用户名密码登录并创建有过期时间的会话 |
 | `GET` | `/api/auth/me` | 返回当前用户 |
-| `POST` | `/api/auth/logout` | 注销当前会话，返回 `204` |
+| `GET` | `/api/auth/oidc/login` | 发起平台登录，`302` 跳 IdP；`returnTo` 已白名单化 |
+| `GET` | `/api/auth/oidc/callback` | IdP 回调，种下不透明会话 cookie 并 `302` 回站内 |
+| `POST` | `/api/auth/oidc/backchannel-logout` | 平台反向登出通知；验签后撤销该 subject 的全部会话 |
+| `POST` | `/api/auth/logout` | **唯一的登出入口**，撤销请求携带的任何一种会话，返回 `204` |
+| `GET` | `/api/status` | 平台接入自证：四条通道的真实状态；只报状态不报值 |
 | `POST` | `/api/account/avatar` | 上传、处理并替换当前用户头像 |
 | `GET` | `/api/account/avatar` | 鉴权读取当前用户头像 |
 | `PATCH` | `/api/account/password` | 校验旧密码并修改密码，记录审计 |
@@ -463,6 +467,28 @@ Compose 中 `api` 只提交工作流，`worker` 注册四个队列并执行 Acti
 错误语义：400 为输入/阶段前置条件，401 为凭证无效（重换凭证后可重试），403 为求值拒绝
 （**不要重试**，否则得到一个永远失败的循环），404 为资源不存在，409 为 revision 冲突、
 冻结阻断或状态不允许，502/503 为 AI/文档服务失败。状态码语义固定，变的只是体内的 `code`。
+
+### 7.2b 身份与会话
+
+**浏览器零 token。** 平台 access / refresh / id token 全部留在服务端 `rp_session`，
+浏览器只拿一个 `HttpOnly; SameSite=Lax` 的不透明 cookie（生产带 `__Host-` 前缀）。
+这不只是防窃取——access token 同时是 S2S 换票的原料（OBO 模式的 `subject_token`），
+一旦下发前端，那条链就断了。
+
+`SameSite=Lax` 而不是 `Strict`：登录回调是从 IdP 域发起的顶层导航，
+Strict 会让浏览器不带上刚种下的 cookie，表现为「登录成功后仍然未登录」。
+
+**两条身份通道并存（过渡态）**：RP 会话（cookie）优先，本地口令会话（Bearer）其次。
+顺序不是偏好——反过来会让一个残留的旧 Bearer 盖掉刚建立的平台身份。
+前端登录页把平台登录做成主入口，本地口令折叠为标注了「过渡通道」的次要入口。
+平台身份验证通过后，本地那条连同 `app_user` 一起退役。
+
+**是否已登录由服务端裁定**，不由 localStorage 里有没有字符串裁定：RP 会话装在
+HttpOnly cookie 里，浏览器读不到它。
+
+**阶段守卫**：`app.oidc.*` 未配置时使用替身身份；替身在部署态（`DEPLOY_STAGE`
+非 local）**拒绝启动**，除非显式设置 `ALLOW_MOCK_ON_DEPLOY`——而那会由
+`/api/status` 的 `degraded` 位如实自报。替身编造的一切带 `mock-` / `local:` 前缀。
 
 ### 7.3 运行时面
 

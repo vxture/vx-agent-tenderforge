@@ -22,6 +22,14 @@ type RequestOptions = {
   body?: unknown
   formData?: FormData
   authenticated?: boolean
+  /**
+   * 401 时是否触发全局跳转登录页。
+   *
+   * 默认触发。鉴权守卫要设成 'ignore'：它<b>本来就是在问「我登录了吗」</b>，
+   * 得到「没有」是一个正常答案，不是一次会话失效。让它走全局跳转会把
+   * 首次访问变成一次整页刷新，而软跳转本可以在应用内完成。
+   */
+  onUnauthorized?: 'redirect' | 'ignore'
 }
 
 export class ApiError extends Error {
@@ -104,7 +112,9 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
         : JSON.stringify(options.body),
   })
 
-  if (response.status === 401 && authenticated) unauthorized()
+  if (response.status === 401 && authenticated && options.onUnauthorized !== 'ignore') {
+    unauthorized()
+  }
   if (!response.ok) {
     const envelope = (await response.json().catch(() => null)) as ErrorEnvelope | null
     throw toApiError(envelope, response.status, `请求失败（${response.status}）`)

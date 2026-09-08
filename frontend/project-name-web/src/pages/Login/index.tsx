@@ -76,6 +76,24 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+  const [showLocalForm, setShowLocalForm] = useState(false)
+
+  const requestedRedirect = searchParams.get('redirect')
+  const returnTo =
+    requestedRedirect?.startsWith('/') && !requestedRedirect.startsWith('/login')
+      ? requestedRedirect
+      : '/'
+
+  /**
+   * 平台登录是一次<b>整页导航</b>，不是 fetch。
+   *
+   * 授权码流程要把浏览器交给 IdP，再由 IdP 把它送回我们的回调地址；
+   * 用 fetch 发起会被同源策略挡住，而且拿不到回调时种下的 cookie。
+   * 所以这里换的是 window.location，不是路由跳转。
+   */
+  const signInWithPlatform = () => {
+    window.location.href = `/api/auth/oidc/login?returnTo=${encodeURIComponent(returnTo)}`
+  }
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -87,14 +105,8 @@ export default function Login() {
       const result = await authApi.login(normalizedUsername, password)
       setSession(result.token, result.user)
       updateRememberedLogin(rememberPassword, normalizedUsername, password)
-      const requested = searchParams.get('redirect')
       const fallback = result.user.admin ? '/console/users' : '/planner/writing'
-      navigate(
-        requested?.startsWith('/') && !requested.startsWith('/login') ? requested : fallback,
-        {
-          replace: true,
-        }
-      )
+      navigate(returnTo === '/' ? fallback : returnTo, { replace: true })
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : '登录失败，请重试')
     } finally {
@@ -112,7 +124,30 @@ export default function Login() {
           <h1 className="vx-brand-name">TenderAgent</h1>
         </CardHeader>
         <CardContent>
-          <form autoComplete="off" onSubmit={submit}>
+          <div className="flex flex-col gap-md">
+            <Button size="lg" className="w-full" onClick={signInWithPlatform}>
+              <Icon name="sign-in" size="sm" />
+              使用平台账号登录
+            </Button>
+            {/*
+              本地口令入口是过渡通道，不是并列的第二种登录方式。
+              标注出来而不是让它看起来同等重要：平台身份接通并验证后，
+              连同 app_user 一起退役。
+            */}
+            {showLocalForm ? null : (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="w-full text-muted-foreground"
+                onClick={() => setShowLocalForm(true)}
+              >
+                使用本地账号登录（过渡通道）
+              </Button>
+            )}
+          </div>
+          {showLocalForm ? (
+          <form autoComplete="off" onSubmit={submit} className="mt-lg border-t border-border pt-lg">
             <FieldGroup>
               <Field>
                 <FieldLabel htmlFor="login-username">账号</FieldLabel>
@@ -169,6 +204,7 @@ export default function Login() {
               </Button>
             </FieldGroup>
           </form>
+          ) : null}
         </CardContent>
       </Card>
     </main>

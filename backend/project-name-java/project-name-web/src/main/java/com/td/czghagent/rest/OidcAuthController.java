@@ -104,23 +104,10 @@ public class OidcAuthController {
     }
 
     /**
-     * 登出。
-     *
-     * <p>返回 204 并清 cookie，<strong>不</strong>顺带跳转到 IdP 的 end_session：
-     * 那是「从整个平台登出」，语义比「从这个产品登出」大得多，
-     * 不该由一个产品的登出按钮替用户决定。需要全局登出时由 console 发起。
-     */
-    @PostMapping("/logout")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void logout(HttpServletRequest request, HttpServletResponse response) {
-        loginService.logout(
-                RpSessionCookie.read(request), RequestIdentity.user(request),
-                RequestIdentity.traceId(request), request.getRemoteAddr());
-        RpSessionCookie.clear(response, secureCookie);
-    }
-
-    /**
      * 反向登出接收端。
+     *
+     * <p>（普通登出在 {@code POST /api/auth/logout}——那是唯一的登出入口，
+     * 它撤销请求携带的任何一种会话。）
      *
      * <p>平台 POST 一个签名的 {@code logout_token}（表单字段，不是 JSON——
      * 这是规范定的，不是偏好）。验签通过后撤销该 subject 在本产品的<strong>全部</strong>会话。

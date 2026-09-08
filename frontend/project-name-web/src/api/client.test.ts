@@ -128,6 +128,46 @@ describe('apiRequest', () => {
   })
 })
 
+describe('401 的两种处置', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn())
+    vi.stubGlobal('window', {
+      localStorage: { getItem: () => 'stale-token', removeItem: () => undefined },
+      location: { pathname: '/planner/bids', search: '', href: '' },
+    })
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  /**
+   * 默认：401 视为会话失效，跳登录页。
+   */
+  it('默认在 401 时跳转登录页', async () => {
+    vi.mocked(fetch).mockResolvedValue(jsonResponse(401, { code: 'X', message: 'y', retryable: false }))
+
+    await failureOf(apiRequest('/api/bids'))
+
+    expect(window.location.href).toContain('/login?redirect=')
+  })
+
+  /**
+   * 鉴权守卫要的是相反的行为：它本来就是在问「我登录了吗」，
+   * 得到「没有」是一个正常答案。走全局跳转会把首次访问变成一次整页刷新，
+   * 而软跳转本可以在应用内完成。
+   */
+  it('onUnauthorized: ignore 时把 401 原样交回调用方', async () => {
+    vi.mocked(fetch).mockResolvedValue(jsonResponse(401, { code: 'X', message: 'y', retryable: false }))
+
+    const error = await failureOf(apiRequest('/api/auth/me', { onUnauthorized: 'ignore' }))
+
+    expect(error.status).toBe(401)
+    expect(window.location.href).toBe('')
+  })
+})
+
 describe('拒绝码词表', () => {
   it('四个平台同义码加舰队约定的限流码，拼写被钉住', () => {
     expect(REJECTION_CODES).toEqual([
