@@ -44,9 +44,10 @@ class PlatformOidcGatewayTest {
                 "http://127.0.0.1/api/auth/oidc/callback", "", "openid profile",
                 true, 43200, "local");
         OidcDiscovery discovery = new OidcDiscovery(RestClient.builder(), properties);
+        IdTokenVerifier idTokenVerifier = new IdTokenVerifier(properties, discovery);
         gateway = new PlatformOidcGateway(properties, discovery,
                 new OidcTokenClient(RestClient.builder(), properties, discovery),
-                new IdTokenVerifier(properties, discovery));
+                idTokenVerifier, new LogoutTokenVerifier(idTokenVerifier));
     }
 
     @AfterEach

@@ -11,6 +11,7 @@ import com.td.czghagent.rest.security.RpSessionCookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -121,15 +122,30 @@ public class OidcAuthController {
     /**
      * 反向登出接收端。
      *
-     * <p><strong>骨架待完成</strong>：平台会 POST 一个签名的 logout_token（JWT），
-     * 需要按 OIDC Back-Channel Logout 规范验签（iss/aud/exp、{@code events} 声明、
-     * 且必须<strong>没有</strong> nonce）后才能据其撤销会话。
-     * 在验签实现之前这里返回 501 而不是静默成功——一个「收到就撤销」的实现
-     * 会让任何人都能登出任意用户。
+     * <p>平台 POST 一个签名的 {@code logout_token}（表单字段，不是 JSON——
+     * 这是规范定的，不是偏好）。验签通过后撤销该 subject 在本产品的<strong>全部</strong>会话。
+     *
+     * <p><strong>响应必须带 {@code Cache-Control: no-store}</strong>（规范 §2.8）：
+     * 一个被缓存的登出响应会让后续的登出通知被中间层直接答复，而会话根本没被撤销。
+     *
+     * <p>验签失败返回 400 而不是 401。这一条容易搞反：401 的语义是
+     * 「换张凭证再来」，会让平台把这次投递当成可重试的；而一张签名不过的
+     * logout_token 重投多少次都一样。
      */
     @PostMapping("/backchannel-logout")
-    public ResponseEntity<Void> backChannelLogout() {
-        return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).build();
+    public ResponseEntity<Void> backChannelLogout(
+            @RequestParam(name = "logout_token", required = false) String logoutToken) {
+        if (logoutToken == null || logoutToken.isBlank()) {
+            return ResponseEntity.badRequest()
+                    .header(HttpHeaders.CACHE_CONTROL, "no-store").build();
+        }
+        try {
+            loginService.backChannelLogout(gateway.subjectOfLogoutToken(logoutToken));
+        } catch (BusinessException exception) {
+            return ResponseEntity.badRequest()
+                    .header(HttpHeaders.CACHE_CONTROL, "no-store").build();
+        }
+        return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, "no-store").build();
     }
 
     /** 供 {@code /api/status} 与自证页读取的实现类型。 */

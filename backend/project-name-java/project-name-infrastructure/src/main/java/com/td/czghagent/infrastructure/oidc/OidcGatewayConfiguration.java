@@ -29,11 +29,13 @@ public class OidcGatewayConfiguration {
     @Bean
     public OidcGateway oidcGateway(OidcProperties properties, OidcDiscovery discovery,
                                    OidcTokenClient tokenClient, IdTokenVerifier verifier,
+                                   LogoutTokenVerifier logoutTokenVerifier,
                                    @Value("${app.allow-mock-on-deploy:false}") boolean allowMock) {
         if (properties.isConfigured()) {
             LOGGER.info("OIDC RP 使用平台身份服务：issuer={} client={}",
                     properties.issuer(), properties.clientId());
-            return new PlatformOidcGateway(properties, discovery, tokenClient, verifier);
+            return new PlatformOidcGateway(
+                    properties, discovery, tokenClient, verifier, logoutTokenVerifier);
         }
         if (properties.deployStage().isDeployed() && !allowMock) {
             // 拒绝启动，而不是降级后继续。一个供应编造身份的部署，

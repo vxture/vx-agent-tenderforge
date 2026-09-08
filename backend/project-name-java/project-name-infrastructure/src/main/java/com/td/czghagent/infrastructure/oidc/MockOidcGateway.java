@@ -3,6 +3,7 @@
 // DATE: 2026-09-08
 package com.td.czghagent.infrastructure.oidc;
 
+import com.td.czghagent.domain.exception.BusinessException;
 import com.td.czghagent.domain.model.PlatformClaims;
 import com.td.czghagent.domain.port.OidcGateway;
 
@@ -68,6 +69,18 @@ public class MockOidcGateway implements OidcGateway {
         return new PlatformClaims(
                 subject, "本地开发用户", "dev@example.invalid", null,
                 workspace, workspace, List.of("workspace:owner"));
+    }
+
+    /**
+     * 替身<strong>永远拒绝</strong>登出令牌。
+     *
+     * <p>它没有可验的签名，所以「收下并撤销」等于本地开发环境上任何人
+     * 都能登出任何人。返回一个假的 subject 更糟——那会撤销真实存在的会话。
+     */
+    @Override
+    public String subjectOfLogoutToken(String logoutToken) {
+        throw new BusinessException(
+                "AUTH_LOGOUT_TOKEN_INVALID", "替身身份服务不接受登出通知", 401, false, null);
     }
 
     @Override

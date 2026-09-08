@@ -31,6 +31,16 @@ public interface OidcGateway {
      */
     PlatformClaims readClaims(Tokens tokens, String expectedNonce);
 
+    /**
+     * 验证反向登出令牌并取出要登出的 subject。
+     *
+     * <p>放在端口上而不是让 Web 层直接依赖验签实现：Web 不依赖 infrastructure，
+     * 而这条纪律不该为了一个方法破例。更重要的是——放在这里，
+     * <b>mock 实现也必须表态</b>，而它的正确表态是「拒绝」：替身没有可验的签名，
+     * 一个「收到就撤销」的替身意味着本地开发环境上任何人都能登出任何人。
+     */
+    String subjectOfLogoutToken(String logoutToken);
+
     /** 会话时长。放在端口上是因为 mock 与平台可以给出不同的值。 */
     long sessionSeconds();
 

@@ -75,6 +75,17 @@ app:
     # 表现为「登录成功但仍然未登录」。
     secure-cookie: ${RP_SESSION_SECURE_COOKIE:false}
   allow-mock-on-deploy: ${ALLOW_MOCK_ON_DEPLOY:false}
+  # C2 权益 / C3 用量与开通。尚未实现调用侧，这些值当前只被 /api/status 读取，
+  # 用来如实回答「这条通道配没配」——先声明再实现，是为了让自证端点从第一天起
+  # 就说得出真话，而不是等实现落地后再补一个「其实一直没配」的发现。
+  platform:
+    api-url: ${PLATFORM_API_URL:}
+    internal-auth-token: ${PLATFORM_INTERNAL_AUTH_TOKEN:}
+    provision-webhook-secret: ${TENDERFORGE_PROVISION_WEBHOOK_SECRET:}
+    provision-webhook-secret-next: ${TENDERFORGE_PROVISION_WEBHOOK_SECRET_NEXT:}
+    console-url: ${CONSOLE_BASE_URL:https://console.vxture.com}
+  atlas:
+    api-url: ${ATLAS_API_URL:}
   storage:
     root: ${PRIVATE_STORAGE_ROOT:./data/private}
   ai:

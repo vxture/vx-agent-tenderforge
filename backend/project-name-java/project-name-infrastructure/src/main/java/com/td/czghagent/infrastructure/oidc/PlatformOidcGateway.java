@@ -22,13 +22,16 @@ public class PlatformOidcGateway implements OidcGateway {
     private final OidcDiscovery discovery;
     private final OidcTokenClient tokenClient;
     private final IdTokenVerifier verifier;
+    private final LogoutTokenVerifier logoutTokenVerifier;
 
     public PlatformOidcGateway(OidcProperties properties, OidcDiscovery discovery,
-                               OidcTokenClient tokenClient, IdTokenVerifier verifier) {
+                               OidcTokenClient tokenClient, IdTokenVerifier verifier,
+                               LogoutTokenVerifier logoutTokenVerifier) {
         this.properties = properties;
         this.discovery = discovery;
         this.tokenClient = tokenClient;
         this.verifier = verifier;
+        this.logoutTokenVerifier = logoutTokenVerifier;
     }
 
     @Override
@@ -76,6 +79,11 @@ public class PlatformOidcGateway implements OidcGateway {
                 stringClaim(accessClaims, "active_workspace"),
                 rolesOf(accessClaims)
         );
+    }
+
+    @Override
+    public String subjectOfLogoutToken(String logoutToken) {
+        return logoutTokenVerifier.verifyAndExtractSubject(logoutToken);
     }
 
     @Override

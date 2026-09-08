@@ -255,6 +255,11 @@ class OidcLoginServiceTest {
         }
 
         @Override
+        public String subjectOfLogoutToken(String logoutToken) {
+            throw new UnsupportedOperationException("本用例不涉及反向登出");
+        }
+
+        @Override
         public long sessionSeconds() {
             return 43200;
         }
