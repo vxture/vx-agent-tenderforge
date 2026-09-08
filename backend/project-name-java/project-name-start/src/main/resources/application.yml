@@ -84,6 +84,12 @@ app:
     provision-webhook-secret: ${TENDERFORGE_PROVISION_WEBHOOK_SECRET:}
     provision-webhook-secret-next: ${TENDERFORGE_PROVISION_WEBHOOK_SECRET_NEXT:}
     console-url: ${CONSOLE_BASE_URL:https://console.vxture.com}
+    # 仅本地：驱动权益替身走遍各档位分支。
+    # tier=none 走「未订阅」那一屏——它在真实环境里最难复现，
+    # 却是每个新用户看到的第一屏。部署态这三项无效（替身根本起不来）。
+    mock-tier: ${MOCK_TIER:}
+    mock-status: ${MOCK_STATUS:}
+    mock-bundled: ${MOCK_BUNDLED:false}
   atlas:
     api-url: ${ATLAS_API_URL:}
   storage:
