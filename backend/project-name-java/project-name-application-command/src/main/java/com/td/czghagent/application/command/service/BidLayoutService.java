@@ -4,6 +4,7 @@
 package com.td.czghagent.application.command.service;
 
 import com.td.czghagent.domain.exception.BusinessException;
+import com.td.czghagent.domain.model.AuditEvent;
 import com.td.czghagent.domain.model.BidDocument;
 import com.td.czghagent.domain.model.BidProductionState;
 import com.td.czghagent.domain.model.BidWorkspace;
@@ -59,8 +60,8 @@ public class BidLayoutService {
             productionRepository.failLayoutJob(jobId, bidId, safeMessage(exception));
             throw new BusinessException("BID_LAYOUT_START_FAILED", "排版任务启动失败", 502);
         }
-        auditRepository.append(context.user().id(), "BID_LAYOUT_START", "BID", bidId,
-                "SUCCESS", "成稿审查通过，启动正式排版", context.traceId(), context.ipAddress());
+        auditRepository.append(AuditEvent.byUser(context, "BID_LAYOUT_START",
+                "BID", bidId, AuditEvent.SUCCESS, "成稿审查通过，启动正式排版"));
         return bidRepository.loadWorkspace(requireBid(bidId, context));
     }
 

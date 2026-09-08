@@ -25,10 +25,11 @@ final class JdbcBidDraftPersistence {
     void insertBid(BidDocument bid) {
         jdbcTemplate.update("""
                 INSERT INTO bid_document(
-                    id, owner_id, code, writing_method, title, target_pages,
+                    id, owner_id, org_id, workspace_id, code, writing_method, title, target_pages,
                     bidding_mode, workflow_step, status, content_stale
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, bid.id(), bid.ownerId(), bid.code(), bid.writingMethod(), bid.title(),
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, bid.id(), bid.ownerId(), bid.tenant().orgId(), bid.tenant().workspaceId(),
+                bid.code(), bid.writingMethod(), bid.title(),
                 bid.targetPages(), bid.biddingMode(), bid.workflowStep(), bid.status(),
                 bid.contentStale());
     }

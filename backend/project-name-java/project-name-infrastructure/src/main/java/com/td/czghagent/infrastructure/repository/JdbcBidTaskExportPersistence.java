@@ -7,6 +7,7 @@ import com.td.czghagent.domain.exception.BusinessException;
 import com.td.czghagent.domain.model.BidExport;
 import com.td.czghagent.domain.model.BidWorkspace;
 import com.td.czghagent.domain.repository.BidRepository;
+import java.time.LocalDateTime;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.List;
@@ -300,6 +301,16 @@ final class JdbcBidTaskExportPersistence {
                 """, BidJdbcMappers.EXPORT, bidId);
     }
 
+    Optional<BidRepository.ExportRecord> findExport(String bidId, String exportId) {
+        return jdbcTemplate.query("""
+                SELECT * FROM bid_export WHERE bid_id = ? AND id = ?
+                """, (rs, row) -> new BidRepository.ExportRecord(
+                rs.getString("id"), rs.getString("bid_id"), rs.getInt("version_no"),
+                rs.getString("file_name"), rs.getString("object_key"), rs.getLong("file_size"),
+                rs.getString("created_by"), rs.getString("layout_job_id"), rs.getString("qa_status")),
+                bidId, exportId).stream().findFirst();
+    }
+
     Optional<BidRepository.ExportRecord> findLatestExport(String bidId) {
         return jdbcTemplate.query("""
                 SELECT * FROM bid_export WHERE bid_id = ? ORDER BY version_no DESC LIMIT 1
@@ -317,8 +328,8 @@ final class JdbcBidTaskExportPersistence {
                 """, (rs, row) -> new BidWorkspace.GenerationTask(
                 rs.getString("id"), rs.getString("status"), rs.getInt("total_units"),
                 rs.getInt("completed_units"), rs.getString("error_message"),
-                rs.getTimestamp("created_at").toLocalDateTime(),
-                BidJdbcMappers.nullableTime(rs.getTimestamp("finished_at"))), bidId)
+                rs.getObject("created_at", LocalDateTime.class),
+                BidJdbcMappers.nullableTime(rs, "finished_at")), bidId)
                 .stream().findFirst().orElse(null);
     }
 
@@ -330,9 +341,9 @@ final class JdbcBidTaskExportPersistence {
                 rs.getString("id"), rs.getString("status"), rs.getString("stage"),
                 rs.getInt("progress"), rs.getLong("input_revision"),
                 rs.getString("workflow_run_id"),
-                rs.getString("error_message"), rs.getTimestamp("created_at").toLocalDateTime(),
-                BidJdbcMappers.nullableTime(rs.getTimestamp("started_at")),
-                BidJdbcMappers.nullableTime(rs.getTimestamp("finished_at"))), bidId)
+                rs.getString("error_message"), rs.getObject("created_at", LocalDateTime.class),
+                BidJdbcMappers.nullableTime(rs, "started_at"),
+                BidJdbcMappers.nullableTime(rs, "finished_at")), bidId)
                 .stream().findFirst().orElse(null);
     }
 

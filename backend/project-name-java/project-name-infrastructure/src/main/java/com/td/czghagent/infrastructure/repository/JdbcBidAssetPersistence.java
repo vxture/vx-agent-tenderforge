@@ -2,6 +2,7 @@ package com.td.czghagent.infrastructure.repository;
 
 import com.td.czghagent.domain.model.BidReferenceAsset;
 import com.td.czghagent.domain.model.BidReferenceChunk;
+import com.td.czghagent.domain.model.TenantScope;
 import com.td.czghagent.domain.repository.BidRepository;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -21,10 +22,12 @@ final class JdbcBidAssetPersistence {
     void insertAsset(BidRepository.AssetRecord asset) {
         jdbcTemplate.update("""
                 INSERT INTO bid_reference_asset(
-                    id, owner_id, category, display_name, original_file_name,
+                    id, owner_id, org_id, workspace_id, category, display_name, original_file_name,
                     object_key, media_type, file_size, content_hash, status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, asset.id(), asset.ownerId(), asset.category(), asset.displayName(),
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, asset.id(), asset.ownerId(),
+                asset.tenant().orgId(), asset.tenant().workspaceId(),
+                asset.category(), asset.displayName(),
                 asset.originalFileName(), asset.objectKey(), asset.mediaType(), asset.fileSize(),
                 asset.contentHash(), asset.status());
     }
@@ -51,7 +54,9 @@ final class JdbcBidAssetPersistence {
         return jdbcTemplate.query("""
                 SELECT * FROM bid_reference_asset WHERE id = ? AND owner_id = ? AND status = 'ACTIVE'
                 """, (rs, row) -> new BidRepository.AssetRecord(
-                rs.getString("id"), rs.getString("owner_id"), rs.getString("category"),
+                rs.getString("id"), rs.getString("owner_id"),
+                new TenantScope(rs.getString("org_id"), rs.getString("workspace_id")),
+                rs.getString("category"),
                 rs.getString("display_name"), rs.getString("original_file_name"),
                 rs.getString("object_key"), rs.getString("media_type"), rs.getLong("file_size"),
                 rs.getString("content_hash"), rs.getString("status")), assetId, ownerId)

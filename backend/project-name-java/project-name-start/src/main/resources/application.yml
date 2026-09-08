@@ -46,6 +46,12 @@ springdoc:
     tags-sorter: alpha
 
 app:
+  # 构建溯源：由镜像构建时从 git ref 注入，而不是在这里写死。
+  # /api/health 报的必须是「实际构建出来的那个」，不是谁手打进配置的那个。
+  version: ${APP_VERSION:dev}
+  # 部署阶段。production 时任何 mock 实现必须拒绝启动——
+  # 让降级由守卫拦住，而不是靠部署的人记得改配置。
+  deploy-stage: ${DEPLOY_STAGE:local}
   bootstrap:
     enabled: ${BOOTSTRAP_ENABLED:true}
     planner-password: ${BOOTSTRAP_PLANNER_PASSWORD:Planner@123}

@@ -5,6 +5,8 @@ package com.td.czghagent.application.command.service;
 
 import com.td.czghagent.application.command.cmd.LoginCommand;
 import com.td.czghagent.domain.exception.BusinessException;
+import com.td.czghagent.domain.model.AuditEvent;
+import com.td.czghagent.domain.model.OperationContext;
 import com.td.czghagent.domain.model.CurrentUser;
 import com.td.czghagent.domain.model.UserAccount;
 import com.td.czghagent.domain.port.PasswordHasher;
@@ -59,16 +61,22 @@ public class AuthCommandService {
                 SessionToken.hash(token),
                 LocalDateTime.now().plusHours(sessionHours)
         );
-        auditRepository.append(account.id(), "AUTH_LOGIN", "USER", account.id(),
-                "SUCCESS", "账号登录成功", traceId, ipAddress);
+        // 登录也是用户在本产品界面上发起的动作，所以走 byUser 而不是 bySystem：
+        // actorConsole 记本产品码，审计员按控制台筛查时登录事件不会凭空消失。
+        auditRepository.append(AuditEvent.byUser(
+                new OperationContext(account.toCurrentUser(), traceId, ipAddress),
+                "AUTH_LOGIN", "USER", account.id(), AuditEvent.SUCCESS, "账号登录成功"
+        ));
         return new LoginResult(token, account.toCurrentUser(), sessionHours * 3600);
     }
 
     @Transactional
     public void logout(String token, CurrentUser user, String traceId, String ipAddress) {
         authRepository.deleteSession(SessionToken.hash(token));
-        auditRepository.append(user.id(), "AUTH_LOGOUT", "USER", user.id(),
-                "SUCCESS", "账号退出登录", traceId, ipAddress);
+        auditRepository.append(AuditEvent.byUser(
+                new OperationContext(user, traceId, ipAddress),
+                "AUTH_LOGOUT", "USER", user.id(), AuditEvent.SUCCESS, "账号退出登录"
+        ));
     }
 
     @Transactional

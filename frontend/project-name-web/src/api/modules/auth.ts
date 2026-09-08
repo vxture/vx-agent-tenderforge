@@ -12,7 +12,8 @@ export const authApi = {
       authenticated: false,
     }),
   me: () => apiRequest<CurrentUser>('/api/auth/me'),
-  logout: () => apiRequest<void>('/api/auth/session', { method: 'DELETE' }),
+  // 登出是状态迁移，走具名路由而不是 DELETE 一个叫 session 的资源（通则 B-4）。
+  logout: () => apiRequest<void>('/api/auth/logout', { method: 'POST' }),
 }
 
 export const accountApi = {

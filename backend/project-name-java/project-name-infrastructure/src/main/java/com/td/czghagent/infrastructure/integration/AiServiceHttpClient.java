@@ -58,6 +58,7 @@ public class AiServiceHttpClient implements DocumentParser, TenderAiGateway {
             ParsedDocument result = client.post()
                     .uri("/internal/parse")
                     .header("X-Internal-Token", internalToken)
+                    .headers(TaskHeaders::apply)
                     .contentType(MediaType.MULTIPART_FORM_DATA)
                     .body(body)
                     .retrieve()
@@ -149,6 +150,7 @@ public class AiServiceHttpClient implements DocumentParser, TenderAiGateway {
             JsonNode result = client.post()
                     .uri(path)
                     .header("X-Internal-Token", internalToken)
+                    .headers(TaskHeaders::apply)
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(body)
                     .retrieve()
@@ -176,6 +178,7 @@ public class AiServiceHttpClient implements DocumentParser, TenderAiGateway {
         try {
             T result = client.post().uri(path)
                     .header("X-Internal-Token", internalToken)
+                    .headers(TaskHeaders::apply)
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(body).retrieve().body(responseType);
             if (result == null) {

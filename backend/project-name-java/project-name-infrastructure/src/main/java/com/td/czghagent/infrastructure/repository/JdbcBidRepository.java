@@ -323,6 +323,11 @@ public class JdbcBidRepository implements BidRepository {
     }
 
     @Override
+    public Optional<ExportRecord> findExport(String bidId, String exportId) {
+        return tasks.findExport(bidId, exportId);
+    }
+
+    @Override
     public Optional<ExportRecord> findLatestExport(String bidId) {
         return tasks.findLatestExport(bidId);
     }

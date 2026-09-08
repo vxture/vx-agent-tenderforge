@@ -6,6 +6,7 @@ package com.td.czghagent.application.command.service;
 import com.td.czghagent.application.command.cmd.CreateManagedUserCommand;
 import com.td.czghagent.application.command.cmd.UpdateManagedUserCommand;
 import com.td.czghagent.domain.exception.BusinessException;
+import com.td.czghagent.domain.model.AuditEvent;
 import com.td.czghagent.domain.model.ManagedUser;
 import com.td.czghagent.domain.model.OperationContext;
 import com.td.czghagent.domain.model.UserAccount;
@@ -89,6 +90,14 @@ public class AdminCommandService {
         return requireUser(userId);
     }
 
+    /**
+     * 停用账号。
+     *
+     * <p>幂等：已经停用的直接返回当前状态，不报错也不重复写审计。
+     * 这条路径由具名的 {@code POST :id/deactivate} 触发而不是 {@code DELETE}
+     * ——{@code DELETE} 只表示「从目录移除」，用它表达状态迁移会让调用方
+     * 在点确认之前无法从动词判断后果（产品接入通则 B-4）。
+     */
     @Transactional
     public ManagedUser deactivate(String userId, OperationContext context) {
         requireAdmin(context);
@@ -98,6 +107,22 @@ public class AdminCommandService {
         }
         return update(userId, new UpdateManagedUserCommand(
                 current.displayName(), current.roleCode(), false, null, current.revision()
+        ), context);
+    }
+
+    /**
+     * 启用账号。二元开关必须成对提供 activate / deactivate（产品接入通则 B-3），
+     * 否则「恢复」只能靠调用方拼一个完整的更新体，而那会顺带覆盖它没打算改的字段。
+     */
+    @Transactional
+    public ManagedUser activate(String userId, OperationContext context) {
+        requireAdmin(context);
+        ManagedUser current = requireUser(userId);
+        if (current.enabled()) {
+            return current;
+        }
+        return update(userId, new UpdateManagedUserCommand(
+                current.displayName(), current.roleCode(), true, null, current.revision()
         ), context);
     }
 
@@ -153,10 +178,9 @@ public class AdminCommandService {
 
     private void appendAudit(OperationContext context, String targetId,
                              String actionCode, String summary) {
-        auditRepository.append(
-                context.user().id(), actionCode, "USER", targetId,
-                "SUCCESS", summary, context.traceId(), context.ipAddress()
-        );
+        auditRepository.append(AuditEvent.byUser(
+                context, actionCode, "USER", targetId, AuditEvent.SUCCESS, summary
+        ));
     }
 
     private String roleLabel(String roleCode) {

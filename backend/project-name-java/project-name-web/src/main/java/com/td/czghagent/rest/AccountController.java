@@ -10,7 +10,6 @@ import com.td.czghagent.domain.model.StoredFile;
 import com.td.czghagent.rest.dto.ChangePasswordRequest;
 import com.td.czghagent.rest.dto.UpdateProfileRequest;
 import com.td.czghagent.rest.security.RequestIdentity;
-import com.td.czghagent.rest.support.ApiResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.CacheControl;
@@ -42,12 +41,9 @@ public class AccountController {
     }
 
     @PostMapping(value = "/avatar", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ApiResponse<CurrentUser> updateAvatar(@RequestParam MultipartFile file,
+    public CurrentUser updateAvatar(@RequestParam MultipartFile file,
                                                  HttpServletRequest request) throws IOException {
-        return ApiResponse.success(
-                commandService.updateAvatar(file.getBytes(), RequestIdentity.operation(request)),
-                RequestIdentity.traceId(request)
-        );
+        return commandService.updateAvatar(file.getBytes(), RequestIdentity.operation(request));
     }
 
     @GetMapping("/avatar")
@@ -61,21 +57,18 @@ public class AccountController {
     }
 
     @PatchMapping("/password")
-    public ApiResponse<Void> changePassword(@Valid @RequestBody ChangePasswordRequest body,
+    @org.springframework.web.bind.annotation.ResponseStatus(org.springframework.http.HttpStatus.NO_CONTENT)
+    public void changePassword(@Valid @RequestBody ChangePasswordRequest body,
                                             HttpServletRequest request) {
         commandService.changePassword(
                 body.currentPassword(), body.newPassword(), RequestIdentity.operation(request)
         );
-        return ApiResponse.success(null, RequestIdentity.traceId(request));
     }
 
     @PatchMapping("/profile")
-    public ApiResponse<CurrentUser> updateProfile(@Valid @RequestBody UpdateProfileRequest body,
+    public CurrentUser updateProfile(@Valid @RequestBody UpdateProfileRequest body,
                                                   HttpServletRequest request) {
-        return ApiResponse.success(
-                commandService.updateProfile(body.displayName(), RequestIdentity.operation(request)),
-                RequestIdentity.traceId(request)
-        );
+        return commandService.updateProfile(body.displayName(), RequestIdentity.operation(request));
     }
 }
 

@@ -16,7 +16,6 @@ import {
   Input,
   ListPageTemplate,
   NativeSelect,
-  Pagination,
   UserAvatar,
   ViewHeader,
 } from '@vxture/design-system'
@@ -36,9 +35,9 @@ import {
   useUpdateAdminUserMutation,
 } from './queries'
 
+// 账号是有界集合，一次取完；limit 只是服务端钳制上限的本地表达，不是翻页。
 const DEFAULT_FILTERS: ManagedUserFilters = {
-  page: 1,
-  size: 20,
+  limit: 200,
   keyword: '',
   roleCode: '',
   enabled: '',
@@ -61,7 +60,7 @@ export default function UsersPage() {
 
   const submitFilters = (event: FormEvent) => {
     event.preventDefault()
-    setFilters({ ...draft, page: 1 })
+    setFilters({ ...draft })
   }
 
   const resetFilters = () => {
@@ -133,7 +132,7 @@ export default function UsersPage() {
     setNotice(`用户 ${displayName} 已停用`)
   }
 
-  const result = usersQuery.data
+  const users = usersQuery.data ?? []
   const columns: DataTableColumn<ManagedUser>[] = [
     {
       id: 'user',
@@ -259,7 +258,7 @@ export default function UsersPage() {
         filters={
           <form onSubmit={submitFilters}>
             <FilterBar
-              count={`共 ${result?.total ?? 0} 条`}
+              count={`共 ${users.length} 条`}
               onReset={resetFilters}
               resetLabel="重置筛选"
               search={
@@ -323,7 +322,7 @@ export default function UsersPage() {
           ) : (
             <DataTable
               columns={columns}
-              rows={result?.items ?? []}
+              rows={users}
               rowKey={(user) => user.id}
               loading={usersQuery.isLoading}
               loadingRows={10}
@@ -340,25 +339,10 @@ export default function UsersPage() {
           )
         }
         footer={
-          result ? (
-            <Pagination
-              page={result.page}
-              pageCount={Math.max(1, result.totalPages)}
-              total={result.total}
-              countLabel={`共 ${result.total} 条`}
-              pageSize={result.size}
-              pageSizeOptions={[10, 20, 50]}
-              onPageChange={(page) => setFilters({ ...filters, page })}
-              onPageSizeChange={(size) => {
-                if (typeof size !== 'number') return
-                setDraft({ ...draft, size })
-                setFilters({ ...filters, page: 1, size })
-              }}
-              previousLabel="上一页"
-              nextLabel="下一页"
-              pageSizeLabel="每页条数"
-              pageSizeOptionTemplate="每页 {size} 条"
-            />
+          users.length >= filters.limit ? (
+            <p className="text-sm text-muted-foreground">
+              仅显示前 {filters.limit} 个账号，请用筛选条件缩小范围。
+            </p>
           ) : undefined
         }
       />

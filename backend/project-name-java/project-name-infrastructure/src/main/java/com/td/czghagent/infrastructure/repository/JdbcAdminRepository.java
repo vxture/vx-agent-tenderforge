@@ -23,31 +23,33 @@ public class JdbcAdminRepository implements AdminRepository {
             resultSet.getString("id"), resultSet.getString("username"),
             resultSet.getString("display_name"), resultSet.getString("role_code"),
             resultSet.getString("avatar_url"), resultSet.getBoolean("enabled"),
-            resultSet.getTimestamp("created_at").toLocalDateTime(),
-            resultSet.getTimestamp("updated_at").toLocalDateTime(), resultSet.getLong("revision")
+            resultSet.getObject("created_at", LocalDateTime.class),
+            resultSet.getObject("updated_at", LocalDateTime.class), resultSet.getLong("revision")
     );
 
     private static final RowMapper<AuditLogEntry> AUDIT_MAPPER = (resultSet, rowNumber) ->
             new AuditLogEntry(
-                    resultSet.getString("id"), resultSet.getString("user_id"),
-                    resultSet.getString("username"), resultSet.getString("target_name"),
-                    resultSet.getString("action_code"), resultSet.getString("target_type"),
-                    resultSet.getString("target_id"), resultSet.getString("result_code"),
-                    resultSet.getString("detail_summary"), resultSet.getString("trace_id"),
-                    resultSet.getString("ip_address"),
-                    resultSet.getTimestamp("created_at").toLocalDateTime()
+                    resultSet.getString("event_id"), resultSet.getString("actor_id"),
+                    resultSet.getString("actor_name"), resultSet.getString("actor_console"),
+                    resultSet.getString("object_name"),
+                    resultSet.getString("action"), resultSet.getString("object_type"),
+                    resultSet.getString("object_id"), resultSet.getString("outcome"),
+                    resultSet.getString("detail_summary"), resultSet.getString("task_id"),
+                    resultSet.getString("org_id"), resultSet.getString("workspace_id"),
+                    resultSet.getString("trace_id"), resultSet.getString("ip_address"),
+                    resultSet.getObject("occurred_at", LocalDateTime.class)
             );
 
     private static final String AUDIT_JOINS = """
             FROM audit_log a
-            LEFT JOIN app_user u ON u.id = a.user_id
-            LEFT JOIN bid_document b ON a.target_type = 'BID' AND b.id = a.target_id
-            LEFT JOIN app_user target_user ON a.target_type = 'USER' AND target_user.id = a.target_id
+            LEFT JOIN app_user u ON u.id = a.actor_id
+            LEFT JOIN bid_document b ON a.object_type = 'BID' AND b.id = a.object_id
+            LEFT JOIN app_user target_user ON a.object_type = 'USER' AND target_user.id = a.object_id
             """;
 
     private static final String AUDIT_SELECT = """
-            SELECT a.*, u.username,
-                   COALESCE(b.title, target_user.display_name, a.target_id) AS target_name
+            SELECT a.*, u.username AS actor_name,
+                   COALESCE(b.title, target_user.display_name, a.object_id) AS object_name
             """ + AUDIT_JOINS;
 
     private final JdbcTemplate jdbcTemplate;
@@ -61,22 +63,11 @@ public class JdbcAdminRepository implements AdminRepository {
         QueryParts where = userWhere(filter);
         List<Object> parameters = new ArrayList<>(where.parameters());
         parameters.add(filter.limit());
-        parameters.add(filter.offset());
         return jdbcTemplate.query(
                 "SELECT * FROM app_user" + where.sql()
-                        + " ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
+                        + " ORDER BY created_at DESC, id DESC LIMIT ?",
                 USER_MAPPER, parameters.toArray()
         );
-    }
-
-    @Override
-    public long countUsers(UserFilter filter) {
-        QueryParts where = userWhere(filter);
-        Long count = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM app_user" + where.sql(),
-                Long.class, where.parameters().toArray()
-        );
-        return count == null ? 0 : count;
     }
 
     @Override
@@ -85,26 +76,27 @@ public class JdbcAdminRepository implements AdminRepository {
                 .stream().findFirst();
     }
 
+    /**
+     * 键集游标翻页。
+     *
+     * <p>游标谓词写成 {@code (occurred_at, event_id) < (?, ?)} 的展开形式而不是 MySQL 的行值比较，
+     * 是为了让优化器用得上 {@code (occurred_at, event_id)} 上的索引——行值比较在 MySQL 8 上
+     * 对复合索引的利用并不稳定，而这条查询正是靠索引才避免深翻页扫描的。
+     */
     @Override
     public List<AuditLogEntry> listAuditLogs(AuditFilter filter) {
         QueryParts where = auditWhere(filter);
+        StringBuilder sql = new StringBuilder(AUDIT_SELECT).append(where.sql());
         List<Object> parameters = new ArrayList<>(where.parameters());
+        if (filter.cursorCreatedAt() != null && filter.cursorId() != null) {
+            sql.append(" AND (a.occurred_at < ? OR (a.occurred_at = ? AND a.event_id < ?))");
+            parameters.add(filter.cursorCreatedAt());
+            parameters.add(filter.cursorCreatedAt());
+            parameters.add(filter.cursorId());
+        }
+        sql.append(" ORDER BY a.occurred_at DESC, a.event_id DESC LIMIT ?");
         parameters.add(filter.limit());
-        parameters.add(filter.offset());
-        return jdbcTemplate.query(
-                AUDIT_SELECT + where.sql() + " ORDER BY a.created_at DESC, a.id DESC LIMIT ? OFFSET ?",
-                AUDIT_MAPPER, parameters.toArray()
-        );
-    }
-
-    @Override
-    public long countAuditLogs(AuditFilter filter) {
-        QueryParts where = auditWhere(filter);
-        Long count = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) " + AUDIT_JOINS + where.sql(),
-                Long.class, where.parameters().toArray()
-        );
-        return count == null ? 0 : count;
+        return jdbcTemplate.query(sql.toString(), AUDIT_MAPPER, parameters.toArray());
     }
 
     private QueryParts userWhere(UserFilter filter) {
@@ -129,7 +121,7 @@ public class JdbcAdminRepository implements AdminRepository {
         List<Object> parameters = new ArrayList<>();
         if (hasText(filter.keyword())) {
             sql.append(" AND (LOWER(COALESCE(u.username, '')) LIKE ?")
-                    .append(" OR LOWER(COALESCE(b.title, target_user.display_name, a.target_id, '')) LIKE ?")
+                    .append(" OR LOWER(COALESCE(b.title, target_user.display_name, a.object_id, '')) LIKE ?")
                     .append(" OR LOWER(COALESCE(a.detail_summary, '')) LIKE ?")
                     .append(" OR LOWER(a.trace_id) LIKE ?)");
             String keyword = like(filter.keyword());
@@ -137,10 +129,10 @@ public class JdbcAdminRepository implements AdminRepository {
                 parameters.add(keyword);
             }
         }
-        appendEquals(sql, parameters, "a.action_code", filter.actionCode());
-        appendEquals(sql, parameters, "a.result_code", filter.resultCode());
-        appendTime(sql, parameters, "a.created_at >= ?", filter.startAt());
-        appendTime(sql, parameters, "a.created_at <= ?", filter.endAt());
+        appendEquals(sql, parameters, "a.action", filter.actionCode());
+        appendEquals(sql, parameters, "a.outcome", filter.resultCode());
+        appendTime(sql, parameters, "a.occurred_at >= ?", filter.startAt());
+        appendTime(sql, parameters, "a.occurred_at <= ?", filter.endAt());
         return new QueryParts(sql.toString(), parameters);
     }
 

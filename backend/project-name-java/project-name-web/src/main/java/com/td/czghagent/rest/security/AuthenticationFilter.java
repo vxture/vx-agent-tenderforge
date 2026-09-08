@@ -6,7 +6,7 @@ package com.td.czghagent.rest.security;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.td.czghagent.application.query.service.AuthQueryService;
 import com.td.czghagent.domain.model.CurrentUser;
-import com.td.czghagent.rest.support.ApiResponse;
+import com.td.czghagent.rest.support.ErrorEnvelope;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -36,6 +36,9 @@ public class AuthenticationFilter extends OncePerRequestFilter {
         String path = request.getRequestURI();
         return "OPTIONS".equals(request.getMethod())
                 || "/api/auth/login".equals(path)
+                // 运行时探针必须公开：探测方是编排器和平台健康页，它们没有会话。
+                || "/api/health".equals(path)
+                || "/api/ready".equals(path)
                 || path.startsWith("/actuator/health")
                 || path.startsWith("/v3/api-docs")
                 || path.startsWith("/swagger-ui")
@@ -80,8 +83,8 @@ public class AuthenticationFilter extends OncePerRequestFilter {
         response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.setCharacterEncoding(java.nio.charset.StandardCharsets.UTF_8.name());
-        objectMapper.writeValue(response.getWriter(), ApiResponse.failure(
-                "AUTH_REQUIRED", "登录状态已失效，请重新登录", RequestIdentity.traceId(request)
+        objectMapper.writeValue(response.getWriter(), ErrorEnvelope.of(
+                "AUTH_SESSION_INVALID", "登录状态已失效，请重新登录", false
         ));
     }
 
@@ -89,8 +92,8 @@ public class AuthenticationFilter extends OncePerRequestFilter {
         response.setStatus(HttpServletResponse.SC_FORBIDDEN);
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.setCharacterEncoding(java.nio.charset.StandardCharsets.UTF_8.name());
-        objectMapper.writeValue(response.getWriter(), ApiResponse.failure(
-                "ROLE_ACCESS_DENIED", "当前账号无权访问该业务入口", RequestIdentity.traceId(request)
+        objectMapper.writeValue(response.getWriter(), ErrorEnvelope.of(
+                "AUTH_ROLE_DENIED", "当前账号无权访问该业务入口", false
         ));
     }
 }

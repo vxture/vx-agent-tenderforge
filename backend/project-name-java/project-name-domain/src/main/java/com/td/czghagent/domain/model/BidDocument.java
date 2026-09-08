@@ -8,9 +8,17 @@ import com.td.czghagent.domain.exception.BusinessException;
 import java.time.LocalDateTime;
 import java.util.Set;
 
+/**
+ * 标书聚合根。
+ *
+ * <p>{@link TenantScope} 落在这里而不是散布到 30 张 bid_* 子表：子表通过 bid_id 继承归属，
+ * 各存一份会得到 30 处可能不一致的真相，而任何一处漏更新的表现都是
+ * 「数据在租户之间静默串味」——没有报错，只有一个看起来正常的响应。
+ */
 public record BidDocument(
         String id,
         String ownerId,
+        TenantScope tenant,
         String code,
         String writingMethod,
         String title,

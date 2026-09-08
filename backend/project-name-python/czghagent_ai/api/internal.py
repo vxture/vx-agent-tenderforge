@@ -9,18 +9,18 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Annotated, TypeVar
 
-from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Header, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
 
 from czghagent_ai.config import settings
 from czghagent_ai.document_models import DocumentRenderRequest
+from czghagent_ai.errors import ServiceError
 from czghagent_ai.models import ParsedDocument
 from czghagent_ai.services.ai_provider import (
     AiProviderAuthenticationError,
     AiProviderError,
     AiProviderNotConfiguredError,
-    AiProviderOutputError,
     AiProviderTimeoutError,
     OpenAiCompatibleProvider,
 )
@@ -81,8 +81,15 @@ tender_ai_service = TenderAiService(create_ai_provider())
 
 
 def require_internal_token(x_internal_token: str = Header(default="")) -> None:
+    """内部服务令牌校验。
+
+    常量时间比较，且不区分「没带」与「带错」——两者返回同一个码，
+    因为把它们分开只对攻击者有用。
+    """
     if not secrets.compare_digest(x_internal_token, settings.internal_token):
-        raise HTTPException(status_code=401, detail="内部服务令牌无效")
+        raise ServiceError(
+            "AUTH_INTERNAL_TOKEN_INVALID", "内部服务令牌无效", 401, retryable=False
+        )
 
 
 @router.post("/parse", response_model=ParsedDocument, dependencies=[Depends(require_internal_token)])
@@ -93,19 +100,28 @@ async def parse_document(file: Annotated[UploadFile, File()]) -> ParsedDocument:
             parser_service.parse, file.filename or "document", content
         )
     except UnsupportedDocumentError as exception:
-        raise HTTPException(status_code=422, detail=str(exception)) from exception
+        raise ServiceError(
+            "PARSER_DOCUMENT_UNSUPPORTED", str(exception), 422, retryable=False
+        ) from exception
 
 
-def map_ai_error(exception: AiProviderError) -> HTTPException:
+def map_ai_error(exception: AiProviderError) -> ServiceError:
+    """把模型侧失败翻成平台封套。
+
+    ``exception.code`` 原样带出，不在这里重命名——被调方自己的码是调用方
+    分支的依据，中途改名等于让上游那条分支永远不进。
+    ``retryable`` 由错误码派生（见 :mod:`czghagent_ai.errors`）：
+    配置缺失和结构化输出不合法都不会因为等一会儿而变好。
+    """
     if isinstance(exception, AiProviderNotConfiguredError | AiProviderAuthenticationError):
         status = 503
     elif isinstance(exception, AiProviderTimeoutError):
         status = 504
-    elif isinstance(exception, AiProviderOutputError):
-        status = 502
     else:
         status = 502
-    return HTTPException(status_code=status, detail=exception.details())
+    return ServiceError(
+        exception.code, str(exception), status, details=exception.details()
+    )
 
 
 AiStageResult = TypeVar("AiStageResult")
@@ -380,9 +396,13 @@ async def render_tender_document(body: DocumentRenderRequest) -> Response:
     try:
         content, qa = await asyncio.to_thread(document_renderer.render, body)
     except ValueError as exception:
-        raise HTTPException(status_code=409, detail=str(exception)) from exception
+        raise ServiceError(
+            "DOCUMENT_RENDER_CONFLICT", str(exception), 409, retryable=False
+        ) from exception
     except DocumentQaError as exception:
-        raise HTTPException(status_code=502, detail=str(exception)) from exception
+        raise ServiceError(
+            "DOCUMENT_RENDER_FAILED", str(exception), 502, retryable=True
+        ) from exception
     encoded_summary = base64.urlsafe_b64encode(qa.summary.encode("utf-8")).decode("ascii")
     return Response(
         content=content,

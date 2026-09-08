@@ -63,8 +63,8 @@ public class BidInterpretationProcessor {
 
     public void parseDocument(String sourceId, String bidId, String ownerId,
                               String traceId, String ipAddress) {
-        OperationContext context = context(ownerId, traceId, ipAddress);
-        support.requireBid(bidId, context);
+        BidDocument bid = support.requireBid(bidId, ownerId);
+        OperationContext context = context(bid, traceId, ipAddress);
         BidRepository.SourceFileRecord source = currentParsingSource(sourceId, bidId);
         if (source == null) {
             return;
@@ -96,8 +96,8 @@ public class BidInterpretationProcessor {
 
     public void generateProjectOverview(String sourceId, String bidId, String ownerId,
                                         String traceId, String ipAddress) {
-        OperationContext context = context(ownerId, traceId, ipAddress);
-        BidDocument bid = support.requireBid(bidId, context);
+        BidDocument bid = support.requireBid(bidId, ownerId);
+        OperationContext context = context(bid, traceId, ipAddress);
         BidRepository.SourceFileRecord source = currentParsingSource(sourceId, bidId);
         if (source == null || "SUCCEEDED".equals(source.overviewStatus())) {
             return;
@@ -121,8 +121,8 @@ public class BidInterpretationProcessor {
 
     public void generateTechnicalScoring(String sourceId, String bidId, String ownerId,
                                          String traceId, String ipAddress) {
-        OperationContext context = context(ownerId, traceId, ipAddress);
-        BidDocument bid = support.requireBid(bidId, context);
+        BidDocument bid = support.requireBid(bidId, ownerId);
+        OperationContext context = context(bid, traceId, ipAddress);
         BidRepository.SourceFileRecord source = currentParsingSource(sourceId, bidId);
         if (source == null || "SUCCEEDED".equals(source.scoringStatus())) {
             return;
@@ -147,8 +147,8 @@ public class BidInterpretationProcessor {
     @Transactional
     public void complete(String sourceId, String bidId, String ownerId,
                          String traceId, String ipAddress) {
-        OperationContext context = context(ownerId, traceId, ipAddress);
-        support.requireBid(bidId, context);
+        BidDocument bid = support.requireBid(bidId, ownerId);
+        OperationContext context = context(bid, traceId, ipAddress);
         if (!progress(sourceId, "SAVING", 95)
                 || !bidRepository.completeSourceParse(sourceId, bidId)) {
             return;
@@ -222,9 +222,20 @@ public class BidInterpretationProcessor {
         return value.length() <= 500_000 ? value : value.substring(0, 500_000);
     }
 
-    private OperationContext context(String ownerId, String traceId, String ipAddress) {
+    /**
+     * 为后台执行铸一个操作上下文。
+     *
+     * <p>租户轴取自<strong>标书本身</strong>而不是由 ownerId 现推：ownerId 只说明归属人，
+     * 而一个人可以属于多个工作空间。从人推空间，在多空间场景下会把审计记到错误的空间上，
+     * 且不报任何错。
+     *
+     * <p>显示名与用户名留空：后台路径拿不到，也不该拿——它们只用于界面呈现，
+     * 编一个假的会让审计里出现一个查无此人的名字。
+     */
+    private OperationContext context(BidDocument bid, String traceId, String ipAddress) {
         return new OperationContext(
-                new CurrentUser(ownerId, "", "", "PLANNER", null), traceId, ipAddress);
+                new CurrentUser(bid.ownerId(), "", "", "PLANNER", null, bid.tenant()),
+                traceId, ipAddress);
     }
 
     private String safeMessage(String message) {

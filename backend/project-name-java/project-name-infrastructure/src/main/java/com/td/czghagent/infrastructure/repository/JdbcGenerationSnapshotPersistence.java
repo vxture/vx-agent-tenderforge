@@ -10,6 +10,7 @@ import com.td.czghagent.domain.model.BidReferenceChunk;
 import com.td.czghagent.domain.model.BidWorkspace;
 import com.td.czghagent.domain.repository.BidProductionRepository;
 import com.td.czghagent.domain.port.TenderAiGateway;
+import java.time.LocalDateTime;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -232,7 +233,7 @@ class JdbcGenerationSnapshotPersistence {
                 rs.getInt("interpretation_version"), rs.getInt("outline_version"),
                 rs.getString("solution_contract"), rs.getString("writing_bible"), rs.getString("term_registry"),
                 rs.getString("commitment_registry"), rs.getString("prompt_version"),
-                rs.getTimestamp("created_at").toLocalDateTime());
+                rs.getObject("created_at", LocalDateTime.class));
     }
 
     private String join(List<String> values) {

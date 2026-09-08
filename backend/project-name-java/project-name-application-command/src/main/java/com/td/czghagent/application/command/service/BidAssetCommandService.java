@@ -39,7 +39,8 @@ class BidAssetCommandService {
                 fileName, mediaType, content);
         String id = UUID.randomUUID().toString();
         BidRepository.AssetRecord asset = new BidRepository.AssetRecord(
-                id, context.user().id(), category, displayName(fileName), fileName,
+                id, context.user().id(), context.user().tenant(),
+                category, displayName(fileName), fileName,
                 stored.objectKey(), mediaType, stored.size(), stored.contentHash(),
                 "GALLERY".equals(category) ? "ACTIVE" : "PROCESSING");
         try {

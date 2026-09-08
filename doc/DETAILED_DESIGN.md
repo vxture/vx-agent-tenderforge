@@ -71,6 +71,43 @@ Web，并将 `WEB_HOST` 收回 `127.0.0.1`、在 `CORS_ALLOWED_ORIGINS` 中配�
 浏览器不直接访问 Python、MySQL 或 Temporal。Java 调用 Python 时必须携带
 `X-Internal-Token`；模型密钥通过 Compose 从 `deploy/.env` 注入 `ai` 容器。
 
+### 2.1 平台接入
+
+产品码 **`tenderforge`**，是全仓唯一真源，三处承载必须同时改：
+`ProductIdentity.PRODUCT_CODE`（Java）、`BRAND.productCode`（前端）、
+`brand.PRODUCT_CODE`（Python）。
+
+**它是源码字面量，不是环境变量。** 环境变量意味着同一份镜像可以冒充另一个产品上报用量；
+产品码属于「这份代码是谁」，不属于「这次部署在哪」。
+
+**永远不要从 `OIDC_CLIENT_ID` 反推产品码**：beta 环境的 client 是 `tenderforge-beta`，
+产品码仍是 `tenderforge`，非生产栈上两者必然分叉，而分叉的表现是用量报到一个不存在的
+产品上，本地一切看起来正常。
+
+平台四通道的接入状态：
+
+| 通道 | 状态 |
+| --- | --- |
+| 契约层（X-1 封套、X-2 task_id、X-3 审计字段、A-2/3/4 形状、B-1/3/4 动词） | 已落地 |
+| 租户轴（`TenantScope`，见 §10.0） | 写入已落地；读过滤待 OIDC 切换 |
+| C1 身份（OIDC 授权码 + PKCE，两个 client） | 未接入，仍走本地口令登录 |
+| C1b S2S 换票（RFC 8693，每次调用现铸） | 未接入 |
+| C2 权益（`GET /platform/entitlements`，45s 缓存不落库） | 未接入 |
+| C3 上行（`POST /usage/consume`，缓冲 + 冲洗，永远 200） | 未接入 |
+| C3 下发（provisioning webhook，HMAC 原始字节验签） | 未接入 |
+| Atlas 唯一模型出口 | **未接入，当前直连模型供应商——这是已知的契约违规** |
+| 被调方半边（八条验票、`/.well-known/vxture-tools`） | 未接入 |
+
+**登记的偏离，两条，均带失效条件：**
+
+1. `/api/admin/users` 的启停仍是布尔 `enabled`，而 B-3 要求单一字符串 `state`。
+   理由不是迁移成本——这整个资源即将被「平台 IdP 提供身份 + 本地只存 workspace 内业务角色」
+   替换，新资源会一出生就用 `state`。**失效条件：本地账号体系被替换即作废。**
+2. 仓内类型名 `BidWorkspace`（标书编辑聚合）与平台 `workspace`（租户工作空间）同词异义。
+   线上契约没有撞名——`BidWorkspace` 从不作为 JSON 键出现，响应键是
+   `{bid, sourceFile, criteria, outline, chapters, ...}`；这是仓内可读性问题而非契约违规。
+   **失效条件：随产品码级联重命名一并改为 `BidCanvas`。**
+
 ## 3. 仓库与模块
 
 ### 3.1 前端
@@ -345,8 +382,34 @@ Compose 中 `api` 只提交工作流，`worker` 注册四个队列并执行 Acti
 
 ## 7. Java 对外 API
 
-所有成功 JSON 使用 `{ success, data, errorCode, message, traceId }`。除登录、健康检查和
-OpenAPI 外均需 `Authorization: Bearer <token>`。
+接口形状遵循《产品接入通则》的 MUST 条款。除登录、运行时探针和 OpenAPI 外均需
+`Authorization: Bearer <token>`。
+
+**成功响应直接返回载荷本体**，没有外层信封（A-4）。三种形状按「有没有服务端解析出来的
+结果要回显」来选，不按资源类型选：
+
+| 情形 | 形状 | 本系统的例子 |
+| --- | --- | --- |
+| 无回显内容 | 裸 JSON 数组 | `/api/bids`、`/api/bid-assets`、`/api/admin/users`、`/api/bids/{bidId}/exports` |
+| 无界游标流水 | `{ items, nextCursor }` | `/api/admin/audit-logs` |
+| 单个对象 | 对象本体 | 其余全部 |
+
+集合键一律叫 `items`；`nextCursor` 为 `null` 表示没有下一页。列表 `limit` 由服务端钳制到
+200，**不静默截断语义**——调用方按「返回条数等于上限」判断还有数据。
+
+**失败响应统一为** `{ code, message, retryable, field? }`（X-1）。三个必备字段不可缺省：
+`retryable` 是被调方自己的答复，调用方照读即可，不要按状态码另行推断；`field` 仅字段级
+错误时出现，为空时整体省略而不是置 `null`。错误码是带模块前缀的 `SCREAMING_SNAKE`。
+跨平面同义的拒绝码照抄不自造：`NOT_ENTITLED`、`POLICY_DENIED`、`APPROVAL_REQUIRED`、
+`QUOTA_EXCEEDED`，另有舰队约定的 `RATE_LIMITED`（唯一 `retryable=true` 的拒绝）。
+
+**`X-Vxture-Task-Id`** 是跨产品唯一聚合键（X-2）。调用方送来的值被原样保留并随出站调用
+（Java → Python → 模型）一路带下去；本服务不自产替代值——一个对方查不到的假聚合键比空值
+更难排查。诊断关联仍用 `X-Trace-Id` 响应头，它不进契约字段位。
+
+**动词语义**（B-1、B-3、B-4）：`PATCH` 是部分更新，`PUT` 是全量替换；`DELETE` 只表示从
+目录移除，状态迁移一律走具名路由（`POST :id/deactivate`、`POST :id/activate`、
+`POST /api/auth/logout`）。筛选条件走查询参数，路径段只留给资源标识（A-2）。
 
 ### 7.1 认证、账户与管理
 
@@ -354,14 +417,16 @@ OpenAPI 外均需 `Authorization: Bearer <token>`。
 | --- | --- | --- |
 | `POST` | `/api/auth/login` | 用户名密码登录并创建有过期时间的会话 |
 | `GET` | `/api/auth/me` | 返回当前用户 |
-| `DELETE` | `/api/auth/session` | 注销当前会话 |
+| `POST` | `/api/auth/logout` | 注销当前会话，返回 `204` |
 | `POST` | `/api/account/avatar` | 上传、处理并替换当前用户头像 |
 | `GET` | `/api/account/avatar` | 鉴权读取当前用户头像 |
 | `PATCH` | `/api/account/password` | 校验旧密码并修改密码，记录审计 |
 | `PATCH` | `/api/account/profile` | 修改显示名称 |
-| `GET/POST` | `/api/admin/users` | 分页筛选用户 / 创建用户 |
-| `GET/PATCH/DELETE` | `/api/admin/users/{userId}` | 查询、乐观锁更新、停用用户 |
-| `GET` | `/api/admin/audit-logs` | 按关键字、动作、结果和时间分页查询审计 |
+| `GET/POST` | `/api/admin/users` | 按 `limit` 钳制的筛选（裸数组）/ 创建用户 |
+| `GET/PATCH` | `/api/admin/users/{userId}` | 查询 / 乐观锁部分更新 |
+| `POST` | `/api/admin/users/{userId}/deactivate` | 停用账号，幂等 |
+| `POST` | `/api/admin/users/{userId}/activate` | 启用账号，幂等 |
+| `GET` | `/api/admin/audit-logs` | 按关键字、动作、结果和时间查询审计，键集游标翻页 |
 
 ### 7.2 素材与标书
 
@@ -393,11 +458,20 @@ OpenAPI 外均需 `Authorization: Bearer <token>`。
 | `POST` | `/api/bids/{bidId}/content/freeze` | 校验阻断项并冻结正文 |
 | `POST` | `/api/bids/{bidId}/layout-jobs` | 提交异步 DOCX 排版与 QA |
 | `GET/POST` | `/api/bids/{bidId}/exports` | 查询历史成果 / 同步创建兼容导出 |
-| `GET` | `/api/bids/{bidId}/exports/latest/download` | 下载最近成果 |
+| `GET` | `/api/bids/{bidId}/exports/{exportId}/download` | 按标识下载成果 |
 
-错误语义：400 为输入/阶段前置条件，401 为会话无效，403 为角色或所有权拒绝，404 为
-资源不存在，409 为 revision 冲突、冻结阻断或状态不允许，502/503 为 AI/文档服务失败。
-响应中的 `traceId` 用于关联日志和审计。
+错误语义：400 为输入/阶段前置条件，401 为凭证无效（重换凭证后可重试），403 为求值拒绝
+（**不要重试**，否则得到一个永远失败的循环），404 为资源不存在，409 为 revision 冲突、
+冻结阻断或状态不允许，502/503 为 AI/文档服务失败。状态码语义固定，变的只是体内的 `code`。
+
+### 7.3 运行时面
+
+| 方法 | 路径 | 守卫 | 内容 |
+| --- | --- | --- | --- |
+| `GET` | `/api/health` | 公开 | 存活探针，**按契约零依赖**——只回答进程活着吗、是哪个构建。在这里放数据库检查会让一次抖动重启掉健康容器 |
+| `GET` | `/api/ready` | 公开 | 就绪探针。`blocked` → 503，`ready` → 200。每项检查**只含 status 与耗时**，原始异常文本可能含内网主机名，留在日志里 |
+
+平台的产品健康页探测的是 `/api/ready`；没有它的产品在健康页上恒显示「未实现」。
 
 ## 8. Python 内部 API 与 AI 契约
 
@@ -420,8 +494,20 @@ OpenAPI 外均需 `Authorization: Bearer <token>`。
 | `POST` | `/internal/tender/review` | 全部章节有界摘录 -> 审查问题、覆盖率和摘要；`chapterId` 必须来自 `allowedChapterIds` |
 | `POST` | `/internal/tender/document/render` | 文档模型 -> DOCX bytes 和 QA headers |
 
-除 `/health` 外均校验 `X-Internal-Token`。AI 响应使用 Pydantic 模型，不接受自由文本直接
-进入业务库。Envelope 诊断包含 `finish_reason`、响应长度/哈希、输入/输出、reasoning、缓存命中
+除 `/health` 与 `/ready` 外均校验 `X-Internal-Token`（常量时间比较；「没带」与「带错」
+返回同一个码，区分它们只对攻击者有用）。
+
+**失败响应与 Java 面同一个封套**：`{ code, message, retryable, field? }`。内部服务不构成
+豁免——「承载位置随传输，封套内容统一」。这一面刻意<strong>不</strong>使用 FastAPI 默认的
+`{"detail": ...}`：那是同一个服务上的第二种信封形状，而且它既没有 `code` 也没有
+`retryable`。处理器注册在 <strong>Starlette 的 `HTTPException` 基类</strong>上而不是 FastAPI
+子类，因为路由未命中的 404 由 Starlette 自己抛；只注册子类会让这一面最常被撞到的响应
+成为唯一漏网的那个。
+
+`X-Vxture-Task-Id` 由 Java 侧透传进来，经中间件放进请求作用域的 `ContextVar`，
+再随出站模型调用带出。为空是合法状态，不在此处兜底成新 UUID。
+
+AI 响应使用 Pydantic 模型，不接受自由文本直接进入业务库。Envelope 诊断包含 `finish_reason`、响应长度/哈希、输入/输出、reasoning、缓存命中
 Token 和尝试次数。结构修复无论最终成功或失败，都累计修复前后的可计量 Token 和真实模型
 请求次数，不只记录最后一次响应；错误详情不包含模型原文。结构化输出失败映射为 502；
 未配置或鉴权失败映射为 503；请求模型不合法为 422。
@@ -509,24 +595,49 @@ Java `BidDocumentExporter` 的本地实现用于文档服务关闭时的开发/�
 
 ## 10. 数据模型
 
+### 10.0 租户轴
+
+平台四层模型在本产品侧的投影是 `TenantScope(orgId, workspaceId)`。产品**只持引用，
+不复制平台主数据**——库里存的是标识，不是组织和空间的副本。
+
+**租户列只加在聚合根与直接归属实体上**：`bid_document`、`bid_reference_asset`、
+`audit_log`。其余 30 张 `bid_*` 子表通过 `bid_id` 继承归属。给它们各加一列会得到 30 处
+可能不一致的真相，而任何一处漏更新的表现都是「数据在租户之间静默串味」——没有报错，
+只有一个看起来正常的响应。判据：查询是否需要不经 join 就按租户过滤。
+
+**过渡值**：平台身份接通前，`TenantScope.local(userId)` 产生形如 `local:<userId>` 的值，
+一个本地用户一个工作空间。刻意不是 UUID——平台签发的 workspace 是 UUID，所以它不可能
+与真实值冲突，而且肉眼可辨「这一行还没接上平台身份」。**不留空**是有意的：可空的租户键会让
+一次忘记加过滤的查询静默返回全部行，而那个响应看起来完全正常。
+
+**当前读过滤仍按 `owner_id`**，写入已按租户列落库。今天两者一一对应（`local:<ownerId>`），
+所以两个过滤等价；接通 OIDC 后同一个人可属于多个工作空间，那一刻**必须**把
+`bid_document` / `bid_reference_asset` 的读过滤切到 `workspace_id`。
+切换点由 `TenantScope.isLocal()` 标记：库里还带 `local:` 前缀的行就是尚未迁移的那些。
+
 ### 10.1 账户与审计
 
 | 表 | 作用 |
 | --- | --- |
 | `app_user`、`app_role`、`app_user_role` | 用户、角色和启停状态 |
 | `auth_session` | 哈希会话 Token、过期和注销时间 |
-| `audit_log` | 操作者、动作、目标、结果、trace、IP 和时间 |
+| `audit_log` | 按 X-3 最小字段集：`event_id`、`occurred_at`、`actor_id`、`actor_console`、`object_type`、`object_id`、`action`、`outcome`，另加 `task_id`、`org_id`、`workspace_id`、`trace_id`、`ip_address`、`detail_summary` |
+
+审计表**只追加**：`AuditRepository` 上不暴露 update / delete，更正只能是补偿事件。
+`actor_console` 对本产品界面发起的写填产品码 `tenderforge`，对后台通道（Temporal 活动）
+留空——通则明确 MUST NOT 硬编一个，编出来的控制台名会让审计员按控制台筛查时
+收到一批根本不是从那里发起的动作。
 
 ### 10.2 工作区
 
 | 表 | 作用 |
 | --- | --- |
-| `bid_document` | 标书根、所有者、设置、工作步骤、三段冻结状态/版本/哈希、过期原因 |
+| `bid_document` | 标书根、所有者、**租户轴（`org_id`/`workspace_id`）**、设置、工作步骤、三段冻结状态/版本/哈希、过期原因 |
 | `bid_source_file`、`bid_source_segment` | 当前源文件、对象键、解析和两个 AI 对象状态、稳定文本片段 |
 | `bid_scoring_criterion` | 项目概述、技术评分要求及来源/置信度/人工标记 |
 | `bid_interpretation_version`、`bid_requirement_item` | 冻结解读版本和需求副本 |
 | `bid_requirement_conflict`、`bid_frozen_fact` | V17 历史解读兼容数据；现行两对象解读不再新增记录，下游仍读取存量冻结口径 |
-| `bid_reference_asset`、`bid_asset_chunk`、`bid_asset_selection` | 个人素材、解析分块和标书选择关系 |
+| `bid_reference_asset`、`bid_asset_chunk`、`bid_asset_selection` | 个人素材（带租户轴）、解析分块和标书选择关系 |
 | `bid_outline_node`、`bid_outline_task` | 当前三级目录和异步生成任务 |
 | `bid_outline_regeneration_archive` | 目录重新生成前的 JSON 快照 |
 | `bid_chapter`、`bid_chapter_version` | 当前章节和不可变版本历史 |
@@ -584,6 +695,8 @@ checksum 的一部分，不能删除、改名或改写；新结构只允许追�
 
 | 变量 | 默认值 | 作用 |
 | --- | --- | --- |
+| `APP_VERSION` | `dev` | 构建溯源，由镜像构建时从 git ref 注入并由 `/api/health` 回显。**不在 `.env` 里手写**——健康检查要报的是实际构建出来的那个，不是谁打进配置的那个 |
+| `DEPLOY_STAGE` | `local` | 部署阶段。为 `production` 时任何 mock 实现必须拒绝启动，让降级由守卫拦住而不是靠人记得改配置 |
 | `WEB_HOST` / `WEB_PORT` | Compose 默认 `127.0.0.1` / `5274` | 本地 Docker 入口；服务器 `.env` 使用 `0.0.0.0` / `5274`，本地 Vite 开发使用 `5174` |
 | `TEMPORAL_UI_HOST` / `TEMPORAL_UI_PORT` | `127.0.0.1` / `8233` | Temporal UI 运维入口，不开放公网 |
 | `AUTH_SESSION_HOURS` | `12` | 会话时长 |

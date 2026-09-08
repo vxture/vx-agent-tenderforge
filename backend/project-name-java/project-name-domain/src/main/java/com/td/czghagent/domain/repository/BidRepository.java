@@ -8,6 +8,7 @@ import com.td.czghagent.domain.model.BidExport;
 import com.td.czghagent.domain.model.BidReferenceChunk;
 import com.td.czghagent.domain.model.BidReferenceAsset;
 import com.td.czghagent.domain.model.BidSummary;
+import com.td.czghagent.domain.model.TenantScope;
 import com.td.czghagent.domain.model.BidWorkspace;
 import com.td.czghagent.domain.model.BidWorkspaceViews;
 
@@ -118,6 +119,15 @@ public interface BidRepository {
 
     List<BidExport> listExports(String bidId);
 
+    /**
+     * 按标识取一次成果导出。
+     *
+     * <p>与 {@code findLatestExport} 并存而不是取代它：前者回答「这一个」，后者回答「最近那个」。
+     * 下载路由用前者，因为「最新」是一个视角而不是一个资源标识，
+     * 把它写进路径段会让资源与视角在 URL 上长得一模一样（产品接入通则 A-2）。
+     */
+    Optional<ExportRecord> findExport(String bidId, String exportId);
+
     Optional<ExportRecord> findLatestExport(String bidId);
 
     record SourceFileRecord(
@@ -143,8 +153,15 @@ public interface BidRepository {
     ) {
     }
 
+    /**
+     * 个人素材。
+     *
+     * <p>{@code tenant} 与 {@code ownerId} 并存而不是二选一：归属人决定谁能编辑，
+     * 工作空间决定这份素材属于哪个租户的数据。今天两者一一对应，接通平台身份后不再对应
+     * ——同一个人在两个工作空间里传的素材不该互相可见。
+     */
     record AssetRecord(
-            String id, String ownerId, String category, String displayName,
+            String id, String ownerId, TenantScope tenant, String category, String displayName,
             String originalFileName, String objectKey, String mediaType,
             long fileSize, String contentHash, String status
     ) {
