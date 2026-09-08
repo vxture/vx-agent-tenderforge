@@ -24,10 +24,14 @@ import java.io.IOException;
 public class AuthenticationFilter extends OncePerRequestFilter {
 
     private final AuthQueryService authQueryService;
+    private final PlatformSessionResolver platformSessions;
     private final ObjectMapper objectMapper;
 
-    public AuthenticationFilter(AuthQueryService authQueryService, ObjectMapper objectMapper) {
+    public AuthenticationFilter(AuthQueryService authQueryService,
+                                PlatformSessionResolver platformSessions,
+                                ObjectMapper objectMapper) {
         this.authQueryService = authQueryService;
+        this.platformSessions = platformSessions;
         this.objectMapper = objectMapper;
     }
 
@@ -36,6 +40,11 @@ public class AuthenticationFilter extends OncePerRequestFilter {
         String path = request.getRequestURI();
         return "OPTIONS".equals(request.getMethod())
                 || "/api/auth/login".equals(path)
+                // 登录回路本身不能要求先登录。这三条是 C1 的入口、回调与
+                // 平台反向登出通知，调用它们的时候按定义还没有会话。
+                || "/api/auth/oidc/login".equals(path)
+                || "/api/auth/oidc/callback".equals(path)
+                || "/api/auth/oidc/backchannel-logout".equals(path)
                 // 运行时探针必须公开：探测方是编排器和平台健康页，它们没有会话。
                 || "/api/health".equals(path)
                 || "/api/ready".equals(path)
@@ -48,8 +57,19 @@ public class AuthenticationFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
-        String token = bearerToken(request);
-        CurrentUser user = token == null ? null : authQueryService.resolve(token).orElse(null);
+        // 两条身份通道并存：平台 RP 会话（cookie）优先，本地口令会话（Bearer）其次。
+        // 顺序不是偏好——RP 会话是目标形态，本地那条是待退役的过渡通道，
+        // 反过来会让一个残留的旧 Bearer 盖掉刚建立的平台身份。
+        String cookieValue = RpSessionCookie.read(request);
+        CurrentUser user = null;
+        String token = null;
+        if (cookieValue != null) {
+            user = platformSessions.resolve(cookieValue).orElse(null);
+        }
+        if (user == null) {
+            token = bearerToken(request);
+            user = token == null ? null : authQueryService.resolve(token).orElse(null);
+        }
         if (user == null) {
             writeUnauthorized(request, response);
             return;

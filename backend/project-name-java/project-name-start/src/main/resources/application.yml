@@ -58,6 +58,23 @@ app:
     admin-password: ${BOOTSTRAP_ADMIN_PASSWORD:Admin@123}
   auth:
     session-hours: ${AUTH_SESSION_HOURS:12}
+  # C1 身份：OIDC 依赖方。
+  # 这一对 client 凭据同时是 S2S 换票凭据，没有另一份要申请。
+  # 未配置时走 mock，而 mock 在部署态会被守卫拒绝启动（app.allow-mock-on-deploy 是
+  # 显式且自报的逃生口，不是兜底）。
+  oidc:
+    enabled: ${OIDC_RP_ENABLED:false}
+    issuer: ${OIDC_ISSUER:}
+    client-id: ${OIDC_CLIENT_ID:}
+    client-secret: ${OIDC_CLIENT_SECRET:}
+    redirect-uri: ${OIDC_REDIRECT_URI:}
+    post-logout-redirect-uri: ${OIDC_POST_LOGOUT_REDIRECT_URI:}
+    scopes: ${OIDC_SCOPES:openid profile email phone}
+    session-seconds: ${RP_SESSION_TTL:43200}
+    # 生产必须为 true：__Host- 前缀的 cookie 在 http 上会被浏览器直接拒收，
+    # 表现为「登录成功但仍然未登录」。
+    secure-cookie: ${RP_SESSION_SECURE_COOKIE:false}
+  allow-mock-on-deploy: ${ALLOW_MOCK_ON_DEPLOY:false}
   storage:
     root: ${PRIVATE_STORAGE_ROOT:./data/private}
   ai:

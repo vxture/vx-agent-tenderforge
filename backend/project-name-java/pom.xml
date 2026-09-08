@@ -28,6 +28,14 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <springdoc.version>2.8.13</springdoc.version>
+        <!--
+            JOSE 实现。只引这一个而不是 spring-boot-starter-oauth2-client：
+            后者会把 Spring Security 的整条过滤链拉进来，与现有
+            AuthenticationFilter 争夺请求，等于顺手换掉整个安全模型。
+            RP 需要的其余部分（discovery、PKCE、换票、会话）都是显式代码，
+            唯独签名验证不该自己写。
+        -->
+        <nimbus-jose-jwt.version>10.0.2</nimbus-jose-jwt.version>
         <temporal.version>1.27.0</temporal.version>
         <flyway.version>11.20.3</flyway.version>
     </properties>
