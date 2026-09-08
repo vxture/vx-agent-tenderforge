@@ -1,0 +1,19 @@
+# GENERATED_BY_AI
+# MODEL: gpt-5
+# DATE: 2026-07-29
+.git
+.DS_Store
+deploy/.env
+test
+**/node_modules
+**/dist
+**/target
+**/venv
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.npmrc
+backend/project-name-java/data
+*.log

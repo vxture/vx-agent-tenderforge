@@ -1,0 +1,83 @@
+# GENERATED_BY_AI
+# MODEL: gpt-5
+# DATE: 2026-07-29
+server:
+  port: ${SERVER_PORT:8081}
+  shutdown: graceful
+
+spring:
+  application:
+    name: czghagent-business-api
+  profiles:
+    default: dev
+  datasource:
+    url: ${DATABASE_URL:jdbc:h2:file:./data/database/czghagent;MODE=MySQL;DATABASE_TO_LOWER=TRUE}
+    username: ${DATABASE_USERNAME:sa}
+    password: ${DATABASE_PASSWORD:}
+    driver-class-name: ${DATABASE_DRIVER:org.h2.Driver}
+    hikari:
+      maximum-pool-size: ${DATABASE_POOL_SIZE:10}
+  flyway:
+    enabled: true
+    locations: classpath:sql
+    validate-migration-naming: true
+  servlet:
+    multipart:
+      max-file-size: ${UPLOAD_MAX_FILE_SIZE:50MB}
+      max-request-size: ${UPLOAD_MAX_REQUEST_SIZE:55MB}
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when-authorized
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+
+app:
+  bootstrap:
+    enabled: ${BOOTSTRAP_ENABLED:true}
+    planner-password: ${BOOTSTRAP_PLANNER_PASSWORD:Planner@123}
+    admin-password: ${BOOTSTRAP_ADMIN_PASSWORD:Admin@123}
+  auth:
+    session-hours: ${AUTH_SESSION_HOURS:12}
+  storage:
+    root: ${PRIVATE_STORAGE_ROOT:./data/private}
+  ai:
+    base-url: ${AI_SERVICE_BASE_URL:http://127.0.0.1:8000}
+    internal-token: ${AI_SERVICE_INTERNAL_TOKEN:local-development-token}
+    timeout-seconds: ${AI_SERVICE_TIMEOUT_SECONDS:600}
+    provider-name: ${AI_PROVIDER_NAME:DIRECT_DEEPSEEK}
+    model-name: ${AI_MODEL_NAME:deepseek-v4-flash}
+    fast-model-name: ${AI_MODEL_FAST_NAME:${AI_MODEL_NAME:deepseek-v4-flash}}
+    quality-model-name: ${AI_MODEL_QUALITY_NAME:deepseek-v4-pro}
+  temporal:
+    enabled: ${TEMPORAL_ENABLED:false}
+    worker-enabled: ${TEMPORAL_WORKER_ENABLED:false}
+    address: ${TEMPORAL_ADDRESS:127.0.0.1:7233}
+  document-service:
+    enabled: ${DOCUMENT_SERVICE_ENABLED:false}
+    base-url: ${DOCUMENT_SERVICE_BASE_URL:http://127.0.0.1:8000}
+    timeout-seconds: ${DOCUMENT_SERVICE_TIMEOUT_SECONDS:1800}
+  tender:
+    generation:
+      characters-per-page: ${BID_CHARACTERS_PER_PAGE:700}
+      max-concurrency: ${BID_GENERATION_MAX_CONCURRENCY:3}
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://127.0.0.1:5174,http://localhost:5174}
+
+logging:
+  level:
+    root: INFO
+    com.td.czghagent: DEBUG

@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+    "rootDir": "src",
+    "outDir": ".test-dist"
+  },
+  "files": [
+    "src/types/admin.ts",
+    "src/types/auth.ts",
+    "src/types/tender.ts",
+    "src/features/tender/tableNumbering.ts"
+  ]
+}

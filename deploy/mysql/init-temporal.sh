@@ -1,0 +1,15 @@
+#!/bin/sh
+# GENERATED_BY_AI
+# MODEL: gpt-5
+# DATE: 2026-08-04
+set -eu
+
+mysql -h mysql -uroot -p"${MYSQL_ROOT_PASSWORD}" <<SQL
+CREATE DATABASE IF NOT EXISTS temporal CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE DATABASE IF NOT EXISTS temporal_visibility CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE USER IF NOT EXISTS 'temporal'@'%' IDENTIFIED BY '${TEMPORAL_DB_PASSWORD}';
+ALTER USER 'temporal'@'%' IDENTIFIED BY '${TEMPORAL_DB_PASSWORD}';
+GRANT ALL PRIVILEGES ON temporal.* TO 'temporal'@'%';
+GRANT ALL PRIVILEGES ON temporal_visibility.* TO 'temporal'@'%';
+FLUSH PRIVILEGES;
+SQL

@@ -1,0 +1,205 @@
+# GENERATED_BY_AI
+# MODEL: gpt-5
+# DATE: 2026-07-29
+name: bidagent
+
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: czghagent
+      MYSQL_USER: czghagent
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-ChangeMe-Mysql-2026}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-ChangeMe-Root-2026}
+      TZ: Asia/Shanghai
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_0900_ai_ci
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  ai:
+    build:
+      context: ..
+      dockerfile: backend/project-name-python/Dockerfile
+    restart: unless-stopped
+    environment:
+      AI_SERVICE_INTERNAL_TOKEN: ${AI_SERVICE_INTERNAL_TOKEN:-ChangeMe-Internal-Token-2026}
+      AI_MODEL_API_KEY: ${AI_MODEL_API_KEY:-}
+      AI_MODEL_BASE_URL: ${AI_MODEL_BASE_URL:-https://api.deepseek.com}
+      AI_MODEL_REQUEST_DIALECT: ${AI_MODEL_REQUEST_DIALECT:-deepseek}
+      AI_MODEL_NAME: ${AI_MODEL_NAME:-deepseek-v4-flash}
+      AI_MODEL_FAST_NAME: ${AI_MODEL_FAST_NAME:-deepseek-v4-flash}
+      AI_MODEL_QUALITY_NAME: ${AI_MODEL_QUALITY_NAME:-deepseek-v4-pro}
+      AI_MODEL_TIMEOUT_SECONDS: ${AI_MODEL_TIMEOUT_SECONDS:-240}
+      AI_MODEL_STAGE_TIMEOUT_SECONDS: ${AI_MODEL_STAGE_TIMEOUT_SECONDS:-540}
+      AI_MODEL_MAX_RETRIES: ${AI_MODEL_MAX_RETRIES:-1}
+      AI_MODEL_THINKING_BUDGET_TOKENS: ${AI_MODEL_THINKING_BUDGET_TOKENS:-4096}
+      AI_MODEL_THINKING_DISABLED_OPERATIONS: ${AI_MODEL_THINKING_DISABLED_OPERATIONS:-project_overview_source_selection,project_overview_extraction,technical_scoring_extraction,outline_skeleton_planning,outline_branch_expansion,chapter_drafting}
+      AI_MODEL_THINKING_ENABLED_OPERATIONS: ${AI_MODEL_THINKING_ENABLED_OPERATIONS:-bid_strategy_planning,branch_blueprint_planning,section_revision,consistency_review}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  temporal-db-init:
+    image: mysql:8.4
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-ChangeMe-Root-2026}
+      TEMPORAL_DB_PASSWORD: ${TEMPORAL_DB_PASSWORD:-ChangeMe-Temporal-2026}
+    volumes:
+      - ./mysql/init-temporal.sh:/init-temporal.sh:ro
+    command: ["sh", "/init-temporal.sh"]
+    restart: "no"
+
+  temporal:
+    image: temporalio/auto-setup:1.27.2
+    restart: unless-stopped
+    depends_on:
+      temporal-db-init:
+        condition: service_completed_successfully
+    environment:
+      DB: mysql8
+      DB_PORT: 3306
+      MYSQL_USER: temporal
+      MYSQL_PWD: ${TEMPORAL_DB_PASSWORD:-ChangeMe-Temporal-2026}
+      MYSQL_SEEDS: mysql
+      DBNAME: temporal
+      VISIBILITY_DBNAME: temporal_visibility
+      DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/docker.yaml
+    healthcheck:
+      test: ["CMD-SHELL", "tctl --address temporal:7233 cluster health >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  temporal-ui:
+    image: temporalio/ui:2.34.0
+    restart: unless-stopped
+    depends_on:
+      temporal:
+        condition: service_healthy
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: http://127.0.0.1:8233
+    ports:
+      - "${TEMPORAL_UI_HOST:-127.0.0.1}:${TEMPORAL_UI_PORT:-8233}:8080"
+
+  api:
+    image: tenderagent-java:local
+    build:
+      context: ..
+      dockerfile: backend/project-name-java/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      ai:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      DATABASE_URL: jdbc:mysql://mysql:3306/czghagent?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+      DATABASE_USERNAME: czghagent
+      DATABASE_PASSWORD: ${MYSQL_PASSWORD:-ChangeMe-Mysql-2026}
+      DATABASE_DRIVER: com.mysql.cj.jdbc.Driver
+      PRIVATE_STORAGE_ROOT: /app/data/private
+      AI_SERVICE_BASE_URL: http://ai:8000
+      AI_SERVICE_INTERNAL_TOKEN: ${AI_SERVICE_INTERNAL_TOKEN:-ChangeMe-Internal-Token-2026}
+      AI_SERVICE_TIMEOUT_SECONDS: ${AI_SERVICE_TIMEOUT_SECONDS:-600}
+      AI_PROVIDER_NAME: ${AI_PROVIDER_NAME:-DIRECT_DEEPSEEK}
+      AI_MODEL_NAME: ${AI_MODEL_NAME:-deepseek-v4-flash}
+      AI_MODEL_FAST_NAME: ${AI_MODEL_FAST_NAME:-deepseek-v4-flash}
+      AI_MODEL_QUALITY_NAME: ${AI_MODEL_QUALITY_NAME:-deepseek-v4-pro}
+      BID_CHARACTERS_PER_PAGE: ${BID_CHARACTERS_PER_PAGE:-700}
+      BID_GENERATION_MAX_CONCURRENCY: ${BID_GENERATION_MAX_CONCURRENCY:-3}
+      TEMPORAL_ENABLED: ${TEMPORAL_ENABLED:-true}
+      TEMPORAL_WORKER_ENABLED: "false"
+      TEMPORAL_ADDRESS: ${TEMPORAL_ADDRESS:-temporal:7233}
+      DOCUMENT_SERVICE_ENABLED: ${DOCUMENT_SERVICE_ENABLED:-true}
+      DOCUMENT_SERVICE_BASE_URL: ${DOCUMENT_SERVICE_BASE_URL:-http://ai:8000}
+      DOCUMENT_SERVICE_TIMEOUT_SECONDS: ${DOCUMENT_SERVICE_TIMEOUT_SECONDS:-1800}
+      BOOTSTRAP_ENABLED: ${BOOTSTRAP_ENABLED:-true}
+      BOOTSTRAP_PLANNER_PASSWORD: ${BOOTSTRAP_PLANNER_PASSWORD:-ChangeMe-Planner-2026}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-ChangeMe-Admin-2026}
+      AUTH_SESSION_HOURS: ${AUTH_SESSION_HOURS:-12}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://127.0.0.1:5274,http://localhost:5274}
+    volumes:
+      - private-files:/app/data/private
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8081/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  worker:
+    image: tenderagent-java:local
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+      ai:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+    environment:
+      SPRING_MAIN_WEB_APPLICATION_TYPE: none
+      SPRING_PROFILES_ACTIVE: prod
+      DATABASE_URL: jdbc:mysql://mysql:3306/czghagent?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+      DATABASE_USERNAME: czghagent
+      DATABASE_PASSWORD: ${MYSQL_PASSWORD:-ChangeMe-Mysql-2026}
+      DATABASE_DRIVER: com.mysql.cj.jdbc.Driver
+      PRIVATE_STORAGE_ROOT: /app/data/private
+      AI_SERVICE_BASE_URL: http://ai:8000
+      AI_SERVICE_INTERNAL_TOKEN: ${AI_SERVICE_INTERNAL_TOKEN:-ChangeMe-Internal-Token-2026}
+      AI_SERVICE_TIMEOUT_SECONDS: ${AI_SERVICE_TIMEOUT_SECONDS:-600}
+      AI_PROVIDER_NAME: ${AI_PROVIDER_NAME:-DIRECT_DEEPSEEK}
+      AI_MODEL_NAME: ${AI_MODEL_NAME:-deepseek-v4-flash}
+      AI_MODEL_FAST_NAME: ${AI_MODEL_FAST_NAME:-deepseek-v4-flash}
+      AI_MODEL_QUALITY_NAME: ${AI_MODEL_QUALITY_NAME:-deepseek-v4-pro}
+      BID_CHARACTERS_PER_PAGE: ${BID_CHARACTERS_PER_PAGE:-700}
+      BID_GENERATION_MAX_CONCURRENCY: ${BID_GENERATION_MAX_CONCURRENCY:-3}
+      TEMPORAL_ENABLED: "true"
+      TEMPORAL_WORKER_ENABLED: "true"
+      TEMPORAL_ADDRESS: ${TEMPORAL_ADDRESS:-temporal:7233}
+      DOCUMENT_SERVICE_ENABLED: ${DOCUMENT_SERVICE_ENABLED:-true}
+      DOCUMENT_SERVICE_BASE_URL: ${DOCUMENT_SERVICE_BASE_URL:-http://ai:8000}
+      DOCUMENT_SERVICE_TIMEOUT_SECONDS: ${DOCUMENT_SERVICE_TIMEOUT_SECONDS:-1800}
+      BOOTSTRAP_ENABLED: "false"
+    volumes:
+      - private-files:/app/data/private
+
+  web:
+    build:
+      context: ..
+      dockerfile: frontend/project-name-web/Dockerfile
+      secrets:
+        - github_packages_token
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${WEB_HOST:-127.0.0.1}:${WEB_PORT:-5274}:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  mysql-data:
+  private-files:
+
+secrets:
+  github_packages_token:
+    environment: GITHUB_PACKAGES_TOKEN

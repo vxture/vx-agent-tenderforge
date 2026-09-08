@@ -1,0 +1,28 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.11.13
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+        files: ^backend/project-name-python/
+      - id: ruff-format
+        files: ^backend/project-name-python/
+
+  - repo: local
+    hooks:
+      - id: frontend-eslint
+        name: frontend eslint
+        entry: pnpm --dir frontend/project-name-web exec eslint . --fix --no-cache
+        language: system
+        pass_filenames: false
+        types_or: [javascript, jsx, ts, tsx]
+        files: ^frontend/project-name-web/
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-yaml
+      - id: check-toml
+      - id: detect-private-key
+      - id: check-added-large-files
+        args: [--maxkb=500]

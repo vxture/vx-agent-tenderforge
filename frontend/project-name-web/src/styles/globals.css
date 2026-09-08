@@ -1,0 +1,223 @@
+/* GENERATED_BY_AI */
+/* MODEL: gpt-5 */
+/* DATE: 2026-08-26 */
+
+/*
+ * Application CSS is limited to the document editor's runtime presentation.
+ * Foundation, theme, controls and layout tokens come from @vxture/design-system.
+ */
+@layer components {
+  .report-editor-page {
+    min-height: 100%;
+  }
+
+  .report-editor-content {
+    min-height: 100%;
+    padding: 56px 64px 80px;
+    color: var(--foreground);
+    caret-color: var(--primary);
+    font-family: 'Songti SC', SimSun, 'STSong', serif;
+    font-size: 16px;
+    line-height: 2;
+    letter-spacing: 0;
+    outline: none;
+  }
+
+  .report-editor-content > *:first-child {
+    margin-top: 0;
+  }
+
+  .report-editor-content p {
+    margin: 0 0 12px;
+    text-align: justify;
+    text-indent: 2em;
+  }
+
+  .report-editor-content h2,
+  .report-editor-content h3,
+  .report-editor-content h4,
+  .report-editor-content h5 {
+    scroll-margin-top: 64px;
+    color: var(--foreground);
+    font-family: 'Songti SC', SimSun, 'STSong', serif;
+    letter-spacing: 0;
+    text-indent: 0;
+  }
+
+  .report-editor-content h2 {
+    margin: 24px 0 14px;
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1.6;
+  }
+
+  .report-editor-content h3 {
+    margin: 20px 0 10px;
+    font-size: 19px;
+    font-weight: 700;
+    line-height: 1.7;
+  }
+
+  .report-editor-content h4 {
+    margin: 16px 0 8px;
+    font-size: 17px;
+    font-weight: 700;
+    line-height: 1.8;
+  }
+
+  .report-editor-content h5 {
+    margin: 14px 0 6px;
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1.9;
+  }
+
+  .report-editor-content ul,
+  .report-editor-content ol {
+    margin: 8px 0 14px;
+    padding-left: 2em;
+  }
+
+  .report-editor-content ul {
+    list-style: disc;
+  }
+
+  .report-editor-content ol {
+    list-style: decimal;
+  }
+
+  .report-editor-content li {
+    margin: 3px 0;
+    padding-left: 0.25em;
+  }
+
+  .report-editor-content li > p,
+  .report-editor-content td > p,
+  .report-editor-content th > p,
+  .report-editor-content blockquote > p {
+    margin: 0;
+    text-indent: 0;
+  }
+
+  .report-editor-content blockquote {
+    margin: 14px 0;
+    border-left: 3px solid var(--primary);
+    background: var(--muted);
+    padding: 10px 16px;
+    color: var(--muted-foreground);
+  }
+
+  .report-editor-content table {
+    width: 100%;
+    min-width: 560px;
+    margin: 0;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  .report-editor-content .tableWrapper {
+    max-width: 100%;
+    margin: 0;
+    border: 1px solid var(--input);
+    overflow-x: auto;
+  }
+
+  .report-editor-content th,
+  .report-editor-content td {
+    position: relative;
+    min-width: 80px;
+    border: 0;
+    border-right: 1px solid var(--input);
+    border-bottom: 1px solid var(--input);
+    padding: 10px 12px;
+    vertical-align: top;
+  }
+
+  .report-editor-content th {
+    background: var(--muted);
+    font-weight: 600;
+    text-align: center;
+  }
+
+  .report-editor-content tr:last-child > th,
+  .report-editor-content tr:last-child > td {
+    border-bottom: 0;
+  }
+
+  .report-editor-content tr > th:last-child,
+  .report-editor-content tr > td:last-child {
+    border-right: 0;
+  }
+
+  .report-editor-content p[data-table-title] {
+    margin: 22px 0 6px;
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.6;
+    text-align: center;
+    text-indent: 0;
+  }
+
+  .report-editor-content p[data-table-note] {
+    min-height: 22px;
+    margin: 6px 0 18px;
+    color: var(--muted-foreground);
+    font-family: var(--font-sans);
+    font-size: 12px;
+    line-height: 1.6;
+    text-align: left;
+    text-indent: 0;
+  }
+
+  .report-editor-content p[data-table-title]:empty::before,
+  .report-editor-content p[data-table-note]:empty::before,
+  .report-editor-content p[data-table-title]:has(> br.ProseMirror-trailingBreak)::before,
+  .report-editor-content p[data-table-note]:has(> br.ProseMirror-trailingBreak)::before,
+  .report-editor-content p.is-editor-empty:first-child::before {
+    color: var(--muted-foreground);
+    content: attr(data-placeholder);
+    pointer-events: none;
+  }
+
+  .report-editor-content .selectedCell::after {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    background: color-mix(in srgb, var(--primary) 12%, transparent);
+    content: '';
+    pointer-events: none;
+  }
+
+  .report-editor-content .column-resize-handle {
+    position: absolute;
+    top: 0;
+    right: -2px;
+    bottom: 0;
+    width: 4px;
+    background: var(--primary);
+    pointer-events: none;
+  }
+
+  .report-editor-content a {
+    color: var(--link);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  .report-editor-content p.is-editor-empty:first-child::before {
+    height: 0;
+    float: left;
+  }
+
+  @media (max-width: 767px) {
+    .report-editor-content {
+      padding: 32px 24px 56px;
+      font-size: 15px;
+    }
+  }
+}
