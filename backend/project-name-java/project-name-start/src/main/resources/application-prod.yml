@@ -9,11 +9,9 @@ spring:
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: ${DATABASE_POOL_SIZE:30}
-  # 生产上应用连的是最小权限角色 tenderforge_svc，它没有 DDL 权限——
-  # 就算这里漏关 Flyway，建表也会被库直接拒绝。两道闸门刻意重叠：
+  # 生产上应用连的是最小权限角色 tenderforge_svc，它没有 DDL 权限。
+  # 就算有人把 Flyway 依赖加回来并打开它，建表也会被库直接拒绝——
   # 配置可以被改错，权限不会。
-  flyway:
-    enabled: false
 
 app:
   bootstrap:

@@ -27,11 +27,13 @@ spring:
     driver-class-name: ${DATABASE_DRIVER:org.postgresql.Driver}
     hikari:
       maximum-pool-size: ${DATABASE_POOL_SIZE:10}
-  # Flyway 已移除（治理规范 §11：常规部署链不跑 migration/seed）。
-  # DDL 单一权威 = deploy/database/ddl/*.sql，只由 db-init.yml 施加。
-  # 应用**永远不建表**——它以最小权限角色连库，连 CREATE 的权限都没有。
-  flyway:
-    enabled: false
+  # 这里**没有** flyway 配置，是因为 Flyway 连依赖都已经不在了
+  # （治理规范 §11：常规部署链不跑 migration/seed）。DDL 单一权威 =
+  # deploy/database/ddl/*.sql，只由 db-init.yml 施加。
+  #
+  # 刻意不留 `flyway: enabled: false`：依赖不在时那个键什么都不做，
+  # 而一个不起作用的配置键比一句注释更坏——它让人以为闸门在这里。
+  # 真正的闸门是权限：应用以最小权限角色连库，连 CREATE 都没有。
   servlet:
     multipart:
       max-file-size: ${UPLOAD_MAX_FILE_SIZE:50MB}
