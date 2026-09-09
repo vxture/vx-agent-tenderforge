@@ -92,10 +92,10 @@ pull_one() {
   if docker pull "$primary"; then return 0; fi
 
   local fb_reg="${FALLBACK_IMAGE_REGISTRY:-}" fb_ns="${FALLBACK_IMAGE_NAMESPACE:-}"
-  [ -n "$fb_reg" ] && [ -n "$fb_ns" ] || {
+  if [ -z "$fb_reg" ] || [ -z "$fb_ns" ]; then
     log "FATAL: 主源拉取失败且没有配置备源"
     exit 1
-  }
+  fi
   local fallback="${fb_reg}/${fb_ns}/${image}:${tag}"
   log "主源失败，改用备源 ${fallback}"
   docker pull "$fallback"
