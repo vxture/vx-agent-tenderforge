@@ -45,6 +45,9 @@ public class AuthenticationFilter extends OncePerRequestFilter {
                 || "/api/auth/oidc/login".equals(path)
                 || "/api/auth/oidc/callback".equals(path)
                 || "/api/auth/oidc/backchannel-logout".equals(path)
+                // 平台下发的开通/停用事件。调用方是平台，按定义没有会话；
+                // 它的鉴权全部来自 HMAC 验签，而验签在控制器里是第一件事。
+                || "/api/platform/provisioning/webhook".equals(path)
                 // 运行时探针必须公开：探测方是编排器和平台健康页，它们没有会话。
                 || "/api/health".equals(path)
                 || "/api/ready".equals(path)

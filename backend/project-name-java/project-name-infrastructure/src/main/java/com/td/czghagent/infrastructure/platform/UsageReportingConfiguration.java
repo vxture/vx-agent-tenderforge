@@ -5,6 +5,7 @@ package com.td.czghagent.infrastructure.platform;
 
 import com.td.czghagent.domain.model.DeployStage;
 import com.td.czghagent.domain.port.EntitlementResolver;
+import com.td.czghagent.domain.port.WebhookSignatureVerifier;
 import com.td.czghagent.domain.port.UsageConsumeClient;
 import com.td.czghagent.domain.repository.UsageBufferRepository;
 import org.slf4j.Logger;
@@ -19,7 +20,7 @@ import org.springframework.web.client.RestClient;
 import java.time.Clock;
 
 /**
- * C3 上行的装配与阶段守卫。
+ * C3 两个方向的装配与阶段守卫。
  *
  * <p>与身份、权益同一条纪律：部署态不许用替身上报。用替身的表现比另外两个更安静
  * ——一切正常，只是<strong>什么都没记到账上</strong>，而账单要到月底才对不上。
@@ -57,6 +58,38 @@ public class UsageReportingConfiguration {
             LOGGER.info("C3 用量上报未配置，本地使用替身（gated={}）", mockGated);
         }
         return new MockUsageConsumeClient(mockGated);
+    }
+
+    /**
+     * C3 下发的验签器。
+     *
+     * <p>与其它三个通道不同，这里<strong>没有替身</strong>。一个「本地放行」的
+     * 验签替身意味着任何人都能往本地栈里发开通事件；而更糟的是它会让
+     * 「密钥没配好」这件事在本地永远不可见——直到上线那天平台开始投递，
+     * 而每一条都被拒。未配置时就让它拒绝，本地想测就自己签一条。
+     */
+    @Bean
+    public WebhookSignatureVerifier webhookSignatureVerifier(
+            @Value("${app.platform.provision-webhook-secret:}") String secret,
+            @Value("${app.platform.provision-webhook-secret-next:}") String secretNext,
+            @Value("${app.deploy-stage:local}") String deployStage,
+            @Value("${app.allow-mock-on-deploy:false}") boolean allowMock
+    ) {
+        HmacWebhookSignatureVerifier verifier = new HmacWebhookSignatureVerifier(
+                secret, secretNext, Clock.systemUTC());
+        DeployStage stage = DeployStage.parse(deployStage);
+        if (!verifier.isConfigured()) {
+            if (stage.isDeployed() && !allowMock) {
+                throw new IllegalStateException(
+                        "部署阶段 " + stage + " 缺少 TENDERFORGE_PROVISION_WEBHOOK_SECRET，"
+                                + "开通/停用事件将全部被拒。补齐配置或显式设置"
+                                + " app.allow-mock-on-deploy=true");
+            }
+            LOGGER.info("C3 下发未配置密钥，webhook 将拒绝所有投递");
+        } else {
+            LOGGER.info("C3 下发已配置{}", secretNext.isBlank() ? "" : "（含轮换密钥）");
+        }
+        return verifier;
     }
 
     @Bean

@@ -7,6 +7,7 @@ import com.td.czghagent.domain.model.DeployStage;
 import com.td.czghagent.domain.model.ProductIdentity;
 import com.td.czghagent.domain.port.EntitlementResolver;
 import com.td.czghagent.domain.port.UsageConsumeClient;
+import com.td.czghagent.domain.port.WebhookSignatureVerifier;
 import com.td.czghagent.domain.port.OidcGateway;
 import com.td.czghagent.domain.port.S2STokenMinter;
 import org.springframework.beans.factory.annotation.Value;
@@ -40,13 +41,13 @@ public class PlatformStatusController {
     private final S2STokenMinter s2sTokenMinter;
     private final EntitlementResolver entitlementResolver;
     private final UsageConsumeClient usageConsumeClient;
+    private final WebhookSignatureVerifier webhookVerifier;
     private final String version;
     private final DeployStage deployStage;
     private final boolean oidcEnabled;
     private final String oidcIssuer;
     private final boolean allowMockOnDeploy;
     private final boolean platformApiConfigured;
-    private final boolean provisionWebhookConfigured;
     private final boolean atlasConfigured;
 
     public PlatformStatusController(
@@ -54,26 +55,26 @@ public class PlatformStatusController {
             S2STokenMinter s2sTokenMinter,
             EntitlementResolver entitlementResolver,
             UsageConsumeClient usageConsumeClient,
+            WebhookSignatureVerifier webhookVerifier,
             @Value("${app.version:dev}") String version,
             @Value("${app.deploy-stage:local}") String deployStage,
             @Value("${app.oidc.enabled:false}") boolean oidcEnabled,
             @Value("${app.oidc.issuer:}") String oidcIssuer,
             @Value("${app.allow-mock-on-deploy:false}") boolean allowMockOnDeploy,
             @Value("${app.platform.api-url:}") String platformApiUrl,
-            @Value("${app.platform.provision-webhook-secret:}") String provisionWebhookSecret,
             @Value("${app.atlas.api-url:}") String atlasApiUrl
     ) {
         this.oidcGateway = oidcGateway;
         this.s2sTokenMinter = s2sTokenMinter;
         this.entitlementResolver = entitlementResolver;
         this.usageConsumeClient = usageConsumeClient;
+        this.webhookVerifier = webhookVerifier;
         this.version = version;
         this.deployStage = DeployStage.parse(deployStage);
         this.oidcEnabled = oidcEnabled;
         this.oidcIssuer = oidcIssuer;
         this.allowMockOnDeploy = allowMockOnDeploy;
         this.platformApiConfigured = notBlank(platformApiUrl);
-        this.provisionWebhookConfigured = notBlank(provisionWebhookSecret);
         this.atlasConfigured = notBlank(atlasApiUrl);
     }
 
@@ -102,9 +103,13 @@ public class PlatformStatusController {
                         usageConsumeClient.isMock()
                                 ? "正在使用替身上报，所有用量都没有入账"
                                 : "POST /usage/consume；永远 200，gated 是信息不是指令"),
+                // 问验签器自己，不是问属性有没有值：两者在「配了空串」这类
+                // 情况下会分叉，而分叉的那一侧恰好是会拒收所有投递的那一侧。
                 channel("C3-down", "开通 webhook",
-                        provisionWebhookConfigured ? "configured" : "not_configured",
-                        "HMAC 对原始字节验签、按 id 幂等、按 seq 拒倒序"),
+                        webhookVerifier.isConfigured() ? "configured" : "not_configured",
+                        webhookVerifier.isConfigured()
+                                ? "HMAC 对原始字节验签、按 id 幂等、按 seq 拒倒序"
+                                : "未配密钥，所有开通/停用投递都会被拒收"),
                 channel("atlas", "模型出口", atlasConfigured ? "configured" : "not_configured",
                         atlasConfigured ? "POST /v1/chat" : "当前仍直连模型供应商，属已知契约违规")
         ));

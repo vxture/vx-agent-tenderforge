@@ -10,6 +10,7 @@ import com.td.czghagent.domain.model.Entitlement;
 import com.td.czghagent.domain.port.EntitlementResolver;
 import com.td.czghagent.domain.port.OidcGateway;
 import com.td.czghagent.domain.port.UsageConsumeClient;
+import com.td.czghagent.domain.port.WebhookSignatureVerifier;
 import com.td.czghagent.domain.repository.UsageBufferRepository;
 import com.td.czghagent.domain.port.S2STokenMinter;
 import org.junit.jupiter.api.Test;
@@ -35,6 +36,10 @@ class PlatformStatusControllerTest {
      *
      * <p>用一个<b>配齐了密钥</b>的夹具，而不是空配置——空配置下这条断言恒真，
      * 什么都证明不了。
+     *
+     * <p>webhook 密钥现在<strong>根本不进这个控制器</strong>：它只经由验签器，
+     * 而控制器只问验签器「配了没有」。不持有就不可能泄露，这比测出它没泄露更强。
+     * 这条断言留着是为了守住剩下那些确实流经这里的配置（issuer、内部地址）。
      */
     @Test
     void neverEchoesAnySecretIntoTheResponse() {
@@ -46,6 +51,13 @@ class PlatformStatusControllerTest {
         assertThat(body.toString())
                 .as("issuer 可以出现，密钥不行")
                 .doesNotContain(SECRET);
+    }
+
+    /** 没配 webhook 密钥时明说所有投递都会被拒，不含糊成「未配置」。 */
+    @Test
+    void spellsOutThatAnUnconfiguredWebhookRefusesEveryDelivery() {
+        assertThat(channelDetail(controller(true, false).status(), "C3-down"))
+                .contains("拒收");
     }
 
     /**
@@ -161,18 +173,22 @@ class PlatformStatusControllerTest {
         return new PlatformStatusController(
                 new StubGateway(mock), new StubMinter(false),
                 new StubResolver(entitlementMock), new StubConsume(usageMock),
+                new StubVerifier(false),
                 "v1.2.3", stage, oidcEnabled,
                 "https://accounts.vxture.com", false,
-                "", "", "");
+                "", "");
     }
 
     private static PlatformStatusController controllerWithSecretsConfigured() {
         return new PlatformStatusController(
                 new StubGateway(false), new StubMinter(true),
                 new StubResolver(false), new StubConsume(false),
+                // 验签器持有密钥，控制器只问它「配了没有」——
+                // 于是「配齐了密钥」这个前提依然成立，而密钥不经过被测对象。
+                new StubVerifier(true),
                 "v1.2.3", "production", true,
                 "https://accounts.vxture.com", false,
-                "http://platform-api.internal", SECRET, "http://atlas.internal");
+                "http://platform-api.internal", "http://atlas.internal");
     }
 
     private record StubResolver(boolean mock) implements EntitlementResolver {
@@ -188,6 +204,18 @@ class PlatformStatusControllerTest {
         @Override
         public boolean isMock() {
             return mock;
+        }
+    }
+
+    private record StubVerifier(boolean configured) implements WebhookSignatureVerifier {
+        @Override
+        public boolean verify(byte[] rawBody, String signatureHeader) {
+            return configured;
+        }
+
+        @Override
+        public boolean isConfigured() {
+            return configured;
         }
     }
 
