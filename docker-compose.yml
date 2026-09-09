@@ -24,7 +24,7 @@ services:
 
   ai:
     build:
-      context: ..
+      context: .
       dockerfile: backend/project-name-python/Dockerfile
     restart: unless-stopped
     environment:
@@ -65,7 +65,7 @@ services:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-ChangeMe-Root-2026}
       TEMPORAL_DB_PASSWORD: ${TEMPORAL_DB_PASSWORD:-ChangeMe-Temporal-2026}
     volumes:
-      - ./mysql/init-temporal.sh:/init-temporal.sh:ro
+      - ./deploy/mysql/init-temporal.sh:/init-temporal.sh:ro
     command: ["sh", "/init-temporal.sh"]
     restart: "no"
 
@@ -105,7 +105,7 @@ services:
   api:
     image: tenderagent-java:local
     build:
-      context: ..
+      context: .
       dockerfile: backend/project-name-java/Dockerfile
     restart: unless-stopped
     depends_on:
@@ -269,7 +269,7 @@ services:
 
   web:
     build:
-      context: ..
+      context: .
       dockerfile: frontend/project-name-web/Dockerfile
       secrets:
         - github_packages_token

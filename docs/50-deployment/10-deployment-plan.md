@@ -15,7 +15,7 @@
 | 本地未推送 | `feat/platform-integration` 上 **23 个提交** |
 | `.github/workflows/` | **不存在**（基准仓有 8 个工作流） |
 | `deploy/deploy.sh` | **不存在**（基准仓有 159 行的宿主机生命周期脚本） |
-| `deploy/.env.example` | 存在，但**比 `docker-compose.yml` 少 36 个键** |
+| `.env.example` | 存在，但**比 `docker-compose.yml` 少 36 个键** |
 | 分支保护 / ruleset | 未应用 |
 | GitHub Environment | 未创建 |
 
@@ -361,7 +361,7 @@ WorkflowExecutionStarted → WorkflowTaskScheduled/Started/Completed
 ## 6. 执行顺序
 
 **阶段一：把仓库准备好（不依赖任何外部输入）**
-1. 补齐 `deploy/.env.example` 的 36 个键，删掉 restate 的端口。
+1. 补齐 `.env.example` 的 36 个键，删掉 restate 的端口。
 2. 写 `.github/workflows/ci.yml`（Java + Python + 前端三套测试与覆盖率）。
 3. 首次推送 `main`，让 CI 跑一次产出必需检查的 context。
 4. 开启 secret scanning + push protection（治理规范 §2 的第一层）。

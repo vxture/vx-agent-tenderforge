@@ -2,7 +2,7 @@
 # GENERATED_BY_AI
 # MODEL: claude-opus-5
 # DATE: 2026-09-09
-"""deploy/.env.example 必须与 docker-compose.yml 逐键对齐。
+""".env.example 必须与 docker-compose.yml 逐键对齐。
 
 为什么值得一条 CI 守卫：`.env.example` 是 `ENV_FILE_BASE64` 的起点，也是
 「本产品需要哪些配置」的唯一来源。而 compose 的 `environment:` 是**白名单**
@@ -28,8 +28,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-COMPOSE = ROOT / "deploy" / "docker-compose.yml"
-EXAMPLE = ROOT / "deploy" / ".env.example"
+COMPOSE = ROOT / "docker-compose.yml"
+EXAMPLE = ROOT / ".env.example"
 APPLICATION_YML = (
     ROOT / "backend" / "project-name-java" / "project-name-start"
     / "src" / "main" / "resources" / "application.yml"
@@ -111,7 +111,7 @@ def main() -> int:
     ok &= report(
         "compose 引用了、.env.example 没写",
         referenced - example - set(COMPOSE_ONLY),
-        "交付时这些配置不会写进宿主机 .env。补进 deploy/.env.example。",
+        "交付时这些配置不会写进宿主机 .env。补进 .env.example。",
     )
     ok &= report(
         ".env.example 写了、compose 没引用",

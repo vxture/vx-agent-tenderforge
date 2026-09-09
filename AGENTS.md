@@ -71,8 +71,8 @@ uvicorn main:app --reload --port 8000
 ### 部署
 
 ```powershell
-docker compose --env-file deploy/.env -f deploy/docker-compose.yml config
-docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d --build
+docker compose config
+docker compose up -d --build
 ```
 
 不得删除 `mysql-data`、`private-files` 或本地 `deploy/dify/volumes` 遗留数据，除非用户明确

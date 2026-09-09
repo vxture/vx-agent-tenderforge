@@ -69,7 +69,7 @@ TCP 5274。公网 HTTP 不提供传输加密；正式使用必须接入域名和
 Web，并将 `WEB_HOST` 收回 `127.0.0.1`、在 `CORS_ALLOWED_ORIGINS` 中配置实际 HTTPS 域名。
 
 浏览器不直接访问 Python、MySQL 或 Temporal。Java 调用 Python 时必须携带
-`X-Internal-Token`；模型密钥通过 Compose 从 `deploy/.env` 注入 `ai` 容器。
+`X-Internal-Token`；模型密钥通过 Compose 从 `.env` 注入 `ai` 容器。
 
 ### 2.1 平台接入
 
@@ -863,7 +863,7 @@ checksum 的一部分，不能删除、改名或改写；新结构只允许追�
 | --- | --- |
 | `MYSQL_PASSWORD`、`MYSQL_ROOT_PASSWORD`、`TEMPORAL_DB_PASSWORD` | 业务、root、Temporal 数据库密码 |
 | `AI_SERVICE_INTERNAL_TOKEN` | Java -> Python 内部认证，两个服务必须一致 |
-| `AI_MODEL_API_KEY` | 模型 API Key，由 `deploy/.env` 注入 `ai` 容器，不设默认值 |
+| `AI_MODEL_API_KEY` | 模型 API Key，由 `.env` 注入 `ai` 容器，不设默认值 |
 | `BOOTSTRAP_PLANNER_PASSWORD`、`BOOTSTRAP_ADMIN_PASSWORD` | 引导账号密码，仅首次/显式引导使用 |
 | `GITHUB_PACKAGES_TOKEN` | 仅在构建 Web 镜像时使用，必须具备 `read:packages`；通过 BuildKit secret 注入，不进入运行容器或镜像层 |
 
@@ -896,7 +896,7 @@ checksum 的一部分，不能删除、改名或改写；新结构只允许追�
 | `TEMPORAL_WORKER_ENABLED` | API `false`，Worker `true` | 是否注册 Worker |
 | `DOCUMENT_SERVICE_ENABLED` | Compose `true` | 是否使用 Python 排版服务 |
 
-模型参数和 API Key 均位于 `deploy/.env`，该文件被 Git 和 Docker build context 忽略。Compose
+模型参数和 API Key 均位于 `.env`，该文件被 Git 和 Docker build context 忽略。Compose
 仅把 `AI_MODEL_API_KEY` 注入 `ai` 服务，不注入 Java、Web、MySQL 或 Temporal。Key 不进入镜像
 层和应用日志，但会出现在容器运行环境中，具备 Docker 管理权限的人员可通过容器检查命令读取。
 环境变量为空时，Python 返回 `AI_PROVIDER_NOT_CONFIGURED`，Compose readiness 失败。
@@ -926,7 +926,7 @@ AI_MODEL_API_KEY=sk-replace-with-real-key
 npm 凭据。Compose 构建时先在当前 PowerShell 会话设置
 `$env:GITHUB_PACKAGES_TOKEN = gh auth token`。Compose 将该值声明为构建 secret，Dockerfile
 只在 `pnpm install` 的 BuildKit 步骤临时创建受信 npm 配置，并在同一层删除；Token 不得写入
-`deploy/.env`、构建参数、仓库文件或最终 Nginx 镜像。
+`.env`、构建参数、仓库文件或最终 Nginx 镜像。
 
 ### 12.3 AI 网关的失败分类
 
@@ -1003,8 +1003,8 @@ mvn test
 
 Set-Location ../..
 $env:GITHUB_PACKAGES_TOKEN = gh auth token
-docker compose --env-file deploy/.env -f deploy/docker-compose.yml config
-docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d --build
+docker compose config
+docker compose up -d --build
 git diff --check
 ```
 
@@ -1023,7 +1023,7 @@ git diff --check
 | 长任务 | `application-command/workflow` | Task Queue、幂等、Compose worker、章节 6/13 |
 | 表结构 | `project-name-start/resources/sql` 新 V23+ | JDBC 仓储、领域模型、章节 10 |
 | 文件/排版 | Infrastructure exporter、Python `document_*` | QA、私有存储、章节 9 |
-| 部署变量 | `deploy/docker-compose.yml`、`.env.example` | Java/Python config、README、章节 12 |
+| 部署变量 | `docker-compose.yml`、`.env.example` | Java/Python config、README、章节 12 |
 
 接手时建议先通过 Compose 启动系统，再按“创建标书 -> 上传 -> 冻结解读 -> 冻结目录 -> 生成
 正文 -> 审查冻结 -> 排版下载”完成一次纵向验证。任何功能、接口、状态、表或配置变化都在同一
