@@ -35,9 +35,11 @@ concurrency:
   group: deploy-production
   cancel-in-progress: false
 
+# 权限按作业给。detect 只做一次字符串路由，deploy 只需要读——
+# 在 workflow 层开 packages: write 会把它连带给到每一个作业，
+# 包括那些只是算个变量的。
 permissions:
   contents: read
-  packages: write
 
 env:
   PRODUCT_CODE: tenderforge

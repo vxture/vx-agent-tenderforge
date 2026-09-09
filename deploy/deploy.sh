@@ -133,6 +133,10 @@ probe() {
     python) compose exec -T "$service" python -c \
               "import urllib.request;urllib.request.urlopen('http://127.0.0.1:${port}${path}')" >/dev/null 2>&1 ;;
     wget)   compose exec -T "$service" wget -q --spider "http://127.0.0.1:${port}${path}" >/dev/null 2>&1 ;;
+    # 没有默认分支时，未知的 tool 会让 case 什么都不做并返回 0——
+    # 于是 probe 报成功、verify 判定通过，而<b>一次探测都没发生</b>。
+    # 这是这个脚本里最坏的一种失败：部署报绿，服务其实没起来。
+    *)      log "FATAL: probe 不认识的探测工具 '$tool'"; return 1 ;;
   esac
 }
 
