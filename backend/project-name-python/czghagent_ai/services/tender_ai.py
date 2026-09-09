@@ -333,6 +333,9 @@ class TenderAiService:
             object_name="章节正文",
             schema_version="chapter-content-v3",
             normalizer=normalize_chapter_content_contract,
+            semantic_validator=lambda response: chapter_completeness_errors(
+                response.content, request.word_budget
+            ),
         )
         content = result.data
         warnings = list(content.warnings)
@@ -521,8 +524,19 @@ def blocks_to_html(blocks: list[ContentBlock]) -> str:
     return "".join(output)
 
 
+#: 首尾的空白，含<b>编码形式</b>的空白。
+#:
+#: ``strip()`` 只认字面空白，看不见 ``&#x20;`` 和 ``&nbsp;``。模型在结尾多吐一个
+#: 编码空格，它会落在最后一个块元素<em>外面</em>——编辑器里是一个孤立的空段，
+#: 导出的 DOCX 里是一个空行。不报错，只是每一份成果都比预期多一行。
+_ENCLOSING_BLANKS = re.compile(
+    r"^(?:\s|&nbsp;|&#(?:32|160|x20|xa0);)+|(?:\s|&nbsp;|&#(?:32|160|x20|xa0);)+$",
+    flags=re.IGNORECASE,
+)
+
+
 def normalize_editor_content(value: str, fallback_table_context: str = "") -> str:
-    content = value.strip()
+    content = _ENCLOSING_BLANKS.sub("", value)
     content = re.sub(r"```(?:html)?\s*|```", "", content, flags=re.IGNORECASE)
     content = re.sub(r"<(script|style)\b[^>]*>[\s\S]*?</\1>", "", content, flags=re.IGNORECASE)
     content = re.sub(r"\s+on[a-z]+\s*=\s*(['\"]).*?\1", "", content, flags=re.IGNORECASE)
@@ -552,6 +566,39 @@ def normalize_chapter_content_contract(raw: dict[str, Any]) -> None:
 def _visible_character_count(content: str) -> int:
     visible = html.unescape(re.sub(r"<[^>]+>", "", content))
     return len(re.sub(r"\s+", "", visible))
+
+
+#: 「最小有效内容」下限：低于单元预算的这个比例即判为响应不足，触发一次局部修复。
+#:
+#: 详细设计写着「单元预算是质量提示和监控指标，不是硬失败条件……<b>低于最小有效
+#: 内容</b>或违反表格/内部字段/事实边界时，才触发一次局部修复」——下限是有的，
+#: 只是两侧代码里都没实现过，于是一个只写了四分之一篇幅的章节会一路进到成果里。
+#:
+#: <b>0.5 这个数字是产品决定，不是推导结果。</b>取值理由：提示词的目标区间是
+#: 预算的 80%-115%，下限压到一半远离那个区间，正常波动不会误伤；而拿到不足一半
+#: 篇幅的章节确实是废的。取高了会制造重试风暴（Java 侧把 AI_OUTPUT_INVALID 列为
+#: 可重试），取低了这道闸门等于不存在。
+_MIN_CONTENT_RATIO = 0.5
+
+
+def chapter_completeness_errors(content: str, word_budget: int) -> list[str]:
+    """正文是否短到不成立。
+
+    只查<b>下限</b>。超出预算不在这里判——那是软目标，超了保留全文、不截断、
+    不因篇幅重写，只记 OVER_BUDGET。两个方向用同一个判据会让「写多了」
+    和「没写完」得到同样的处置，而它们一个是风格问题、一个是缺陷。
+    """
+    if word_budget <= 0:
+        return []
+    minimum = round(word_budget * _MIN_CONTENT_RATIO)
+    actual = _visible_character_count(content)
+    if actual >= minimum:
+        return []
+    return [
+        f"正文可见字符仅{actual}，低于单元最小有效内容{minimum}"
+        f"（预算{word_budget}的{int(_MIN_CONTENT_RATIO * 100)}%）；"
+        "请按写作任务补足技术内容，不要以套话或同义重复填充"
+    ]
 
 
 def _chapter_budget_warning(content: str, word_budget: int) -> str | None:

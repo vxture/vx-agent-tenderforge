@@ -196,12 +196,16 @@ def normalize_skeleton(value: dict[str, Any], scale: OutlineScale) -> None:
 def build_outline_scale(
     target_pages: int, project_overview: str, technical_scoring: str
 ) -> OutlineScale:
-    if target_pages <= 200:
-        divisor = 1.5
-    elif target_pages <= 300:
-        divisor = 2.5
-    else:
-        divisor = 2.75
+    # 每个三级目录承担多少页。
+    #
+    # 短标书的每节略薄（2.6 页），长标书略厚（2.8 页）——长文里章节多了之后，
+    # 继续切碎只会制造同义重复的标题，而不是更细的技术分解。
+    #
+    # 这两个数<b>不是可以随手调的</b>：整条目录链路的配额、二级容量、正文字数预算
+    # 都从它们派生。曾经它们被改成 1.5/2.5/2.75，于是 80 页的标书要写 53 个三级节点
+    # ——每节 1.5 页。那不会报错，只会让模型被迫把同一件事拆成三个标题，
+    # 而评审看到的是一份注水的目录。
+    divisor = 2.6 if target_pages <= 200 else 2.8
     base = round(target_pages / divisor)
     base = max(12, min(300, base))
     complexity = _source_complexity(project_overview, technical_scoring)

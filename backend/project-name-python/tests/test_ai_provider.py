@@ -104,14 +104,21 @@ def test_provider_routes_quality_operations_and_applies_thinking_policy() -> Non
     assert draft["temperature"] == 0.4
     assert revision["thinking"] == {"type": "disabled"}
     assert strategy["thinking"] == {"type": "enabled"}
-    assert strategy["max_tokens"] == 12288
+    # bid_strategy_planning 不设 max_tokens，走提供方默认值：详细设计 §8.1 的
+    # 参数表里没有它——策略接口只作为兼容保留，不在默认用户流程中产生调用。
+    assert "max_tokens" not in strategy
     assert skeleton["thinking"] == {"type": "disabled"}
     assert expansion["thinking"] == {"type": "disabled"}
     assert expansion["model"] == "deepseek-v4-flash"
-    assert skeleton["max_tokens"] == 8192
-    assert expansion["max_tokens"] == 6144
+    # 与详细设计 §8.1 的参数表一致。这两个数曾经写着 8192/6144，
+    # 那是更早一版的调参——骨架规划要一次吐出完整的一二级结构，
+    # 8192 会在大标书上截断，而截断的表现是整个目录任务失败重跑。
+    assert skeleton["max_tokens"] == 16384
+    assert expansion["max_tokens"] == 8192
     assert blueprint["model"] == "deepseek-v4-pro"
-    assert blueprint["max_tokens"] == 12288
+    # 与 bid_strategy_planning 同理：技术域蓝图也只是兼容保留的接口，
+    # 详细设计 §8.1 的参数表里没有它，不设 max_tokens。
+    assert "max_tokens" not in blueprint
     assert review["thinking"] == {"type": "enabled"}
 
 
