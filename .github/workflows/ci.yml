@@ -182,6 +182,12 @@ jobs:
       # ruff 一直在 pyproject 里配着，却从没进过 CI——于是它慢慢积了 6 条：
       # 一个真正没用的 import、两处 import 顺序、一处该用 datetime.UTC。
       # 配了不跑的 linter 等于没配，而且比没配更坏：它让人以为查过了。
+      # 列锁白名单与代码里真实的 UPDATE 必须逐列一致。两个方向都要红：
+      # 少给 → 生产 permission denied，而本地以 owner 连库完全不显形；
+      # 多给 → 没有任何报错，只是一次注入的爆炸半径从几列变回整表。
+      - name: Column lock guardrail (whitelist <-> real UPDATE statements)
+        run: python scripts/guardrails/check_column_locks.py
+
       - name: Python lint (ruff)
         working-directory: backend/project-name-python
         run: |
