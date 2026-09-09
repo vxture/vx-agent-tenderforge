@@ -9,6 +9,11 @@ FROM python:3.12-slim
 # DEPLOY_STAGE 的默认取 local 而不是规范示例里的 dev：本仓同一个镜像也用于
 # 本地开发，而 dev 在本产品的 DeployStage 里已经算「部署态」，会触发
 # 「拒绝以替身启动」那道闸门——默认成 dev 等于本地栈起不来。
+#
+# 而且 DEPLOY_STAGE 在运行时仍可被 compose 覆盖，这偏离 025 §4「stage 必须
+# 构建期注入」，已登记为 **TD-005**（详细设计 §13b）。缓解手段是 compose 里
+# 写 ${DEPLOY_STAGE:?} 而非 :-local——**没有默认值**，漏配直接拒绝启动，
+# 不会静默落到唯一放行替身的那一档。另外三个溯源值不受此条影响，严格只读镜像 ENV。
 ARG APP_VERSION=dev
 ARG GIT_SHA=unknown
 ARG BUILD_TIME=unknown

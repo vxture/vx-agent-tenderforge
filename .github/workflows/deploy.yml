@@ -8,9 +8,11 @@ name: deploy
 # 零保护的表现是 tag 一推就直接上线，没有任何人看过（varda 首上线教训）。
 #
 # 本产品的 DB 结构变更目前由 Flyway 在 api 启动时自动跑（V1–V30）。
-# 治理规范要求「常规部署链不跑 migration/seed」，这是一条**已登记的偏离**，
-# 见 docs/30-design/10-detailed-design.md §12。别把它当成疏漏顺手改掉——
-# 改它要连带把 30 个迁移转成 ddl 单一权威，那是独立排期的事。
+# 治理规范 §11 要求「常规部署链不跑 migration/seed，DB 结构变更是独立授权
+# 动作」——本产品不满足，这是**已登记的偏离 TD-001**
+# （docs/30-design/10-detailed-design.md §13b，含理由、风险与回收条件）。
+# 别把它当成疏漏顺手改掉：改它要连带把 30 个迁移转成 ddl 单一权威、
+# 关掉部署态的 flyway.enabled、新建 db-init.yml，是独立排期的事。
 
 on:
   push:

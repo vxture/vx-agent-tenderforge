@@ -7,7 +7,13 @@ services:
   mysql:
     # 规范 §7 的容器命名 vx-<stack>-<engine>-db-<env>。<b>服务名仍用短名</b>，
     # 因为服务名才是网络别名、DATABASE_URL 只认它——改容器名永远不该断连接串。
-    # （服务名从 mysql 改成 db 属于库层整改，owner 决定本轮不动。）
+    #
+    # <b>两条已登记的偏离在这里</b>（见 docs/30-design/10-detailed-design.md §13b）：
+    #   TD-002 库名与角色仍是 czghagent，不是 ADR-007 的 vx_tenderforge_db +
+    #          tenderforge_svc；服务角色也还没有最小权限与列锁。
+    #   TD-003 引擎是 MySQL，而组织内已部署的产品全部是 Postgres。
+    # 两条都是 owner 2026-09-10 明确「本轮不动、待排期」，不是疏漏。
+    # 改它们要连带动 Flyway 迁移、连接串与本地栈重建——同一件事的三个面。
     container_name: vx-tenderforge-mysql-db-${DEPLOY_STAGE}
     image: mysql:8.4
     restart: unless-stopped

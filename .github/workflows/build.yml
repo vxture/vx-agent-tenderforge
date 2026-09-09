@@ -3,7 +3,9 @@ name: build-images
 # 可复用的镜像构建，由 deploy.yml 在路由到环境之后调用。
 #
 # 与基准产品 vxtpl 的关键差异：**本产品是三个镜像**（java api / python ai /
-# web），而 vxtpl 是单体一个。三者必须**同一个 SHA、同一批 tag**——各自按分支
+# web），而 vxtpl 是单体一个。这偏离基建登记表 §4 的「镜像 {code}-app」，
+# 已登记为 **TD-004**（docs/30-design/10-detailed-design.md §13b），
+# 并已回报平台（vxture-platform#263）。三者必须**同一个 SHA、同一批 tag**——各自按分支
 # 最新构建会让 api 与 web 版本错开，而错开的表现是前端调一个后端还没有的接口，
 # 拿到 404，两侧都不会说「版本不匹配」。所以这里用 matrix 构建、共用一个
 # image_tag，而不是三个独立的 workflow。
