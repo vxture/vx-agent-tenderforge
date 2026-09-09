@@ -188,7 +188,7 @@ Insights → Dependency graph → Dependabot 手动跑一次 "Check for updates"
 无法真正生效**——这两件事不能分别排期。
 
 需要交给平台线的两个具体值：
-- webhook 投递地址：`https://tender.vxture.com/api/platform/provisioning/webhook`
+- webhook 投递地址：`https://tenderforge.vxture.com/api/platform/provisioning/webhook`
 - 需要授权的 Atlas endpoint：见 `atlas_endpoints.required_endpoint_codes()`；
   授权到位前保持 `ATLAS_USE_DEDICATED_ENDPOINTS=false`，全部走 `chat/default`
 

@@ -1,7 +1,7 @@
 # GENERATED_BY_AI
 # MODEL: gpt-5
 # DATE: 2026-07-29
-name: bidagent
+name: tenderforge
 
 services:
   mysql:
@@ -278,7 +278,9 @@ services:
       api:
         condition: service_healthy
     ports:
-      - "${WEB_HOST:-127.0.0.1}:${WEB_PORT:-5274}:80"
+      # 端口登记表 2026-09-10 分配 4050/4051（L3 #5）。R3：这个回退默认值、
+      # 登记表、生产容器内口必须是同一个数——5274 是此前自取的未登记值。
+      - "${APP_PUBLISH_HOST:-127.0.0.1}:${APP_PUBLISH_PORT:-4050}:80"
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/"]
       interval: 10s

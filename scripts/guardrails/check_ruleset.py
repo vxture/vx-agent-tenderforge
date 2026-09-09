@@ -4,7 +4,7 @@
 # DATE: 2026-09-09
 """main 分支保护的 ruleset 不许被悄悄放松。
 
-`doc/rebuild/main-ruleset.json` 是**逐字**应用到仓库上的那份配置。它被改弱
+`docs/50-deployment/rebuild/main-ruleset.json` 是**逐字**应用到仓库上的那份配置。它被改弱
 之后，GitHub 的设置页面上「保护」两个字还在，只是不再要求任何检查——
 这正是最难发现的一类回退：没有报错，PR 照常能合，绿灯照常亮。
 
@@ -27,7 +27,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-RULESET = ROOT / "doc" / "rebuild" / "main-ruleset.json"
+RULESET = ROOT / "docs" / "50-deployment" / "rebuild" / "main-ruleset.json"
 WORKFLOWS = ROOT / ".github" / "workflows"
 
 REQUIRED_CHECKS = {"quality-gate", "build", "test-coverage", "audit", "gitleaks"}

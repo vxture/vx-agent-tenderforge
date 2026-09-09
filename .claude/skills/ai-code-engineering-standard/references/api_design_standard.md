@@ -11,7 +11,7 @@
 ### 1.1 文档位置
 
 ```
-接口现状统一记录在 `doc/DETAILED_DESIGN.md`；运行时 OpenAPI 由 Springdoc 提供。
+接口现状统一记录在 `docs/30-design/10-detailed-design.md`；运行时 OpenAPI 由 Springdoc 提供。
 ```
 
 ### 1.2 完整示例

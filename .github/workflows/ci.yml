@@ -7,7 +7,7 @@ name: ci
 # 作业名是稳定契约——改名会直接让分支保护失效，而失效的表现是
 # 「保护还在页面上，但没有任何检查被要求」。
 #
-# 与基准产品 vxtpl 的形态差异（见 doc/DEPLOYMENT_PLAN.md §2）：本产品是
+# 与基准产品 vxtpl 的形态差异（见 docs/50-deployment/10-deployment-plan.md §2）：本产品是
 # Java + Python + 前端三套，三个镜像；所以 build 与 test-coverage 都是
 # 三段并行的矩阵，而不是单个 pnpm 命令。
 

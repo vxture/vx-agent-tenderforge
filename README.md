@@ -16,7 +16,7 @@ docker compose --env-file deploy/.env -f deploy/docker-compose.yml ps
 
 `.env.example` 默认展示阿里云百炼托管 DeepSeek 的华北 2（北京）配置；启动前必须把
 `AI_MODEL_BASE_URL` 中的 `replace-with-workspace-id` 替换为实际业务空间 ID。其他提供方的
-配置和请求方言见 [详细设计](doc/DETAILED_DESIGN.md)。
+配置和请求方言见 [详细设计](docs/30-design/10-detailed-design.md)。
 
 `deploy/.env` 已被 Git 忽略，禁止将其内容提交、粘贴到工单或写入日志。环境变量会进入容器
 配置，可被具备 Docker 管理权限的人员通过容器检查命令读取。
@@ -44,11 +44,11 @@ backend/project-name-java/       Java 25 + Spring Boot 业务 API 与 Temporal W
 backend/project-name-python/     FastAPI 文档解析、AI 契约和 DOCX 渲染服务
 deploy/                          当前 Docker Compose 部署
 scripts/qa/                      核心 AI 与端到端验收脚本
-doc/DETAILED_DESIGN.md           当前系统唯一详细设计
+docs/30-design/10-detailed-design.md           当前系统唯一详细设计
 ```
 
 系统范围、路由、接口、状态机、数据表、任务队列、配置和接手指南统一维护在
-[详细设计](doc/DETAILED_DESIGN.md)。代码变更必须同步更新该文档，不在仓库长期保留提案、
+[详细设计](docs/30-design/10-detailed-design.md)。代码变更必须同步更新该文档，不在仓库长期保留提案、
 任务清单或历史过程文档。
 
 ## 本地验证

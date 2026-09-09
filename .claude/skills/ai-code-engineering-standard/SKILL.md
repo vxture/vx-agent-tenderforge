@@ -9,11 +9,11 @@ last_updated: 2026-08-14
 
 ## 工作流程
 
-1. 先读根目录 `AGENTS.md`、`doc/DETAILED_DESIGN.md` 和涉及模块代码。
+1. 先读根目录 `AGENTS.md`、`docs/30-design/10-detailed-design.md` 和涉及模块代码。
 2. 新功能或跨模块变更先在当前任务中完成设计，确认状态、接口、数据和失败语义；不在仓库
    长期保存提案、任务清单或过程记录。
 3. 实现时遵循现有目录、领域端口、统一响应、错误码和测试模式，不引入平行框架。
-4. 代码完成后同步更新 `doc/DETAILED_DESIGN.md` 的最终现状。
+4. 代码完成后同步更新 `docs/30-design/10-detailed-design.md` 的最终现状。
 5. 运行受影响模块测试、静态检查、构建和 `git diff --check`。
 
 ## 分层与依赖
@@ -54,4 +54,4 @@ last_updated: 2026-08-14
 - 评审：`references/code_review_guide.md`
 - Java：`../backend-java-code-engineering/SKILL.md`
 
-项目代码和 `doc/DETAILED_DESIGN.md` 与通用参考冲突时，以项目现状和根 `AGENTS.md` 为准。
+项目代码和 `docs/30-design/10-detailed-design.md` 与通用参考冲突时，以项目现状和根 `AGENTS.md` 为准。

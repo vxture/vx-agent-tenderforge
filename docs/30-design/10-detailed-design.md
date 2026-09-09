@@ -803,7 +803,7 @@ checksum 的一部分，不能删除、改名或改写；新结构只允许追�
 ### 10.5 开通事件接收（C3 下发）
 
 接收地址 **`POST /api/platform/provisioning/webhook`**，完整 URL
-`https://tender.vxture.com/api/platform/provisioning/webhook`——需要连同
+`https://tenderforge.vxture.com/api/platform/provisioning/webhook`——需要连同
 `TENDERFORGE_PROVISION_WEBHOOK_SECRET` 一起交给平台线。
 
 这个端点**不要求会话**（调用方是平台，不是浏览器），鉴权全部来自 HMAC 验签。

@@ -177,7 +177,7 @@ fi
 if (( worst_status != 0 )); then
   echo >&2
   echo "!! 依赖漏洞扫描未通过（osv-scanner 退出码 $worst_status）" >&2
-  echo "   整顿方法见治理规范 §9 与 doc/DEPLOYMENT_PLAN.md §4b——是抬版本，不是加忽略。" >&2
+  echo "   整顿方法见治理规范 §9 与 docs/50-deployment/10-deployment-plan.md §4b——是抬版本，不是加忽略。" >&2
   exit 1
 fi
 
