@@ -297,6 +297,52 @@ tomcat / spring / jackson / logback / micrometer；Temporal 抬掉了
 **PyPI** — 三个都是直接钉的：`Pillow` 11.2.1 → 12.3.0、
 `python-multipart` 0.0.20 → 0.0.31、`pytest` 8.4.0 → 9.0.3。
 
+## 4c. Temporal SDK 1.38.0 对服务端 1.27.2（本地整栈实测）
+
+SDK 与 server 是**两条独立的版本线**——1.38 和 1.27 不是同一个数字，不存在
+「差了 11 个版本」这回事。server 1.27.2 距当时最新的 1.29.x 只差两个小版本。
+
+单元测试覆盖不到这一层（集成测试被 `-DskipITs` 跳过），所以在本地整栈上
+实跑了一遍：换掉 api 与 worker 的镜像，**Temporal / MySQL / AI 都不动**，
+仍然是原来那个 1.27.2 的服务端。
+
+先确认镜像里装的确实是新版（防构建缓存骗人）：`temporal-sdk 1.38.0`、
+`grpc-netty-shaded 1.76.0`、`protobuf-java 3.25.8`、`tomcat-embed-core 10.1.59`、
+`jackson-databind 2.21.5`、`spring-core 6.2.19`、`commons-lang3 3.18.0`、
+`log4j-api 2.25.5`。
+
+**worker 侧**：四个任务队列的 poller 全部在服务端可见（identity 与新容器的
+hostname 对得上）。用同一条探针工作流对比新旧两版的事件序列，**完全一致**：
+
+```
+WorkflowExecutionStarted → WorkflowTaskScheduled/Started/Completed
+→ ActivityTaskScheduled/Started/Failed        （BidLayout_Render，探针 bid 不存在）
+→ WorkflowTaskScheduled/Started/Completed
+→ ActivityTaskScheduled/Started/Completed     （BidLayout_Fail 补偿）
+→ WorkflowTaskScheduled/Started/Completed → WorkflowExecutionFailed
+```
+
+这条路径覆盖的比happy path 还宽：工作流任务收发、活动派发、活动重试
+（日志里 attempt=1/2/3 到 `RETRY_STATE_MAXIMUM_ATTEMPTS_REACHED`）、
+失败编码、补偿活动、工作流失败上报。
+
+**客户端侧**：产品的业务端点有前置条件（`BID_CONTENT_NOT_FROZEN`），起不到
+工作流，所以另写了一个只依赖 SDK 1.38 的独立探针直接发
+`StartWorkflowExecution`——能力协商（`GetSystemInfo`）通过、start 被接受、
+长轮询取结果正常。这条路是产品每次起工作流都要走的，值得单独验。
+
+两个容器全程 **0 条** `UNIMPLEMENTED` / `FAILED_PRECONDITION` /
+`INVALID_ARGUMENT`。结论：这个组合可用，服务端**不需要**跟着升。
+
+> **一个会骗人的运维细节**：SDK 1.38 把
+> `Created WorkflowServiceStubs...` 与 `Poller - start: Poller{...}` 这些
+> INFO 日志**降级了**。1.27 时代靠 grep 这两行确认 worker 起来的做法，
+> 在新版上会得到「一行都没有」，看起来像 worker 根本没连上——而它其实
+> 一直在轮询。判断依据要换成服务端的
+> `tctl taskqueue describe --taskqueue <队列>` 有没有 poller。
+
+---
+
 ## 5. 待决策清单
 
 1. **端口** — 必须向组织端口登记表申请。仓内现有的 `5274` 是遗留值，要删。
@@ -306,14 +352,9 @@ tomcat / spring / jackson / logback / micrometer；Temporal 抬掉了
 4. **是否要 beta 环境** — 基准产品是 prod only（ADR-002）。本产品有 Temporal
    与数据库迁移，一个 beta 环境的价值可能更高，代价是第二套宿主机资源。
 5. **三镜像的 tag 与推送策略** — 建议同 SHA 同批。
-6. **Temporal SDK 1.38.0 与服务端 1.27.2 的配合** —— SDK 与 server 是两条
-   独立的版本线（不是同一个数字），server 1.27.2 距最新的 1.29.x 只差两个
-   小版本，按 Temporal 的兼容策略应当没问题。单元测试覆盖不到这一层
-   （集成测试 `-DskipITs` 跳过），上线前应在本地整栈上确认 worker 能注册、
-   工作流能跑通一轮。
-
 ~~**Maven 依赖树在 CI 里怎么解析**~~ —— 已解决，见 §4b.1。
 ~~**依赖告警的整顿窗口**~~ —— 已做完，142 → 0，见 §4b.2。
+~~**Temporal SDK 1.38.0 与服务端 1.27.2 的配合**~~ —— 已在本地整栈实测，见 §4c。
 
 ---
 
