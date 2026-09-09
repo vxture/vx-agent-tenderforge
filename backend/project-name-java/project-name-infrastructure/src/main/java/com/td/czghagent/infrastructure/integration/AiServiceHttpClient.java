@@ -24,7 +24,6 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
-import org.springframework.web.client.ResourceAccessException;
 
 import java.net.SocketTimeoutException;
 import java.net.http.HttpTimeoutException;
@@ -204,10 +203,16 @@ public class AiServiceHttpClient implements DocumentParser, TenderAiGateway {
             return new AiResponse<>(data, diagnostics);
         } catch (RestClientResponseException exception) {
             throw responseFailure(exception, path, started);
-        } catch (ResourceAccessException exception) {
-            throw transportFailure(exception, path, started);
         } catch (RestClientException exception) {
-            throw new BusinessException("AI_GATEWAY_UNAVAILABLE", "AI 网关暂不可用", 502);
+            // 一并接住 ResourceAccessException（它是子类）。
+            //
+            // 曾经这里先接 ResourceAccessException 再兜 RestClientException，
+            // 而 Spring 的 RestClient <b>把读超时包成普通的 RestClientException</b>
+            // ——不是老 RestTemplate 那个 ResourceAccessException。于是超时分支
+            // 从来没命中过：整个 AI_GATEWAY_TIMEOUT / 504 / 「已等待约 N 秒」
+            // 对最常见的超时情形是死代码，用户收到的是「AI 网关暂不可用」。
+            // 模型调用是本产品最慢的一环，超时正是它的常规失败形态。
+            throw transportFailure(exception, path, started);
         } catch (Exception exception) {
             throw new BusinessException("AI_OUTPUT_INVALID", "AI 服务响应无法解析", 502);
         }
@@ -227,10 +232,16 @@ public class AiServiceHttpClient implements DocumentParser, TenderAiGateway {
             return result;
         } catch (RestClientResponseException exception) {
             throw responseFailure(exception, path, started);
-        } catch (ResourceAccessException exception) {
-            throw transportFailure(exception, path, started);
         } catch (RestClientException exception) {
-            throw new BusinessException("AI_GATEWAY_UNAVAILABLE", "AI 网关暂不可用", 502);
+            // 一并接住 ResourceAccessException（它是子类）。
+            //
+            // 曾经这里先接 ResourceAccessException 再兜 RestClientException，
+            // 而 Spring 的 RestClient <b>把读超时包成普通的 RestClientException</b>
+            // ——不是老 RestTemplate 那个 ResourceAccessException。于是超时分支
+            // 从来没命中过：整个 AI_GATEWAY_TIMEOUT / 504 / 「已等待约 N 秒」
+            // 对最常见的超时情形是死代码，用户收到的是「AI 网关暂不可用」。
+            // 模型调用是本产品最慢的一环，超时正是它的常规失败形态。
+            throw transportFailure(exception, path, started);
         }
     }
 
@@ -250,7 +261,7 @@ public class AiServiceHttpClient implements DocumentParser, TenderAiGateway {
     }
 
     private BusinessException transportFailure(
-            ResourceAccessException exception, String path, long started
+            RestClientException exception, String path, long started
     ) {
         if (isTimeout(exception)) {
             String stage = stage(path);

@@ -928,6 +928,29 @@ npm 凭据。Compose 构建时先在当前 PowerShell 会话设置
 只在 `pnpm install` 的 BuildKit 步骤临时创建受信 npm 配置，并在同一层删除；Token 不得写入
 `deploy/.env`、构建参数、仓库文件或最终 Nginx 镜像。
 
+### 12.3 AI 网关的失败分类
+
+Java 调 Python 的失败分三类，**分错了不会报错，只会把人带向错误的排查方向**：
+
+| 情形 | 码 | 状态 | 用户看到 |
+| --- | --- | --- | --- |
+| 被调方返回结构化错误 | 原样透出被调方的码 | 503/504 原样，其余折 502 | 被调方的消息 + 对象名 + 首条校验错误 |
+| 读超时 | `AI_GATEWAY_TIMEOUT` | 504 | 「已等待约 N 秒，请稍后重试」 |
+| 连不上 | `AI_GATEWAY_UNAVAILABLE` | 502 | 「AI 网关暂不可用」 |
+
+超时判据是**沿 cause 链找 `SocketTimeoutException`**，不是按异常类型。
+Spring 的 `RestClient` 把读超时包成普通的 `RestClientException`，
+而不是老 `RestTemplate` 那个 `ResourceAccessException`——按类型接会让超时分支
+永远不命中，用户在一次三分钟的正文生成超时后收到「服务不可用」。
+
+`AI_ATLAS_TOKEN_REJECTED` 是唯一会触发重试的码，且**只重一次**：作废缓存里
+那张票、重铸、再调一次。其余失败一概不重试——每次调用都被计量，
+而最值得重试的操作恰好都不是幂等的。
+
+**已知同类问题**：文件解析路径（`/internal/parse`）没有超时分类，
+一次大 PDF 的解析超时同样报「解析服务暂不可用」。加一个码是契约变更，
+留待与前端一并处理。
+
 ## 13. 故障恢复与可观测性
 
 - `/actuator/health`、`/health`、Compose healthcheck 判断服务可用性；Temporal UI 查看任务
