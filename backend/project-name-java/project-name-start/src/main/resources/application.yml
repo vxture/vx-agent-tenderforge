@@ -90,6 +90,11 @@ app:
     mock-tier: ${MOCK_TIER:}
     mock-status: ${MOCK_STATUS:}
     mock-bundled: ${MOCK_BUNDLED:false}
+    # 仅本地：让 consume 替身答 gated，好在本地走一遍「配额没覆盖住」
+    # 那条分支——它牵着权益缓存的失效，不给开关就只会在线上第一次执行。
+    mock-usage-gated: ${MOCK_USAGE_GATED:false}
+    usage-flush-interval-ms: ${USAGE_FLUSH_INTERVAL_MS:15000}
+    usage-flush-batch-size: ${USAGE_FLUSH_BATCH_SIZE:100}
   atlas:
     api-url: ${ATLAS_API_URL:}
   storage:

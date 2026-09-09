@@ -43,6 +43,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "spring.datasource.username=sa",
         "spring.datasource.password=",
         "app.bootstrap.enabled=false",
+        // 冲洗任务在后台跑会去认领测试刚写进去的行——关掉它。
+        "app.platform.usage-flush-enabled=false",
         "app.storage.root=${java.io.tmpdir}/tender-writing-${random.uuid}"
 })
 @AutoConfigureMockMvc

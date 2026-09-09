@@ -147,6 +147,7 @@ services:
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
       OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-}
       OIDC_POST_LOGOUT_REDIRECT_URI: ${OIDC_POST_LOGOUT_REDIRECT_URI:-}
+      OIDC_SCOPES: ${OIDC_SCOPES:-}
       RP_SESSION_TTL: ${RP_SESSION_TTL:-43200}
       # 生产必须为 true：__Host- 前缀的 cookie 在 http 上会被浏览器直接拒收
       RP_SESSION_SECURE_COOKIE: ${RP_SESSION_SECURE_COOKIE:-false}
@@ -162,6 +163,9 @@ services:
       MOCK_TIER: ${MOCK_TIER:-}
       MOCK_STATUS: ${MOCK_STATUS:-}
       MOCK_BUNDLED: ${MOCK_BUNDLED:-false}
+      MOCK_USAGE_GATED: ${MOCK_USAGE_GATED:-false}
+      USAGE_FLUSH_INTERVAL_MS: ${USAGE_FLUSH_INTERVAL_MS:-15000}
+      USAGE_FLUSH_BATCH_SIZE: ${USAGE_FLUSH_BATCH_SIZE:-100}
     volumes:
       - private-files:/app/data/private
     healthcheck:
@@ -218,6 +222,7 @@ services:
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
       OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-}
       OIDC_POST_LOGOUT_REDIRECT_URI: ${OIDC_POST_LOGOUT_REDIRECT_URI:-}
+      OIDC_SCOPES: ${OIDC_SCOPES:-}
       RP_SESSION_TTL: ${RP_SESSION_TTL:-43200}
       # 生产必须为 true：__Host- 前缀的 cookie 在 http 上会被浏览器直接拒收
       RP_SESSION_SECURE_COOKIE: ${RP_SESSION_SECURE_COOKIE:-false}
@@ -233,6 +238,9 @@ services:
       MOCK_TIER: ${MOCK_TIER:-}
       MOCK_STATUS: ${MOCK_STATUS:-}
       MOCK_BUNDLED: ${MOCK_BUNDLED:-false}
+      MOCK_USAGE_GATED: ${MOCK_USAGE_GATED:-false}
+      USAGE_FLUSH_INTERVAL_MS: ${USAGE_FLUSH_INTERVAL_MS:-15000}
+      USAGE_FLUSH_BATCH_SIZE: ${USAGE_FLUSH_BATCH_SIZE:-100}
     volumes:
       - private-files:/app/data/private
 

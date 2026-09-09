@@ -6,7 +6,11 @@ package com.td.czghagent.rest;
 import com.td.czghagent.domain.model.PlatformClaims;
 import com.td.czghagent.domain.model.S2SToken;
 import com.td.czghagent.domain.model.TenantScope;
+import com.td.czghagent.domain.model.Entitlement;
+import com.td.czghagent.domain.port.EntitlementResolver;
 import com.td.czghagent.domain.port.OidcGateway;
+import com.td.czghagent.domain.port.UsageConsumeClient;
+import com.td.czghagent.domain.repository.UsageBufferRepository;
 import com.td.czghagent.domain.port.S2STokenMinter;
 import org.junit.jupiter.api.Test;
 
@@ -53,7 +57,42 @@ class PlatformStatusControllerTest {
     @Test
     void reportsDegradedWheneverAnIdentityStandInIsInUse() {
         assertThat(controller(true, false).status().get("degraded")).isEqualTo(true);
-        assertThat(controller(false, false).status().get("degraded")).isEqualTo(false);
+        assertThat(controller(false, false, "local", false, false).status().get("degraded"))
+                .isEqualTo(false);
+    }
+
+    /**
+     * 降级是<strong>三个通道的并集</strong>，不是只看身份。
+     *
+     * <p>只看身份的话，一套真身份配上替身权益会报 {@code degraded=false}——
+     * 而那时每个人拿到的能力都是编造的、用量一笔也没入账。
+     * 这正是「拿着一份 mock 数据做完验收」最可能的发生方式：
+     * 登录是真的，所以没人怀疑后面。
+     */
+    @Test
+    void countsEveryStandInTowardsDegradedNotJustIdentity() {
+        assertThat(controller(false, true, "local", true, false).status().get("degraded"))
+                .as("权益是替身").isEqualTo(true);
+        assertThat(controller(false, true, "local", false, true).status().get("degraded"))
+                .as("用量上报是替身").isEqualTo(true);
+    }
+
+    /**
+     * C2 与 C3-up 的状态问的是<strong>对象自己</strong>，不是 URL 配没配。
+     *
+     * <p>两者不总是一致：配了 URL 却漏了令牌时装配会落到替身上，
+     * 而只看 URL 会报「已配置」——恰好是最需要被看见的那种半配好状态。
+     */
+    @Test
+    void asksTheResolverItselfRatherThanLookingAtTheUrl() {
+        Map<String, Object> body = controller(false, true, "production", true, true).status();
+
+        assertThat(channelState(body, "C2")).isEqualTo("degraded_mock");
+        assertThat(channelState(body, "C3-up")).isEqualTo("degraded_mock");
+        assertThat(channelState(controller(false, true, "local", true, true).status(), "C2"))
+                .as("本地用替身是正常的，与部署态要区分开").isEqualTo("mock");
+        assertThat(channelState(controller(false, true, "local", false, false).status(), "C3-up"))
+                .isEqualTo("active");
     }
 
     /**
@@ -83,8 +122,8 @@ class PlatformStatusControllerTest {
     void reportsEveryUnconfiguredChannelHonestly() {
         Map<String, Object> body = controller(true, false).status();
 
-        assertThat(channelState(body, "C2")).isEqualTo("not_configured");
-        assertThat(channelState(body, "C3-up")).isEqualTo("not_configured");
+        assertThat(channelState(body, "C2")).isEqualTo("mock");
+        assertThat(channelState(body, "C3-up")).isEqualTo("mock");
         assertThat(channelState(body, "C3-down")).isEqualTo("not_configured");
         assertThat(channelState(body, "atlas")).isEqualTo("not_configured");
     }
@@ -113,17 +152,55 @@ class PlatformStatusControllerTest {
     /** 四条平台通道全部未配置——这是当前部署的真实形态。 */
     private static PlatformStatusController controller(
             boolean mock, boolean oidcEnabled, String stage) {
+        return controller(mock, oidcEnabled, stage, true, true);
+    }
+
+    private static PlatformStatusController controller(
+            boolean mock, boolean oidcEnabled, String stage,
+            boolean entitlementMock, boolean usageMock) {
         return new PlatformStatusController(
-                new StubGateway(mock), new StubMinter(false), "v1.2.3", stage, oidcEnabled,
+                new StubGateway(mock), new StubMinter(false),
+                new StubResolver(entitlementMock), new StubConsume(usageMock),
+                "v1.2.3", stage, oidcEnabled,
                 "https://accounts.vxture.com", false,
                 "", "", "");
     }
 
     private static PlatformStatusController controllerWithSecretsConfigured() {
         return new PlatformStatusController(
-                new StubGateway(false), new StubMinter(true), "v1.2.3", "production", true,
+                new StubGateway(false), new StubMinter(true),
+                new StubResolver(false), new StubConsume(false),
+                "v1.2.3", "production", true,
                 "https://accounts.vxture.com", false,
                 "http://platform-api.internal", SECRET, "http://atlas.internal");
+    }
+
+    private record StubResolver(boolean mock) implements EntitlementResolver {
+        @Override
+        public Entitlement resolve(String workspaceId) {
+            return Entitlement.none(workspaceId, "tenderforge");
+        }
+
+        @Override
+        public void invalidate(String workspaceId) {
+        }
+
+        @Override
+        public boolean isMock() {
+            return mock;
+        }
+    }
+
+    private record StubConsume(boolean mock) implements UsageConsumeClient {
+        @Override
+        public Outcome consume(UsageBufferRepository.BufferedUsage usage) {
+            return new Outcome(200, false, false, "evt", null);
+        }
+
+        @Override
+        public boolean isMock() {
+            return mock;
+        }
     }
 
     @SuppressWarnings("unchecked")

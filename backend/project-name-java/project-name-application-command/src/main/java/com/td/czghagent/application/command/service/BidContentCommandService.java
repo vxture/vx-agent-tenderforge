@@ -11,10 +11,13 @@ import com.td.czghagent.domain.model.BidWorkspace;
 import com.td.czghagent.domain.model.BidWorkspaceViews;
 import com.td.czghagent.domain.model.OperationContext;
 import com.td.czghagent.domain.model.StoredFile;
+import com.td.czghagent.domain.model.UsageEvent;
+import com.td.czghagent.domain.model.UsageMetric;
 import com.td.czghagent.domain.port.BidDocumentExporter;
 import com.td.czghagent.domain.port.BidGenerationOrchestrator;
 import com.td.czghagent.domain.port.FileStorage;
 import com.td.czghagent.domain.port.TenderAiGateway;
+import com.td.czghagent.domain.port.UsageRecorder;
 import com.td.czghagent.domain.repository.BidProductionRepository;
 import com.td.czghagent.domain.repository.BidRepository;
 import org.springframework.stereotype.Service;
@@ -39,6 +42,7 @@ class BidContentCommandService {
     private final BidGenerationOrchestrator generationOrchestrator;
     private final BidGenerationService generationService;
     private final BidCommandSupport support;
+    private final UsageRecorder usageRecorder;
 
     BidContentCommandService(BidRepository bidRepository, FileStorage fileStorage,
                              BidAiExecutionService aiExecutionService,
@@ -46,7 +50,8 @@ class BidContentCommandService {
                              BidProductionRepository productionRepository,
                              BidGenerationOrchestrator generationOrchestrator,
                              BidGenerationService generationService,
-                             BidCommandSupport support) {
+                             BidCommandSupport support,
+                             UsageRecorder usageRecorder) {
         this.bidRepository = bidRepository;
         this.fileStorage = fileStorage;
         this.aiExecutionService = aiExecutionService;
@@ -55,6 +60,7 @@ class BidContentCommandService {
         this.generationOrchestrator = generationOrchestrator;
         this.generationService = generationService;
         this.support = support;
+        this.usageRecorder = usageRecorder;
     }
 
     BidWorkspace startGeneration(String bidId, OperationContext context) {
@@ -92,6 +98,12 @@ class BidContentCommandService {
                     "BID_GENERATION_START_FAILED", "正文生成任务启动失败", 502);
         }
         support.audit(context, bidId, "BID_CONTENT_GENERATE", "启动标书正文生成");
+        // 计量点在这里而不是方法入口：上面两处提前返回走的是「已经有任务在跑」
+        // 和「刚被别人抢先创建」，那两条路没有产生新的业务单元，也就不该计一次。
+        // 幂等键用任务 id——用户连点三次只会产生一个任务，账上也只有一笔。
+        usageRecorder.record(UsageEvent.of(
+                bid.tenant(), UsageMetric.BID_GENERATIONS,
+                launch.taskId(), context.user().id()));
         return support.workspace(bidId, context);
     }
 
@@ -261,6 +273,10 @@ class BidContentCommandService {
                     exportId, bidId, version, fileName, stored.objectKey(), stored.size(),
                     context.user().id(), null, "NOT_CHECKED"));
             support.audit(context, bidId, "BID_EXPORT_CREATE", "生成标书DOCX成果V" + version);
+            // 写在事务里，和 export 行同生同死：回滚了就没有这笔账。
+            // 放到事务外「等成功再记」反而更脆——那之间的任何一次崩溃都会漏计。
+            usageRecorder.record(UsageEvent.of(
+                    bid.tenant(), UsageMetric.DOCUMENT_EXPORTS, exportId, context.user().id()));
         } catch (RuntimeException exception) {
             fileStorage.delete(stored.objectKey());
             throw exception;
