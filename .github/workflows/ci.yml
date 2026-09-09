@@ -33,17 +33,79 @@ jobs:
   #
   # 本产品有<b>三个生态</b>：npm（前端）、Maven（后端）、PyPI（AI 服务）。
   # 只扫一个的表现是另外两个的漏洞永远不出现，而报告是绿的。
+  #
+  # Java 那一半要先用 Maven 自己把依赖树解析出来（见下面那一步的说明），
+  # 断言逻辑全在 scripts/ci/sca-scan.sh——那个文件能在本地逐字复跑。
   audit:
     name: audit
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       # 单一升级点（见 https://github.com/google/osv-scanner/releases）。
       # 版本号与下面的 sha256 必须一起改。
       OSV_SCANNER_VERSION: "2.4.0"
+      # 生成 CycloneDX 聚合 SBOM 的插件。钉死版本：构建期插件同样是供应链。
+      CYCLONEDX_PLUGIN_VERSION: "2.9.1"
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # osv-scanner 自带的 pom.xml 传递解析在这里是<b>不能用</b>的：它自己去
+      # repo.maven.apache.org 拉父 POM，实测被 <b>HTTP 429</b> 拒绝，而失败的
+      # 表现极坏——「Scanned pom.xml 并找到 6 个包」照常打印，紧接着一行
+      # failed resolution，于是只有各模块直接声明的依赖被扫，Spring Boot
+      # 拉进来的整棵传递树一个都没扫到，报告却是绿的。
+      #
+      # 所以让 <b>Maven 自己</b>解析：cyclonedx 聚合 SBOM 就是真正打进产物的
+      # 那棵树，不是一个近似。实测 25 个直接声明 → 112 个包。
+      # 走 setup-java 缓存的 ~/.m2，热缓存下这一步 10 秒以内。
+      - name: Resolve the Java dependency tree (CycloneDX aggregate SBOM)
+        working-directory: backend/project-name-java
+        shell: bash
+        run: |
+          set -euo pipefail
+          mvn -B -ntp \
+            "org.cyclonedx:cyclonedx-maven-plugin:${CYCLONEDX_PLUGIN_VERSION}:makeAggregateBom" \
+            -DoutputFormat=json \
+            -DoutputName=bom \
+            -Dmaven.test.skip=true
+          # 名字是有意义的：osv-scanner 靠文件名挑提取器，叫别的会得到
+          # 「could not determine extractor suitable to this file」而<b>静默跳过</b>。
+          test -f target/bom.json
+
+      # osv-scanner 确实会解析 requirements.txt 的传递依赖，但**解析出来的版本
+      # 是错的**：实测它认定 idna 3.9.0、pygments 2.9.0，而真正装进镜像的是
+      # idna 3.19、pygments 2.21.0。多报的 22 条全是不存在的问题，按它说的去
+      # 「修」还是无效动作——版本本来就比它以为的新。一个会喊狼来了的闸门
+      # 等于没有闸门。
+      # uv 解析出的是真正会被装上的那套（15 → 42 个包），不装、不编译，几秒。
+      #
+      # 文件名必须是 requirements.txt：osv-scanner 靠文件名挑提取器。
+      - name: Resolve the Python dependency tree (uv pip compile)
+        working-directory: backend/project-name-python
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet --disable-pip-version-check uv
+          mkdir -p target
+          # --python-version 固定住 marker 求值，让扫描结果与镜像里装的那套一致
+          # （Dockerfile 是 python:3.12-slim）。
+          python -m uv pip compile requirements.txt \
+            --python-version 3.12 \
+            --output-file target/requirements.txt \
+            --quiet
 
       - name: Cache osv-scanner binary
         id: osv-cache
@@ -68,33 +130,26 @@ jobs:
 
       - name: Scan every ecosystem (npm + Maven + PyPI)
         shell: bash
+        env:
+          OSV_SCANNER: /tmp/osv-bin/osv-scanner
         run: |
           set -euo pipefail
           chmod +x /tmp/osv-bin/osv-scanner
-          # 必须显式 --config：扫 --lockfile 时 osv-scanner 不会自动发现
-          # 仓根的配置，忽略基线会静默不生效。
-          /tmp/osv-bin/osv-scanner scan source \
-            --config .osv-scanner.toml \
-            --recursive . \
-            2>&1 | tee /tmp/osv-report.txt
-          # 三个生态都要真的被扫到，而且<b>解析要成功</b>。
-          #
-          # 第一版这里只 grep 文件名是否出现在输出里——实测证明那太弱：
-          # osv-scanner 会打印「Scanned pom.xml 并找到 6 个包」，紧接着
-          # 「failed to merge parents: 无法拉取 spring-boot-starter-parent」，
-          # 于是<b>传递依赖一个都没扫</b>而文件名照样出现。一条只看文件名的
-          # 检查会一路绿灯，而 Java 那半边实际是裸奔的。
-          for ecosystem in "pnpm-lock.yaml" "pom.xml" "requirements.txt"; do
-            grep -q "Scanned .*${ecosystem}" /tmp/osv-report.txt || {
-              echo "!! osv-scanner 没有扫到 $ecosystem" >&2
-              exit 1
-            }
-          done
-          if grep -qE "failed resolution|Error during extraction" /tmp/osv-report.txt; then
-            echo "!! 有依赖树解析失败——那部分依赖实际未被扫描：" >&2
-            grep -E "failed resolution|Error during extraction" /tmp/osv-report.txt | head -5 >&2
-            exit 1
-          fi
+          bash scripts/ci/sca-scan.sh
+
+      - name: Upload SCA reports (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: sca-reports
+          path: |
+            /tmp/osv-inventory.txt
+            /tmp/osv-npm.txt
+            /tmp/osv-java.txt
+            /tmp/osv-python.txt
+            backend/project-name-java/target/bom.json
+            backend/project-name-python/target/requirements.txt
+          if-no-files-found: ignore
 
   # ── 静态守卫（汇入 quality-gate）────────────────────────────────────────
   static-checks:

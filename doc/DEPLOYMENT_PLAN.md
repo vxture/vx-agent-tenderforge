@@ -197,40 +197,85 @@ Insights → Dependency graph → Dependabot 手动跑一次 "Check for updates"
 ## 4b. SCA 闸门的现状（实测，**不是推测**）
 
 治理规范 §9 要求 `audit` 是 `main` 的硬阻断检查。本地用 CI 里同一条命令实跑了
-osv-scanner 2.4.0，结果是**这道门今天开不了**，两个原因：
+osv-scanner 2.4.0，先后发现两类问题：**门本身是瞎的**，以及**门后面确实有东西**。
 
-### 4b.1 npm 侧有大量待修告警
+### 4b.1 门是瞎的（已修）
 
-`frontend/project-name-web/pnpm-lock.yaml`（478 个包）上报出 js-yaml、minimatch、
-nanoid、picomatch、postcss、react-router、rollup、vite、vitest 等多条，
-其中若干 CVSS ≥ 8。
+osv-scanner 直接对着仓内清单文件扫，三个生态的成色完全不同：
 
-规范 §9 写明了整顿方法，**不是抑制**：
+| 生态 | 直接扫清单的结果 | 问题 |
+| --- | --- | --- |
+| npm | `pnpm-lock.yaml` 478 个包 | 无——锁文件本身就是完整解析结果 |
+| Maven | 「Scanned pom.xml 并找到 6 个包」+ 一行 `failed resolution` | 传递树**一个都没扫**，报告却是绿的 |
+| PyPI | 6 个包受影响、49 条 | 传递依赖**版本是错的**，多报 22 条假阳性 |
 
-* **直接依赖** → 抬 `package.json` 的 caret 下限到修复版（诚实声明安全下限）
-* **纯传递依赖** → 根 `pnpm.overrides`；跨 major 用 `pkg@1` / `pkg@5` 选择器分别定
-* **peer-only 依赖** → caret override 会被 pnpm **静默忽略**（还反过来报自己
-  override unmet），必须**精确版 pin**
+**Maven** 那条的真实原因是 osv-scanner 自己去 `repo.maven.apache.org` 拉
+`spring-boot-starter-parent:3.5.6` 时拿到 **HTTP 429**（限流，不是网络不通：
+同一容器里 curl 拉同一个 URL 返回 200）。于是只有各模块直接声明的 25 个依赖
+被扫，Spring Boot 拉进来的整棵树一个没扫。第一版那条「三个生态都扫到」的检查
+只 grep 文件名是否出现，会一路放行这种情况。
 
-`react-router` 与 `vite` 是直接依赖，走第一条；其余多为传递依赖。
+**PyPI** 那条更隐蔽：它确实解析了传递依赖，但解析出 `idna 3.9.0`、
+`pygments 2.9.0`，而真正装进镜像的是 `idna 3.19`、`pygments 2.21.0`。
+多出来的 22 条全是不存在的问题，而且按它说的去「修」是无效动作——版本本来
+就比它以为的新。一个会喊狼来了的闸门等于没有闸门。
 
-### 4b.2 Maven 侧实际上没被扫
+**修法**：两边都不用 osv-scanner 自己的解析器，改由**各自生态的解析器**先把
+树解析出来，再扫解析结果（`scripts/ci/sca-scan.sh`）：
 
-这一条更值得注意，因为它**看起来是绿的**。osv-scanner 打印
-「Scanned pom.xml 并找到 6 个包」，紧接着报
-`failed to merge parents: 无法拉取 spring-boot-starter-parent:3.5.6`
-——于是只有各模块**直接声明**的那几个依赖被扫，Spring Boot 拉进来的
-整棵传递树一个都没扫到。
+* Maven → `cyclonedx-maven-plugin:makeAggregateBom`，25 → **112** 个包
+* PyPI  → `uv pip compile`，15 → **42** 个包，版本与镜像里装的一致
+* npm   → 直接扫 `pnpm-lock.yaml`，478 个包
 
-我第一版的「三个生态都扫到」检查只 grep 文件名是否出现，会一路放行这种情况。
-已加强成同时拒绝 `failed resolution` / `Error during extraction`，实测确认会拒。
+三趟扫描是显式指定文件的，准确，但代价是仓里新出现一个 `go.mod` 不会有人提醒。
+所以额外跑一趟递归**盘点**，把发现到的清单集合与脚本里的 `EXPECTED_MANIFESTS`
+对账，多一个少一个都红。
 
-**待解**：让 osv-scanner 在 CI 里能解析 Maven 父 POM。可选路径是先跑
-`mvn dependency:tree` 导出后再扫，或给 osv-scanner 配可达的 Maven registry。
-在解决之前，`audit` 会因为这条硬失败——**这是对的**：一个报告绿色而实际
-没扫 Java 依赖的闸门，比没有闸门更坏。
+六条断言全部做过反证（故意弄坏、确认会红）：SBOM 缺失、SBOM 退化到只剩直接
+依赖、Python 解析产物缺失、清单多一个、清单少一个、把扫描对象指回未解析的
+`pom.xml`。脚本还刻意把「门是瞎的」排在「门拦下了东西」之前报——一个没扫全的
+绿灯比一个红灯坏得多。
 
----
+（另有两个实测出来的坑：osv-scanner 靠**文件名**挑提取器，SBOM 叫
+`bom-bumped.json` 就会得到 `could not determine extractor suitable to this file`
+然后静默跳过；`--experimental-disable-plugins` 传一个不存在的插件名**不报错**，
+所以那两个 flag 只用在不计退出码的盘点趟上，真正的结论不依赖它们生效。）
+
+### 4b.2 门后面确实有东西
+
+门修好之后，三个生态的真实存量：
+
+| 生态 | 受影响包 | 条数 | 最高 |
+| --- | --- | --- | --- |
+| npm（478 包） | 21 | 59 | High ×37 |
+| Maven（112 包） | 17 | 56 | **Critical ×7** |
+| PyPI（42 包） | 3 | 27 | High ×17 |
+
+**Maven** 那 56 条此前完全不可见，分布很集中：`tomcat-embed-core` 10.1.46
+（16 条，含 9.8/9.1 若干）、`spring-webmvc`/`spring-expression`/`spring-core`
+6.2.11（15 条）、`jackson-*` 2.19.2（7 条）、`logback-core`、`micrometer-core`、
+`commons-lang3`、`log4j-api`、`spring-boot*` 3.5.6，以及 Temporal SDK 1.27.0
+拉进来的 `protobuf-java` 3.21.7 与 `grpc-*` 1.54.1。
+
+已实测过整顿效果（只在临时拷贝上抬版本，仓内 pom 未动）：
+
+* `spring-boot-starter-parent` 3.5.6 → **3.5.16**，`temporal.version`
+  1.27.0 → **1.38.0** ⇒ **56 → 8 条**
+* 剩下 8 条要在 `<properties>` 里显式压过 Boot BOM 钉的版本：
+  `tomcat.version` 10.1.55 → 10.1.58（3 条，含 9.8/9.1/9.1）、
+  `jackson-bom.version` 2.21.4 → 2.21.5（3 条）、
+  `commons-lang3.version` → 3.18.0、`log4j2.version` → 2.25.5
+
+**npm** 侧按规范 §9 的方法整顿，**不是抑制**：直接依赖（`react-router`、`vite`）
+抬 `package.json` 的 caret 下限；纯传递依赖走根 `pnpm.overrides`，跨 major 用
+`pkg@1` / `pkg@5` 选择器分别定；peer-only 依赖的 caret override 会被 pnpm
+**静默忽略**（还反过来报自己 override unmet），必须精确版 pin。
+
+**PyPI** 侧三个包都是直接钉的：`pillow` 11.2.1 → 12.3.0、
+`python-multipart` 0.0.20 → 0.0.31、`pytest` 8.4.0 → 9.0.3。
+
+这三件都会动运行时依赖版本，需要一次完整回归，所以列进 §5 的待决策，
+不在这一轮里顺手做。
 
 ## 5. 待决策清单
 
@@ -241,9 +286,12 @@ nanoid、picomatch、postcss、react-router、rollup、vite、vitest 等多条�
 4. **是否要 beta 环境** — 基准产品是 prod only（ADR-002）。本产品有 Temporal
    与数据库迁移，一个 beta 环境的价值可能更高，代价是第二套宿主机资源。
 5. **三镜像的 tag 与推送策略** — 建议同 SHA 同批。
-6. **npm 侧告警的整顿窗口**（§4b.1）——抬下限会动前端依赖版本，需要一次回归。
-7. **Maven 依赖树在 CI 里怎么解析**（§4b.2）——在此之前 `audit` 无法转正为
-   必需检查，而先把它设成必需会让所有 PR 卡死。
+6. **依赖告警的整顿窗口**（§4b.2）——三个生态一共 142 条，其中 Maven 侧有
+   7 条 Critical。整顿方案已经实测过（Maven 56 → 8），但会动运行时依赖版本，
+   需要一次完整回归。三个生态**要合成一次做完**：`audit` 是一道门，
+   三边都干净它才转得了正。
+
+~~**Maven 依赖树在 CI 里怎么解析**~~ —— 已解决，见 §4b.1。
 
 ---
 
@@ -254,8 +302,8 @@ nanoid、picomatch、postcss、react-router、rollup、vite、vitest 等多条�
 2. 写 `.github/workflows/ci.yml`（Java + Python + 前端三套测试与覆盖率）。
 3. 首次推送 `main`，让 CI 跑一次产出必需检查的 context。
 4. 开启 secret scanning + push protection（治理规范 §2 的第一层）。
-5. 整顿 SCA 告警（§4b）——**必须在应用 ruleset 之前**，否则 `audit` 一成为
-   必需检查，所有 PR 立刻卡死。
+5. 整顿 SCA 告警（§4b.2）——**必须在应用 ruleset 之前**，否则 `audit` 一成为
+   必需检查，所有 PR 立刻卡死。npm / Maven / PyPI 三边要一起做完。
 6. 应用分支 ruleset（**顺序不能反**：空仓上先加限制性 ruleset 会挡住首次导入）。
 
 **阶段二：部署链（依赖运维给主机信息）**
