@@ -645,18 +645,27 @@ class TenderWritingIntegrationTest {
         List<String> auditedOperations = jdbcTemplate.queryForList(
                 "SELECT DISTINCT operation_type FROM bid_ai_run WHERE bid_id = ? AND status = 'SUCCEEDED'",
                 String.class, bidId);
-        // 主流程实际记录的 AI 操作。分阶段的 OUTLINE_STRATEGY / OUTLINE_SKELETON /
-        // OUTLINE_EXPANSION / BRANCH_BLUEPRINT 是 Python 侧保留的兼容接口，
-        // Java 主流程不调用（详细设计 §8）——断言它们等于断言一条不会发生的路径。
+        // 目录现在按阶段走：策略、骨架、逐批展开各自成为一次可恢复的 AI 运行，
+        // 所以主流程不再有一条笼统的 OUTLINE 记录。这不只是命名变化——
+        // 每个阶段单独入账，才可能回答「这个任务卡在第几批、试了几次」。
+        //
+        // BRANCH_BLUEPRINT 仍然不在主流程里：Python 侧的实现和路由已经补齐，
+        // 正文载荷也已经能接收它，但 Java 侧还没有在写正文前为每个二级分支
+        // 生成蓝图。那是本次之后剩下的最后一段。
         assertThat(auditedOperations).contains(
                 "INTERPRETATION_PROJECT_OVERVIEW", "INTERPRETATION_TECHNICAL_SCORING",
-                "OUTLINE", "CHAPTER_DRAFT", "REVIEW");
+                "OUTLINE_STRATEGY", "OUTLINE_SKELETON", "OUTLINE_EXPANSION",
+                "CHAPTER_DRAFT", "REVIEW");
+        assertThat(auditedOperations)
+                .as("单次调用那条路径已经不再被主流程使用")
+                .doesNotContain("OUTLINE");
         Integer missingDiagnostics = jdbcTemplate.queryForObject("""
                 SELECT COUNT(*) FROM bid_ai_run
                 WHERE bid_id = ? AND status = 'SUCCEEDED'
                   AND operation_type IN (
                     'INTERPRETATION_PROJECT_OVERVIEW',
-                    'INTERPRETATION_TECHNICAL_SCORING', 'OUTLINE',
+                    'INTERPRETATION_TECHNICAL_SCORING',
+                    'OUTLINE_STRATEGY', 'OUTLINE_SKELETON', 'OUTLINE_EXPANSION',
                     'CHAPTER_DRAFT', 'REVIEW')
                   AND (finish_reason IS NULL OR response_length IS NULL OR response_hash IS NULL)
                 """, Integer.class, bidId);
@@ -666,21 +675,24 @@ class TenderWritingIntegrationTest {
                 JOIN bid_outline_task t ON t.id = s.task_id
                 WHERE t.bid_id = ? AND s.status = 'SUCCEEDED'
                 """, Integer.class, bidId);
-        // 分阶段目录（V23「resumable outline stages」）当前是<b>断开</b>的：
-        // 领域端口 BidOutlineStageStore 有完整的 JDBC 实现、有 bid_outline_stage_result 表、
-        // 有专门的迁移，却<b>没有任何生产调用方</b>——主流程一次性调 /outline 出目录。
+        // 分阶段目录（V23「resumable outline stages」）现在接通了。
         //
-        // 这里断言「确实一行都没有」，而不是删掉断言。删掉等于把这个事实从视野里抹掉；
-        // 断言现状则意味着：谁把这条链接回主流程，这个用例就会红，而那正是需要有人
-        // 来决定它该断言什么的时刻。原断言要求 >= 3 个成功阶段与 EXPANSION 用 flash 模型，
-        // 那描述的是一个当前不存在的执行路径。
-        assertThat(completedOutlineStages).isZero();
+        // 这条断言此前被改成「确实一行都没有」，因为那时领域端口、JDBC 实现、
+        // bid_outline_stage_result 表和专门的迁移都在，却没有任何生产调用方。
+        // 当时留了一句话：谁把这条链接回主流程，这个用例就会红，而那正是需要有人
+        // 来决定它该断言什么的时刻。它按预期红了，现在断言真实路径。
+        //
+        // 至少三个阶段：策略、骨架，以及至少一批展开。落库不是为了好看——
+        // 没有它，一次十几批的展开在中途失败时会从策略开始整个重跑。
+        assertThat(completedOutlineStages).isGreaterThanOrEqualTo(3);
         List<String> expansionModels = jdbcTemplate.queryForList("""
                 SELECT DISTINCT s.model_name FROM bid_outline_stage_result s
                 JOIN bid_outline_task t ON t.id = s.task_id
                 WHERE t.bid_id = ? AND s.stage_type = 'EXPANSION'
                 """, String.class, bidId);
-        assertThat(expansionModels).isEmpty();
+        // 展开走 fast 档：它是量最大的一段（每批一次调用），
+        // 用 quality 档跑完一份大标书的价钱是另一个量级。
+        assertThat(expansionModels).containsExactly("deepseek-v4-flash");
         assertThat(parsed.path("criteria")).isNotEmpty();
     }
 

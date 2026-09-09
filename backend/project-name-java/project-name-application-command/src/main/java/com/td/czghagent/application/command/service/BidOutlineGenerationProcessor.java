@@ -24,18 +24,18 @@ import java.util.UUID;
 public class BidOutlineGenerationProcessor {
     private static final int MAX_OUTLINE_REFERENCE_CHARACTERS = 50_000;
     private final BidRepository bidRepository;
-    private final BidAiExecutionService aiExecutionService;
+    private final BidOutlineStagedPlanner stagedPlanner;
     private final BidAssetIngestionService assetIngestionService;
     private final BidCommandSupport support;
 
     public BidOutlineGenerationProcessor(
             BidRepository bidRepository,
-            BidAiExecutionService aiExecutionService,
+            BidOutlineStagedPlanner stagedPlanner,
             BidAssetIngestionService assetIngestionService,
             BidCommandSupport support
     ) {
         this.bidRepository = bidRepository;
-        this.aiExecutionService = aiExecutionService;
+        this.stagedPlanner = stagedPlanner;
         this.assetIngestionService = assetIngestionService;
         this.support = support;
     }
@@ -54,8 +54,11 @@ public class BidOutlineGenerationProcessor {
         if (!progress(taskId, "GENERATING", 35)) {
             return;
         }
-        TenderAiGateway.OutlinePlan plan = aiExecutionService.planOutline(
-                bidId, new TenderAiGateway.OutlineRequest(
+        // 按阶段走，每个阶段的结果落库。重试时从断点继续——不这样做的话，
+        // 一次大标书在第十几批失败，重试会从策略开始重跑，把已经成功的那十几批
+        // 白白丢掉重新付一遍钱，而且重跑出来的目录和上一次并不相同。
+        TenderAiGateway.OutlinePlan plan = stagedPlanner.plan(
+                taskId, bidId, new TenderAiGateway.OutlineRequest(
                         traceId, bid.title(), bid.targetPages(), bid.biddingMode(),
                         BidProductionRules.effectiveCriteria(workspace).stream()
                                 .map(this::toAiCriterion).toList(), references));
