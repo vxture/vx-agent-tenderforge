@@ -2,7 +2,7 @@
 # GENERATED_BY_AI
 # MODEL: claude-opus-5
 # DATE: 2026-09-09
-"""deploy/.env.example 必须与 docker-compose.yml 逐键对齐。
+""".env.example 必须与 docker-compose.yml 逐键对齐。
 
 为什么值得一条 CI 守卫：`.env.example` 是 `ENV_FILE_BASE64` 的起点，也是
 「本产品需要哪些配置」的唯一来源。而 compose 的 `environment:` 是**白名单**
@@ -28,8 +28,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-COMPOSE = ROOT / "deploy" / "docker-compose.yml"
-EXAMPLE = ROOT / "deploy" / ".env.example"
+COMPOSE = ROOT / "docker-compose.yml"
+EXAMPLE = ROOT / ".env.example"
 APPLICATION_YML = (
     ROOT / "backend" / "project-name-java" / "project-name-start"
     / "src" / "main" / "resources" / "application.yml"
@@ -39,14 +39,36 @@ APPLICATION_YML = (
 #:
 #: 每一条都要写清楚理由——这个集合是给守卫开的口子，开得越随意，
 #: 守卫越接近装饰品。
-COMPOSE_ONLY: dict[str, str] = {}
+#: compose 引用但<b>刻意</b>不写进 .env.example 的键——它们不是运维旋钮，
+#: 而是 deploy.sh 在部署那一刻导出到环境里的值（shell 环境的优先级高于 .env）。
+#: 写进 .env.example 会引人在宿主机 .env 里钉一个 tag，而那正是「宿主机上跑的
+#: 到底是哪个镜像」这个问题不该有的第二个答案。
+_DEPLOY_INJECTED = (
+    "部署期注入：deploy.sh 从 CI 传来的 IMAGE_TAG / registry 导出到环境，"
+    "不经过宿主机 .env。本地不设时 compose 回落到 ghcr.io/vxture/...:local。"
+)
+
+COMPOSE_ONLY: dict[str, str] = {
+    "IMAGE_REGISTRY": _DEPLOY_INJECTED,
+    "IMAGE_NAMESPACE": _DEPLOY_INJECTED,
+    "IMAGE_TAG": _DEPLOY_INJECTED,
+}
 
 #: application.yml 引用但<b>刻意</b>不放进 compose 白名单的键。
+_BUILD_INJECTED = (
+    "构建期注入（治理规范 025 §4.1）：由 Dockerfile 的 ARG→ENV 提供，"
+    "刻意<b>不</b>放进 compose 的 environment。它回答的是「这是哪一次构建」，"
+    "一旦能被宿主机 .env 改写，就不再是那个问题的答案了。"
+)
+
 APPLICATION_ONLY: dict[str, str] = {
     "SERVER_PORT": (
         "8081 在健康检查与 nginx 上游里是写死的；放开这个开关等于给人一个"
         "能把整栈弄坏的旋钮，而它坏掉的表现是容器健康但代理 502。"
     ),
+    "APP_VERSION": _BUILD_INJECTED,
+    "GIT_SHA": _BUILD_INJECTED,
+    "BUILD_TIME": _BUILD_INJECTED,
 }
 
 
@@ -111,7 +133,7 @@ def main() -> int:
     ok &= report(
         "compose 引用了、.env.example 没写",
         referenced - example - set(COMPOSE_ONLY),
-        "交付时这些配置不会写进宿主机 .env。补进 deploy/.env.example。",
+        "交付时这些配置不会写进宿主机 .env。补进 .env.example。",
     )
     ok &= report(
         ".env.example 写了、compose 没引用",

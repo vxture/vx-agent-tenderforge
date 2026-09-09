@@ -1,7 +1,7 @@
 # Agent 开发指南
 
 本文件定义 TenderAgent 仓库的维护规则。现行产品与技术事实以
-`doc/DETAILED_DESIGN.md` 为唯一来源。
+`docs/30-design/10-detailed-design.md` 为唯一来源。
 
 ## 项目结构
 
@@ -11,7 +11,7 @@ backend/project-name-python/     Python，FastAPI 文档/AI/排版服务
 frontend/project-name-web/       React 19 + Vite + TypeScript
 deploy/                          MySQL、Temporal、Java、Python、Nginx Compose 部署
 scripts/qa/                      真实 AI 和浏览器端到端验收
-doc/DETAILED_DESIGN.md           唯一现行详细设计
+docs/30-design/10-detailed-design.md           唯一现行详细设计
 .claude/skills/                  当前工程与 Java 编码规范
 ```
 
@@ -20,10 +20,10 @@ doc/DETAILED_DESIGN.md           唯一现行详细设计
 
 ## 变更流程
 
-1. 先读取 `doc/DETAILED_DESIGN.md` 和涉及模块的代码。
+1. 先读取 `docs/30-design/10-detailed-design.md` 和涉及模块的代码。
 2. 新功能、跨模块重构先在任务中形成设计并确认边界，但不把提案、任务清单或过程记录
    长期提交到仓库。
-3. 实现完成后同步更新 `doc/DETAILED_DESIGN.md` 中受影响的功能、接口、状态、数据、配置
+3. 实现完成后同步更新 `docs/30-design/10-detailed-design.md` 中受影响的功能、接口、状态、数据、配置
    和运维说明；该文档只描述最终现状。
 4. Bug、样式和配置修复可直接开发，但仍需更新受影响的现行设计。
 5. 按风险运行测试，提交信息说明最终行为，不记录无关开发过程。
@@ -71,8 +71,8 @@ uvicorn main:app --reload --port 8000
 ### 部署
 
 ```powershell
-docker compose --env-file deploy/.env -f deploy/docker-compose.yml config
-docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d --build
+docker compose config
+docker compose up -d --build
 ```
 
 不得删除 `mysql-data`、`private-files` 或本地 `deploy/dify/volumes` 遗留数据，除非用户明确
@@ -92,7 +92,7 @@ docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d --build
 
 ## 文档约束
 
-- `doc/DETAILED_DESIGN.md` 是唯一产品和技术详细设计，不新建平行规格、OpenSpec 或模块
+- `docs/30-design/10-detailed-design.md` 是唯一产品和技术详细设计，不新建平行规格、OpenSpec 或模块
   README。
 - 根 `README.md` 只保留项目入口、启动、验证和详细设计链接。
 - 设计必须描述当前代码实际行为，不保留迭代历史、方案比较、完成清单或未来承诺。

@@ -69,7 +69,7 @@ TCP 5274。公网 HTTP 不提供传输加密；正式使用必须接入域名和
 Web，并将 `WEB_HOST` 收回 `127.0.0.1`、在 `CORS_ALLOWED_ORIGINS` 中配置实际 HTTPS 域名。
 
 浏览器不直接访问 Python、MySQL 或 Temporal。Java 调用 Python 时必须携带
-`X-Internal-Token`；模型密钥通过 Compose 从 `deploy/.env` 注入 `ai` 容器。
+`X-Internal-Token`；模型密钥通过 Compose 从 `.env` 注入 `ai` 容器。
 
 ### 2.1 平台接入
 
@@ -803,7 +803,7 @@ checksum 的一部分，不能删除、改名或改写；新结构只允许追�
 ### 10.5 开通事件接收（C3 下发）
 
 接收地址 **`POST /api/platform/provisioning/webhook`**，完整 URL
-`https://tender.vxture.com/api/platform/provisioning/webhook`——需要连同
+`https://tenderforge.vxture.com/api/platform/provisioning/webhook`——需要连同
 `TENDERFORGE_PROVISION_WEBHOOK_SECRET` 一起交给平台线。
 
 这个端点**不要求会话**（调用方是平台，不是浏览器），鉴权全部来自 HMAC 验签。
@@ -863,7 +863,7 @@ checksum 的一部分，不能删除、改名或改写；新结构只允许追�
 | --- | --- |
 | `MYSQL_PASSWORD`、`MYSQL_ROOT_PASSWORD`、`TEMPORAL_DB_PASSWORD` | 业务、root、Temporal 数据库密码 |
 | `AI_SERVICE_INTERNAL_TOKEN` | Java -> Python 内部认证，两个服务必须一致 |
-| `AI_MODEL_API_KEY` | 模型 API Key，由 `deploy/.env` 注入 `ai` 容器，不设默认值 |
+| `AI_MODEL_API_KEY` | 模型 API Key，由 `.env` 注入 `ai` 容器，不设默认值 |
 | `BOOTSTRAP_PLANNER_PASSWORD`、`BOOTSTRAP_ADMIN_PASSWORD` | 引导账号密码，仅首次/显式引导使用 |
 | `GITHUB_PACKAGES_TOKEN` | 仅在构建 Web 镜像时使用，必须具备 `read:packages`；通过 BuildKit secret 注入，不进入运行容器或镜像层 |
 
@@ -896,7 +896,7 @@ checksum 的一部分，不能删除、改名或改写；新结构只允许追�
 | `TEMPORAL_WORKER_ENABLED` | API `false`，Worker `true` | 是否注册 Worker |
 | `DOCUMENT_SERVICE_ENABLED` | Compose `true` | 是否使用 Python 排版服务 |
 
-模型参数和 API Key 均位于 `deploy/.env`，该文件被 Git 和 Docker build context 忽略。Compose
+模型参数和 API Key 均位于 `.env`，该文件被 Git 和 Docker build context 忽略。Compose
 仅把 `AI_MODEL_API_KEY` 注入 `ai` 服务，不注入 Java、Web、MySQL 或 Temporal。Key 不进入镜像
 层和应用日志，但会出现在容器运行环境中，具备 Docker 管理权限的人员可通过容器检查命令读取。
 环境变量为空时，Python 返回 `AI_PROVIDER_NOT_CONFIGURED`，Compose readiness 失败。
@@ -926,7 +926,7 @@ AI_MODEL_API_KEY=sk-replace-with-real-key
 npm 凭据。Compose 构建时先在当前 PowerShell 会话设置
 `$env:GITHUB_PACKAGES_TOKEN = gh auth token`。Compose 将该值声明为构建 secret，Dockerfile
 只在 `pnpm install` 的 BuildKit 步骤临时创建受信 npm 配置，并在同一层删除；Token 不得写入
-`deploy/.env`、构建参数、仓库文件或最终 Nginx 镜像。
+`.env`、构建参数、仓库文件或最终 Nginx 镜像。
 
 ### 12.3 AI 网关的失败分类
 
@@ -983,6 +983,72 @@ Spring 的 `RestClient` 把读超时包成普通的 `RestClientException`，
 - MySQL 和私有文件是必须一起备份的一致性资产；仅恢复数据库而缺失 `private-files` 会造成
   源文件和导出不可读。
 
+## 13b. 已登记的标准偏离
+
+治理规范要求「无静默标准偏离」：暂不满足的条款一律三步登记——**实现处标注 +
+本表记名 + 回报平台**，且每条带回收条件。没登记的偏离与「不知道有这条规范」
+在结果上没有区别，而后者至少还会被下一次对表发现。
+
+回报渠道是平台仓的 `liaison` issue（规范 §10 起，不再新建 `80-liaison/*.md`）。
+
+### TD-001 · Flyway 启动时自动迁移，而非 `ddl/` 单一权威 + `db-init.yml`
+
+| | |
+| --- | --- |
+| **规范条款** | §7「DDL 单一权威 = 手写 `deploy/database/ddl/*.sql`」；§11「常规部署链不跑 migration/seed，DB 结构变更是独立授权动作」 |
+| **本仓现状** | Flyway 在 api 启动时自动跑 V1–V30 |
+| **实现处标注** | `.github/workflows/deploy.yml` 抬头注释 |
+| **理由** | 30 个迁移已在这条路径上跑通并验证过；转成 `ddl/apply.sh` 的 clean-baseline 形态要重写全部迁移、重建本地栈、重做一次完整回归。owner 2026-09-10 决定本轮不动。 |
+| **风险** | MySQL 没有 DDL 事务：一次失败的迁移会留下 `success=0` 的行，之后每次启动都失败，需人工删行才能恢复。**本轮已踩过两次。** |
+| **回收条件** | 库层整改排期时一并做——转 `ddl/` 单一权威、关掉部署态的 `flyway.enabled`、新建 `db-init.yml`（`confirm=yes` + `expected_sha` + 审批门）。 |
+
+### TD-002 · 库名与服务角色仍是 `czghagent`
+
+| | |
+| --- | --- |
+| **规范条款** | ADR-007「库名 `vx_<product_code>_db`，角色 `<code>_svc`」；§7「最小权限服务角色 + 列锁」 |
+| **本仓现状** | 库 `czghagent`、角色 `czghagent`、全量授权、无列锁 |
+| **实现处标注** | `docker-compose.yml` 的 mysql 服务注释 |
+| **理由** | 改库名要动 Flyway 迁移、连接串与本地栈重建，与 TD-001 是同一件事的两半。 |
+| **风险** | 跨产品对账时按 `vx_*_db` 找不到本产品的库；角色权限过大，一次注入的爆炸半径是整库而不是白名单列。 |
+| **回收条件** | 同 TD-001。 |
+
+### TD-003 · MySQL 而非 Postgres
+
+| | |
+| --- | --- |
+| **规范条款** | 无明文条款，但组织内已部署产品（arda / karda / runos / atlas / varda）**全部是 Postgres**，容器命名规约 `vx-<stack>-<engine>-db-<env>` 也是按 pg 写的 |
+| **本仓现状** | MySQL 8.4 |
+| **实现处标注** | `docker-compose.yml` 的 mysql 服务注释 |
+| **理由** | 引擎迁移的成本远大于前两条，且 owner 2026-09-10 明确「当前是 mysql，还需要修正」——即已知、待排期，不是疏漏。 |
+| **风险** | 运维要维护第二种引擎；备份、监控、db-maintenance 的白名单函数都要写两套。 |
+| **回收条件** | 与 TD-001/002 合并成一次库层整改，或 owner 明确接受长期双引擎。 |
+
+### TD-004 · 三个镜像，而非级联规则的 `{code}-app` 一个
+
+| | |
+| --- | --- |
+| **规范条款** | 基建登记表 §4「镜像 `{code}-app`」 |
+| **本仓现状** | `tenderforge-api` / `tenderforge-ai` / `tenderforge-web` |
+| **实现处标注** | `.github/workflows/build.yml` 抬头注释 |
+| **理由** | 产品形态就是三套技术栈（Java / Python / 前端），塞进一个镜像要么装三套运行时、要么放弃独立扩缩。 |
+| **风险** | 三个镜像版本可能错开，表现是前端调一个后端还没有的接口拿 404，两侧都不报「版本不匹配」。 |
+| **缓解** | `build.yml` 用 matrix 并行但**共用一个先算好的 tag**，且 `fail-fast: true`——宁可一个都不推，也不推出两新一旧。tag 单独成作业算，不在 matrix 里各算各的。 |
+| **回收条件** | 不回收。这是形态差异，已回报平台（vxture-platform#263）。 |
+
+### TD-005 · `DEPLOY_STAGE` 是运行时值，不是构建期烤进镜像的
+
+| | |
+| --- | --- |
+| **规范条款** | 025 §4「`stage` 必须在构建期注入镜像，运行时只读取」 |
+| **本仓现状** | Dockerfile 里有 `ARG DEPLOY_STAGE=local` → `ENV`，但 compose 的 `environment` 仍会用宿主机 `.env` 的值覆盖 |
+| **实现处标注** | 三个 Dockerfile 的 ARG 块注释 + `application.yml` |
+| **理由** | 同一个镜像也用于本地开发，而 `local` 是唯一不触发「拒绝以替身启动」那道闸门的一档。若烤死成 `production`，本地栈起不来；烤成 `dev`，`dev` 已算部署态，同样起不来。 |
+| **缓解** | compose 里写成 `${DEPLOY_STAGE:?}` 而不是 `${DEPLOY_STAGE:-local}`——**没有默认值**。漏配时 compose 直接拒绝启动，而不是静默落到 `local` 放行替身。`version`/`gitSha`/`buildTime` 三个仍严格走构建期注入，不受此条影响。 |
+| **回收条件** | 若将来本地开发改用单独的 compose override（不复用生产镜像），可以把 stage 一并烤进镜像。 |
+
+---
+
 ## 14. 验证与接手
 
 ### 14.1 自动验证
@@ -1003,8 +1069,8 @@ mvn test
 
 Set-Location ../..
 $env:GITHUB_PACKAGES_TOKEN = gh auth token
-docker compose --env-file deploy/.env -f deploy/docker-compose.yml config
-docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d --build
+docker compose config
+docker compose up -d --build
 git diff --check
 ```
 
@@ -1023,7 +1089,7 @@ git diff --check
 | 长任务 | `application-command/workflow` | Task Queue、幂等、Compose worker、章节 6/13 |
 | 表结构 | `project-name-start/resources/sql` 新 V23+ | JDBC 仓储、领域模型、章节 10 |
 | 文件/排版 | Infrastructure exporter、Python `document_*` | QA、私有存储、章节 9 |
-| 部署变量 | `deploy/docker-compose.yml`、`.env.example` | Java/Python config、README、章节 12 |
+| 部署变量 | `docker-compose.yml`、`.env.example` | Java/Python config、README、章节 12 |
 
 接手时建议先通过 Compose 启动系统，再按“创建标书 -> 上传 -> 冻结解读 -> 冻结目录 -> 生成
 正文 -> 审查冻结 -> 排版下载”完成一次纵向验证。任何功能、接口、状态、表或配置变化都在同一

@@ -11,11 +11,11 @@
 
 | 项 | 状态 |
 | --- | --- |
-| 远端仓库 | `github.com/vxture/vx-agent-bid`，`main` 停在初始提交 `6759760` |
+| 远端仓库 | `github.com/vxture/vx-agent-tenderforge`，`main` 停在初始提交 `6759760` |
 | 本地未推送 | `feat/platform-integration` 上 **23 个提交** |
 | `.github/workflows/` | **不存在**（基准仓有 8 个工作流） |
 | `deploy/deploy.sh` | **不存在**（基准仓有 159 行的宿主机生命周期脚本） |
-| `deploy/.env.example` | 存在，但**比 `docker-compose.yml` 少 36 个键** |
+| `.env.example` | 存在，但**比 `docker-compose.yml` 少 36 个键** |
 | 分支保护 / ruleset | 未应用 |
 | GitHub Environment | 未创建 |
 
@@ -106,7 +106,7 @@
 
 **本产品直接复用，不新增组织级条目。**
 
-### 3.2 仓库级（`vx-agent-bid`）
+### 3.2 仓库级（`vx-agent-tenderforge`）
 
 治理规范 §3 把仓库级限定为「仓库专属的**公开标识**」——不是凭证，不是主机信息。
 
@@ -188,7 +188,7 @@ Insights → Dependency graph → Dependabot 手动跑一次 "Check for updates"
 无法真正生效**——这两件事不能分别排期。
 
 需要交给平台线的两个具体值：
-- webhook 投递地址：`https://tender.vxture.com/api/platform/provisioning/webhook`
+- webhook 投递地址：`https://tenderforge.vxture.com/api/platform/provisioning/webhook`
 - 需要授权的 Atlas endpoint：见 `atlas_endpoints.required_endpoint_codes()`；
   授权到位前保持 `ATLAS_USE_DEDICATED_ENDPOINTS=false`，全部走 `chat/default`
 
@@ -355,13 +355,20 @@ WorkflowExecutionStarted → WorkflowTaskScheduled/Started/Completed
 ~~**Maven 依赖树在 CI 里怎么解析**~~ —— 已解决，见 §4b.1。
 ~~**依赖告警的整顿窗口**~~ —— 已做完，142 → 0，见 §4b.2。
 ~~**Temporal SDK 1.38.0 与服务端 1.27.2 的配合**~~ —— 已在本地整栈实测，见 §4c。
+~~**端口**~~ —— owner 2026-09-10 分配 4050/4051（L3 #5），两张登记册已改。
+~~**部署主机与栈根目录**~~ —— worker-02 / `/srv/md0/tenderforge`。
+~~**DB 结构变更路径**~~ —— owner 决定本轮不动，已登记为 TD-001
+（详细设计 §13b），连同 TD-002/003 一起等库层整改排期。
+~~**三镜像的 tag 与推送策略**~~ —— 同 SHA 同批，`build.yml` 已实现并登记为 TD-004。
+
+**仍未决**：是否要 beta 环境。端口子块里 4051 已经为它预留，开不开是资源决定。
 
 ---
 
 ## 6. 执行顺序
 
 **阶段一：把仓库准备好（不依赖任何外部输入）**
-1. 补齐 `deploy/.env.example` 的 36 个键，删掉 restate 的端口。
+1. 补齐 `.env.example` 的 36 个键，删掉 restate 的端口。
 2. 写 `.github/workflows/ci.yml`（Java + Python + 前端三套测试与覆盖率）。
 3. 首次推送 `main`，让 CI 跑一次产出必需检查的 context。
 4. 开启 secret scanning + push protection（治理规范 §2 的第一层）。

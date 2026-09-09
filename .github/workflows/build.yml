@@ -1,0 +1,283 @@
+name: build-images
+
+# 可复用的镜像构建，由 deploy.yml 在路由到环境之后调用。
+#
+# 与基准产品 vxtpl 的关键差异：**本产品是三个镜像**（java api / python ai /
+# web），而 vxtpl 是单体一个。这偏离基建登记表 §4 的「镜像 {code}-app」，
+# 已登记为 **TD-004**（docs/30-design/10-detailed-design.md §13b），
+# 并已回报平台（vxture-platform#263）。三者必须**同一个 SHA、同一批 tag**——各自按分支
+# 最新构建会让 api 与 web 版本错开，而错开的表现是前端调一个后端还没有的接口，
+# 拿到 404，两侧都不会说「版本不匹配」。所以这里用 matrix 构建、共用一个
+# image_tag，而不是三个独立的 workflow。
+#
+# 双仓：GHCR 主 + 阿里云 ACR 备（治理规范 §5 domestic profile，
+# 部署机 worker-02 在 tailnet 内）。
+#
+# 作业名 `docker-build` 是稳定契约。
+
+on:
+  workflow_call:
+    inputs:
+      pass_sha:
+        description: 要构建并打 tag 的提交 SHA
+        required: true
+        type: string
+    secrets:
+      NODE_AUTH_TOKEN:
+        required: true
+      ALIYUN_ACR_USERNAME:
+        required: true
+      ALIYUN_ACR_PASSWORD:
+        required: true
+    outputs:
+      image_tag:
+        description: deploy 作业据以拉取的不可变 sha-<short> tag
+        value: ${{ jobs.docker-build.outputs.image_tag }}
+  workflow_dispatch:
+    inputs:
+      pass_sha:
+        description: 要构建的提交 SHA（留空则取分支 HEAD）
+        required: false
+        type: string
+        default: ''
+
+# 下面三个 docker/* action 全部**钉到完整 commit SHA**（治理规范 §9）：
+# 它们经手 ACR 密码、GHCR 令牌与 GitHub Packages 令牌，而 `@v4` 这样的
+# 浮动 tag 是可以被移动的——移动之后这里就会运行新代码，拿着这些凭据。
+# 版本号写在行尾注释里，升级时 SHA 与注释一起改。
+#
+# 权限按作业给，不在 workflow 层开：meta 作业只算几个字符串，
+# 不需要 packages: write。workflow 层的写权限会连带给到每一个作业。
+
+jobs:
+  # ── 先算一次 tag，三个镜像共用 ────────────────────────────────────────────
+  # 单独成作业而不是在 matrix 里各算各的：matrix 的三个分支各自跑一遍
+  # date/case，理论上能算出不同的值，而"三个镜像 tag 不一致"正是本作业要防的事。
+  meta:
+    name: image-metadata
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      image_tag: ${{ steps.meta.outputs.image_tag }}
+      ref_tag: ${{ steps.meta.outputs.ref_tag }}
+      app_version: ${{ steps.meta.outputs.app_version }}
+      build_time: ${{ steps.meta.outputs.build_time }}
+      deploy_stage: ${{ steps.meta.outputs.deploy_stage }}
+      sha: ${{ steps.meta.outputs.sha }}
+    steps:
+      - name: Compute image metadata
+        id: meta
+        shell: bash
+        env:
+          CALLER_SHA: ${{ inputs.pass_sha }}
+          DEFAULT_SHA: ${{ github.sha }}
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          set -euo pipefail
+          sha="${CALLER_SHA:-$DEFAULT_SHA}"
+          test -n "$sha"
+
+          # 只有 v*.*.* tag 才是 production；其余（手动 dispatch、分支构建）
+          # 一律 dev。
+          case "$REF_TYPE:$REF_NAME" in
+            tag:v*) stage="production" ;;
+            *)      stage="dev" ;;
+          esac
+
+          # 不可变 tag 里**带上 stage**，不只是提交号。原因：DEPLOY_STAGE 是
+          # 构建期烤进镜像的，而下面的 retag-by-digest 只认这个 tag。不带后缀
+          # 的话，某个提交先被手动 dispatch 构建过（stage=dev），之后同一提交
+          # 发版时会被直接 retag 送上生产——于是一个 DEPLOY_STAGE 写着 dev 的
+          # 镜像跑在生产上，而 dev 恰好是**不触发**「拒绝以替身启动」那道闸门的
+          # 那一档。界面一切正常，四条通道全是替身。
+          short_sha="${sha::7}"
+          if [ "$stage" = "production" ]; then
+            echo "image_tag=sha-$short_sha" >> "$GITHUB_OUTPUT"
+          else
+            echo "image_tag=sha-$short_sha-$stage" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [ "$REF_TYPE" = "tag" ]; then app_version="$REF_NAME"; else app_version="dev"; fi
+          {
+            echo "sha=$sha"
+            echo "ref_tag=$REF_NAME"
+            echo "app_version=$app_version"
+            echo "build_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "deploy_stage=$stage"
+          } >> "$GITHUB_OUTPUT"
+
+  # ── 三个镜像并行构建，共用上面那一个 tag ────────────────────────────────
+  docker-build:
+    name: docker-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: meta
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image_tag: ${{ needs.meta.outputs.image_tag }}
+    strategy:
+      fail-fast: true   # 一个失败就停：宁可一个都不推，也不要推出两新一旧
+      matrix:
+        include:
+          - image: tenderforge-api
+            dockerfile: backend/project-name-java/Dockerfile
+            needs_packages_token: false
+          - image: tenderforge-ai
+            dockerfile: backend/project-name-python/Dockerfile
+            needs_packages_token: false
+          - image: tenderforge-web
+            dockerfile: frontend/project-name-web/Dockerfile
+            needs_packages_token: true
+    env:
+      GHCR_NAMESPACE: vxture
+      ACR_REGISTRY: ${{ vars.ALIYUN_ACR_REGISTRY }}
+      ACR_NAMESPACE: ${{ vars.ALIYUN_ACR_NAMESPACE }}
+    steps:
+      - name: Validate registry secrets
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+          ALIYUN_ACR_USERNAME: ${{ secrets.ALIYUN_ACR_USERNAME }}
+          ALIYUN_ACR_PASSWORD: ${{ secrets.ALIYUN_ACR_PASSWORD }}
+        run: |
+          set -euo pipefail
+          # ACR namespace 按产品线分：智能体线（L3）是 vx-agentstudio。
+          # 值从 vars 取、不硬编码——错 namespace 的表现是部署那天
+          # `pull access denied / repository does not exist`，构建期毫无征兆。
+          test -n "$ACR_REGISTRY"  || { echo "::error::缺少 vars.ALIYUN_ACR_REGISTRY"; exit 1; }
+          test -n "$ACR_NAMESPACE" || { echo "::error::缺少 vars.ALIYUN_ACR_NAMESPACE"; exit 1; }
+          test -n "$ALIYUN_ACR_USERNAME"
+          test -n "$ALIYUN_ACR_PASSWORD"
+          test -n "$NODE_AUTH_TOKEN"
+
+      - name: Checkout passed revision
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.meta.outputs.sha }}
+
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+        continue-on-error: true
+
+      - name: Set up Docker Buildx (retry)
+        if: ${{ steps.buildx.outcome == 'failure' }}
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Login to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to Aliyun ACR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.ACR_REGISTRY }}
+          username: ${{ secrets.ALIYUN_ACR_USERNAME }}
+          password: ${{ secrets.ALIYUN_ACR_PASSWORD }}
+
+      - name: Decide build vs retag
+        id: decide
+        shell: bash
+        env:
+          IMAGE: ${{ matrix.image }}
+          IMAGE_TAG: ${{ needs.meta.outputs.image_tag }}
+        run: |
+          set -euo pipefail
+          ghcr_repo="ghcr.io/${GHCR_NAMESPACE}/${IMAGE}"
+          acr_repo="${ACR_REGISTRY}/${ACR_NAMESPACE}/${IMAGE}"
+          # 这个提交在**两个仓里都**已经有同 tag 的镜像才跳过构建。
+          # 只查一个仓会让另一个仓永久缺这个 tag，而缺的那边正是兜底路径——
+          # 平时不用，用到的时候才发现没有。
+          if docker buildx imagetools inspect "${ghcr_repo}:${IMAGE_TAG}" >/dev/null 2>&1 \
+            && docker buildx imagetools inspect "${acr_repo}:${IMAGE_TAG}" >/dev/null 2>&1; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # 前端要从 GitHub Packages 取 @vxture/*。走 BuildKit secret 而不是
+      # build-arg：build-arg 会留在镜像层历史里，也会被导出进 mode=max 的
+      # gha 缓存——任何能 pull 到镜像或读到缓存的人都拿得到那个令牌。
+      - name: Write the packages token for BuildKit
+        if: ${{ matrix.needs_packages_token && steps.decide.outputs.build == 'true' }}
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s' "$NODE_AUTH_TOKEN" > /tmp/github_packages_token
+
+      - name: Build and push
+        if: ${{ steps.decide.outputs.build == 'true' }}
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          # buildx 默认会附一个 provenance 证明清单，其占位层的 media type 是
+          # application/vnd.oci.empty.v1+json。阿里云 ACR 对这个类型回
+          # "unknown manifest class" 导致推送失败，而 GHCR 完全能接受——
+          # 于是表现成"主仓推成功、备仓推失败"。关掉两种证明，镜像本身不变。
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+          build-args: |
+            APP_VERSION=${{ needs.meta.outputs.app_version }}
+            GIT_SHA=${{ needs.meta.outputs.sha }}
+            BUILD_TIME=${{ needs.meta.outputs.build_time }}
+            DEPLOY_STAGE=${{ needs.meta.outputs.deploy_stage }}
+          secrets: |
+            github_packages_token=${{ secrets.NODE_AUTH_TOKEN }}
+          tags: |
+            ghcr.io/${{ env.GHCR_NAMESPACE }}/${{ matrix.image }}:${{ needs.meta.outputs.image_tag }}
+            ghcr.io/${{ env.GHCR_NAMESPACE }}/${{ matrix.image }}:${{ needs.meta.outputs.ref_tag }}
+            ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/${{ matrix.image }}:${{ needs.meta.outputs.image_tag }}
+            ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/${{ matrix.image }}:${{ needs.meta.outputs.ref_tag }}
+
+      - name: Shred the token
+        if: always()
+        shell: bash
+        run: rm -f /tmp/github_packages_token
+
+      - name: Retag unchanged image by digest
+        if: ${{ steps.decide.outputs.build == 'false' }}
+        shell: bash
+        env:
+          IMAGE: ${{ matrix.image }}
+          IMAGE_TAG: ${{ needs.meta.outputs.image_tag }}
+          REF_TAG: ${{ needs.meta.outputs.ref_tag }}
+        run: |
+          set -euo pipefail
+          for repo in \
+            "ghcr.io/${GHCR_NAMESPACE}/${IMAGE}" \
+            "${ACR_REGISTRY}/${ACR_NAMESPACE}/${IMAGE}"; do
+            # 治理规范 §5：跨 registry 拷贝必须带退避重试。GHCR 在并发下会对
+            # 部分镜像回 403 Forbidden / denied——**那是限流，不是权限问题**。
+            # 判据是同一次运行、同一套凭证、同一份代码，有的成功有的失败；
+            # 权限故障不会挑镜像。照字面读 403 会把人送去查 token 权限，
+            # 那条路是死的。
+            ok=false
+            for delay in 0 5 15 45; do
+              [ "$delay" -gt 0 ] && sleep "$delay"
+              if docker buildx imagetools create \
+                   -t "${repo}:${IMAGE_TAG}" -t "${repo}:${REF_TAG}" \
+                   "${repo}:${IMAGE_TAG}"; then
+                ok=true; break
+              fi
+              echo "拷贝 ${repo} 失败，退避后重试（疑似 GHCR 限流，非权限）" >&2
+            done
+            [ "$ok" = true ] || {
+              echo "::error::${repo} 拷贝重试耗尽——疑似 GHCR 限流，非权限问题；不要去查 token 权限" >&2
+              exit 1
+            }
+          done

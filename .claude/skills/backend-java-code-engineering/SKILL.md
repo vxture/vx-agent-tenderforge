@@ -9,7 +9,7 @@ last_updated: 2026-08-14
 
 ## 开始前
 
-1. 阅读根 `AGENTS.md` 和 `doc/DETAILED_DESIGN.md`。
+1. 阅读根 `AGENTS.md` 和 `docs/30-design/10-detailed-design.md`。
 2. 查看目标包的 `package-info.java`、模块 `pom.xml` 和相邻测试。
 3. 确认变更属于 Domain、Application Command/Query、Infrastructure、Web 或 Start。
 
@@ -52,6 +52,6 @@ mvn clean package
 ```
 
 Java 必须使用 JDK 25。接口、状态、表、任务队列或配置变更时，同步更新
-`doc/DETAILED_DESIGN.md`，不创建平行规格或过程文档。
+`docs/30-design/10-detailed-design.md`，不创建平行规格或过程文档。
 
 实现细节以当前仓库代码、相邻测试、根 `AGENTS.md` 和详细设计为准，不引用外部项目模板。

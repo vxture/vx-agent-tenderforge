@@ -7,7 +7,7 @@ name: ci
 # 作业名是稳定契约——改名会直接让分支保护失效，而失效的表现是
 # 「保护还在页面上，但没有任何检查被要求」。
 #
-# 与基准产品 vxtpl 的形态差异（见 doc/DEPLOYMENT_PLAN.md §2）：本产品是
+# 与基准产品 vxtpl 的形态差异（见 docs/50-deployment/10-deployment-plan.md §2）：本产品是
 # Java + Python + 前端三套，三个镜像；所以 build 与 test-coverage 都是
 # 三段并行的矩阵，而不是单个 pnpm 命令。
 
@@ -178,6 +178,39 @@ jobs:
       # 保护就整体弱一格，而没有任何地方会提示。
       - name: Ruleset guardrail (no bypass, five checks still required)
         run: python scripts/guardrails/check_ruleset.py
+
+      # ruff 一直在 pyproject 里配着，却从没进过 CI——于是它慢慢积了 6 条：
+      # 一个真正没用的 import、两处 import 顺序、一处该用 datetime.UTC。
+      # 配了不跑的 linter 等于没配，而且比没配更坏：它让人以为查过了。
+      - name: Python lint (ruff)
+        working-directory: backend/project-name-python
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet --disable-pip-version-check ruff==0.11.13
+          python -m ruff check czghagent_ai tests
+
+      # 本仓的 shell 脚本要挂进容器执行、要在部署主机上跑，出错的代价比
+      # 一般脚本高。shellcheck 第一次跑就在 sca-scan.sh 里挑出两处
+      # ${var#$pattern} 的未加引号展开——那类问题在正常路径上完全不显形。
+      #
+      # 版本必须钉死。第一版用 `apt-get install shellcheck`，结果本地
+      # （koalaman/shellcheck:stable 容器）干净、CI 红——runner 镜像里那个
+      # 版本多报一条 SC2015。**本地与 CI 跑的不是同一个 linter**，那比不跑
+      # 更消耗人：每次都要推一遍才知道结果。钉版本 + 校验 sha256，与
+      # osv-scanner、gitleaks 同一套做法。
+      - name: Shell lint (shellcheck)
+        shell: bash
+        env:
+          SHELLCHECK_VERSION: "0.10.0"
+        run: |
+          set -euo pipefail
+          sha256=6c881ab0698e4e6ea235245f22832860544f17ba386442fe7e9d629f8cbedf87
+          url="https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          curl -fsSL --proto "=https" --proto-redir "=https" --tlsv1.2 "$url" -o /tmp/shellcheck.tar.xz
+          echo "${sha256}  /tmp/shellcheck.tar.xz" | sha256sum -c -
+          tar -xJf /tmp/shellcheck.tar.xz -C /tmp
+          /tmp/shellcheck-v${SHELLCHECK_VERSION}/shellcheck --version
+          /tmp/shellcheck-v${SHELLCHECK_VERSION}/shellcheck deploy/deploy.sh scripts/ci/sca-scan.sh
 
   # ── 质量闸门（聚合器；稳定的必需检查名）─────────────────────────────────
   quality-gate:

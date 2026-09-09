@@ -1,0 +1,31 @@
+# 跨编辑器的最小共识。行尾是这里唯一真正要紧的一条：本仓的 shell 脚本要
+# 挂进容器执行，CRLF 会让容器内的 sh 报 `set: -: invalid option`——
+# 本轮已经踩过一次（deploy/mysql/init-temporal.sh）。
+# .gitattributes 管版本库里的形态，这份管编辑器写出来的形态，两者都要。
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{java,xml}]
+indent_style = space
+indent_size = 4
+
+[*.{yml,yaml,json,ts,tsx,js,jsx,mjs,css}]
+indent_style = space
+indent_size = 2
+
+[*.py]
+indent_style = space
+indent_size = 4
+
+[*.md]
+# Markdown 的行尾双空格是有意义的换行，不能被裁掉。
+trim_trailing_whitespace = false
+
+[*.{png,jpg,jpeg,gif,ico,woff,woff2}]
+insert_final_newline = false
+trim_trailing_whitespace = false

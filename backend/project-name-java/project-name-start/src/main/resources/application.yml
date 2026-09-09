@@ -49,6 +49,11 @@ app:
   # 构建溯源：由镜像构建时从 git ref 注入，而不是在这里写死。
   # /api/health 报的必须是「实际构建出来的那个」，不是谁手打进配置的那个。
   version: ${APP_VERSION:dev}
+  # 构建期注入的身份（治理规范 025 §4.1/§4.2），liveness 端点原样透出。
+  # 这三个值来自镜像 ENV，**不经过宿主机 .env**——它们回答的是「这是哪次构建」，
+  # 一旦能在运行时改写就不再是那个问题的答案了。缺失时诚实兜底 unknown。
+  git-sha: ${GIT_SHA:unknown}
+  build-time: ${BUILD_TIME:unknown}
   # 部署阶段。production 时任何 mock 实现必须拒绝启动——
   # 让降级由守卫拦住，而不是靠部署的人记得改配置。
   deploy-stage: ${DEPLOY_STAGE:local}

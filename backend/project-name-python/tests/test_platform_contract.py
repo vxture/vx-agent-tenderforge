@@ -156,7 +156,7 @@ def test_liveness_probe_has_no_dependencies(client: TestClient) -> None:
     response = client.get("/health")
 
     assert response.status_code == 200
-    assert response.json()["status"] == "UP"
+    assert response.json()["status"] == "ok"
 
 
 # ── 产品身份 ────────────────────────────────────────────────────────────────

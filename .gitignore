@@ -61,7 +61,6 @@ venv/
 .env.*
 !.env.example
 !*.env.example
-deploy/.env
 deploy/dify/volumes/app/
 deploy/dify/volumes/certbot/
 deploy/dify/volumes/db/

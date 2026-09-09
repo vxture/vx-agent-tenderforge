@@ -1,0 +1,248 @@
+name: rollback
+
+# 手动回滚到一个**曾经部署过**的构建。不重新构建、不改代码——
+# 只把三个镜像换回那个 SHA 对应的 tag 再起一次栈。
+#
+# 与 deploy.yml 共用同一个 `production` 环境，所以同样停在审批门上。
+# 回滚是紧急动作，但「紧急」不是「不用人看」——回滚到一个错的 SHA
+# 与部署一个错的版本一样坏，而前者往往发生在没人冷静的时候。
+#
+# **回滚不动数据库。** Flyway 迁移是单向的：V1–V30 里任何一个改过表结构，
+# 回到旧镜像意味着旧代码对着新结构跑。这一条必须在按下按钮之前想清楚——
+# 所以下面把它做成一个必须手打的确认输入，而不是一行说明文字。
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_sha:
+        description: "要回滚到的提交 SHA（必须是**曾经部署过**的构建）"
+        required: true
+        type: string
+      acknowledge_db_not_rolled_back:
+        description: "数据库不会回滚。确认这个 SHA 与当前库结构兼容，输入 yes"
+        required: true
+        type: string
+        default: "no"
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: read
+
+env:
+  PRODUCT_CODE: tenderforge
+
+jobs:
+  rollback:
+    name: rollback
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: read
+      issues: write
+    environment:
+      name: production
+    steps:
+      - name: Check the database acknowledgement
+        shell: bash
+        env:
+          ACK: ${{ inputs.acknowledge_db_not_rolled_back }}
+          TARGET_SHA: ${{ inputs.target_sha }}
+        run: |
+          set -euo pipefail
+          [ "$ACK" = "yes" ] || {
+            echo "::error::未确认数据库不回滚这一条。" >&2
+            echo "Flyway 迁移单向：回到旧镜像意味着旧代码对着新结构跑。" >&2
+            echo "先确认目标 SHA 与当前库结构兼容，再把输入改成 yes。" >&2
+            exit 1
+          }
+          # 短 SHA 也接受，但必须是十六进制——手打错一个字符的表现是
+          # 拉不到镜像，而那个错误信息离「你打错了」很远。
+          echo "$TARGET_SHA" | grep -qE '^[0-9a-f]{7,40}$' || {
+            echo "::error::target_sha 不像一个提交 SHA：$TARGET_SHA" >&2
+            exit 1
+          }
+
+      - name: Checkout deploy sources at the target revision
+        uses: actions/checkout@v7
+        with:
+          # 检出**目标那次**的部署脚本与 compose，不是 main 上的最新版。
+          # 用新脚本去起旧镜像，等于把一个从没一起跑过的组合放上生产。
+          ref: ${{ inputs.target_sha }}
+
+      - name: Validate deployment secrets
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          ALIYUN_ACR_REGISTRY: ${{ vars.ALIYUN_ACR_REGISTRY }}
+          ALIYUN_ACR_NAMESPACE: ${{ vars.ALIYUN_ACR_NAMESPACE }}
+          TAILSCALE_OAUTH_CLIENT_ID: ${{ secrets.TAILSCALE_OAUTH_CLIENT_ID }}
+          TAILSCALE_OAUTH_CLIENT_SECRET: ${{ secrets.TAILSCALE_OAUTH_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          missing=()
+          for key in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS \
+                     ALIYUN_ACR_REGISTRY ALIYUN_ACR_NAMESPACE \
+                     TAILSCALE_OAUTH_CLIENT_ID TAILSCALE_OAUTH_CLIENT_SECRET; do
+            [ -n "${!key:-}" ] || missing+=("$key")
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::环境缺少这些配置：${missing[*]}" >&2
+            exit 1
+          fi
+
+      - name: Join tailnet and prepare SSH
+        uses: ./.github/actions/tailnet-ssh-connect
+        with:
+          tailscale-oauth-client-id: ${{ secrets.TAILSCALE_OAUTH_CLIENT_ID }}
+          tailscale-oauth-secret: ${{ secrets.TAILSCALE_OAUTH_CLIENT_SECRET }}
+          tailscale-tag: ${{ vars.TAILSCALE_OAUTH_CLIENT_TAG }}
+          deploy-host: ${{ secrets.DEPLOY_HOST }}
+          deploy-port: ${{ secrets.DEPLOY_PORT }}
+          deploy-ssh-key: ${{ secrets.DEPLOY_SSH_KEY }}
+          deploy-ssh-passphrase: ${{ secrets.DEPLOY_SSH_KEY_PASSPHRASE }}
+          deploy-known-hosts: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+
+      - name: Confirm the target images exist before touching the stack
+        shell: bash
+        env:
+          TARGET_SHA: ${{ inputs.target_sha }}
+          ALIYUN_ACR_REGISTRY: ${{ vars.ALIYUN_ACR_REGISTRY }}
+          ALIYUN_ACR_NAMESPACE: ${{ vars.ALIYUN_ACR_NAMESPACE }}
+          ALIYUN_ACR_USERNAME: ${{ secrets.ALIYUN_ACR_USERNAME }}
+          ALIYUN_ACR_PASSWORD: ${{ secrets.ALIYUN_ACR_PASSWORD }}
+        run: |
+          set -euo pipefail
+          image_tag="sha-${TARGET_SHA::7}"
+          echo "$image_tag" > /tmp/image_tag
+          printf '%s' "${{ github.token }}" \
+            | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          # **先确认三个镜像都在**，再动生产栈。少确认这一步的代价是：
+          # 拉到第二个才失败，而那时第一个容器已经被换掉了——栈处在
+          # 一个既不是新版也不是旧版的状态。
+          missing=()
+          for image in "${PRODUCT_CODE}-api" "${PRODUCT_CODE}-ai" "${PRODUCT_CODE}-web"; do
+            docker buildx imagetools inspect "ghcr.io/vxture/${image}:${image_tag}" >/dev/null 2>&1 \
+              || missing+=("$image")
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::GHCR 上找不到 ${image_tag} 的这些镜像：${missing[*]}" >&2
+            echo "target_sha 必须是**曾经部署过**的构建——没构建过就没有这个 tag。" >&2
+            exit 1
+          fi
+          echo "三个镜像在 GHCR 上都有 ${image_tag}"
+
+      - name: Roll back over SSH
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_DIR: ${{ secrets.DEPLOY_DIR }}
+          TARGET_SHA: ${{ inputs.target_sha }}
+          ALIYUN_ACR_REGISTRY: ${{ vars.ALIYUN_ACR_REGISTRY }}
+          ALIYUN_ACR_NAMESPACE: ${{ vars.ALIYUN_ACR_NAMESPACE }}
+          ALIYUN_ACR_USERNAME: ${{ secrets.ALIYUN_ACR_USERNAME }}
+          ALIYUN_ACR_PASSWORD: ${{ secrets.ALIYUN_ACR_PASSWORD }}
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          port="${DEPLOY_PORT:-22}"
+          # DEPLOY_DIR 必须精确到**含 compose + .env 的那一层**（治理规范 §6）。
+          # 差一级的表现是镜像能拉、compose 找不到 env_file 而失败（varda 教训）。
+          deploy_dir="${DEPLOY_DIR:-/srv/md0/${PRODUCT_CODE}}"
+          image_tag="$(cat /tmp/image_tag)"
+          ssh_opts=(-i ~/.ssh/deploy_key -p "$port" -o ServerAliveInterval=30 \
+                    -o ServerAliveCountMax=20 -o ConnectTimeout=30)
+
+          # 投递保持**仓内的相对结构**：compose 在顶层、deploy/ 是它的子目录。
+          # 压平成一层会让 compose 里的 ./deploy/mysql/init-temporal.sh 失效，
+          # 而失效的表现是 temporal-db-init 挂到一个空路径、静默什么都不做。
+          stage="$(mktemp -d)"
+          cp -a deploy "$stage/deploy"
+          cp -a docker-compose.yml "$stage/docker-compose.yml"
+          # --delete 会清掉目标目录里不在源里的东西，所以三样必须排除：
+          # 运维的 .env（删了会被下次 bootstrap 用 CI 版本覆盖，运维改过的
+          # 值无声消失）、VERSION（溯源）、data（容器写的 root 所有的持久
+          # 数据，碰它下次 rsync 会以权限错误失败）。
+          rsync -az --delete --exclude='.env' --exclude='VERSION' --exclude='data' \
+            -e "ssh -i ~/.ssh/deploy_key -p $port -o ConnectTimeout=30" \
+            "$stage/" "$DEPLOY_USER@$DEPLOY_HOST:$deploy_dir/"
+          rm -rf "$stage"
+          ssh "${ssh_opts[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "printf '%s\n' '$TARGET_SHA' > '$deploy_dir/VERSION'"
+
+          cat > /tmp/remote-rollback.sh <<'REMOTE_SCRIPT'
+          set -euo pipefail
+          cd "$REPO_DIR"
+          export IMAGE_REGISTRY="ghcr.io"
+          export IMAGE_NAMESPACE="vxture"
+          export IMAGE_TAG="$IMAGE_TAG"
+          export FALLBACK_IMAGE_REGISTRY="$ALIYUN_ACR_REGISTRY"
+          export FALLBACK_IMAGE_NAMESPACE="$ALIYUN_ACR_NAMESPACE"
+          if [ -n "${GHCR_TOKEN:-}" ]; then
+            printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+          fi
+          if [ -n "${ALIYUN_ACR_USERNAME:-}" ] && [ -n "${ALIYUN_ACR_PASSWORD:-}" ]; then
+            for attempt in 1 2 3 4 5; do
+              printf '%s' "$ALIYUN_ACR_PASSWORD" \
+                | timeout 45 docker login "$ALIYUN_ACR_REGISTRY" -u "$ALIYUN_ACR_USERNAME" --password-stdin \
+                && break || sleep $((attempt * 5))
+            done
+          fi
+          # 回滚不 prune：被换下来的那个镜像正是「万一回滚也不对」时要回去的
+          # 地方。`all` 里带 prune，所以这里逐步跑。
+          bash deploy/deploy.sh environment
+          bash deploy/deploy.sh directories
+          bash deploy/deploy.sh start
+          bash deploy/deploy.sh verify
+          REMOTE_SCRIPT
+          scp -i ~/.ssh/deploy_key -P "$port" -o ConnectTimeout=30 \
+            /tmp/remote-rollback.sh "$DEPLOY_USER@$DEPLOY_HOST:/tmp/remote-rollback.sh"
+
+          remote_env=(
+            "PRODUCT_CODE=$PRODUCT_CODE" "REPO_DIR=$deploy_dir" "IMAGE_TAG=$image_tag"
+            "ALIYUN_ACR_REGISTRY=$ALIYUN_ACR_REGISTRY" "ALIYUN_ACR_NAMESPACE=$ALIYUN_ACR_NAMESPACE"
+            "ALIYUN_ACR_USERNAME=$ALIYUN_ACR_USERNAME" "ALIYUN_ACR_PASSWORD=$ALIYUN_ACR_PASSWORD"
+            "GHCR_USERNAME=$GHCR_USERNAME" "GHCR_TOKEN=$GHCR_TOKEN"
+          )
+          remote_cmd=""
+          for item in "${remote_env[@]}"; do
+            key="${item%%=*}"; value="${item#*=}"
+            printf -v escaped '%q=%q ' "$key" "$value"
+            remote_cmd+="$escaped"
+          done
+          remote_cmd+="bash /tmp/remote-rollback.sh"
+          printf '%s\n' "$remote_cmd" | ssh "${ssh_opts[@]}" "$DEPLOY_USER@$DEPLOY_HOST" bash -s
+
+      - name: Record the rollback
+        if: always()
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const sha = '${{ inputs.target_sha }}';
+            const outcome = '${{ job.status }}';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            // 回滚必须留痕：它是紧急动作，事后复盘时「什么时候回滚到了哪个
+            // 版本、谁按的」往往是唯一能解释生产行为变化的线索。
+            await github.rest.issues.create({
+              owner: context.repo.owner, repo: context.repo.repo,
+              title: `Rollback to ${sha.substring(0, 7)} — ${outcome}`,
+              body: [
+                `生产回滚到 \`${sha}\`，结果 **${outcome}**。`,
+                `触发人：@${context.actor}`,
+                `运行记录：${runUrl}`,
+                '',
+                '**数据库没有回滚**——Flyway 迁移是单向的。如果这次回滚跨过了',
+                '一个改表结构的版本，现在跑的是旧代码对着新结构。',
+              ].join('\n'),
+              labels: ['rollback'],
+            });
