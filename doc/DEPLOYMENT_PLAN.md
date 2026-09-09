@@ -241,41 +241,61 @@ osv-scanner 直接对着仓内清单文件扫，三个生态的成色完全不�
 然后静默跳过；`--experimental-disable-plugins` 传一个不存在的插件名**不报错**，
 所以那两个 flag 只用在不计退出码的盘点趟上，真正的结论不依赖它们生效。）
 
-### 4b.2 门后面确实有东西
+### 4b.2 门后面确实有东西（已清零）
 
-门修好之后，三个生态的真实存量：
+门修好之后先看到的存量，三个生态一共 **142 条**：
 
-| 生态 | 受影响包 | 条数 | 最高 |
-| --- | --- | --- | --- |
-| npm（478 包） | 21 | 59 | High ×37 |
-| Maven（112 包） | 17 | 56 | **Critical ×7** |
-| PyPI（42 包） | 3 | 27 | High ×17 |
+| 生态 | 包数 | 受影响包 | 条数 | 最高 |
+| --- | --- | --- | --- | --- |
+| npm | 478 | 21 | 59 | High ×37 |
+| Maven | 112 | 17 | 56 | **Critical ×7** |
+| PyPI | 42 | 3 | 27 | High ×17 |
 
-**Maven** 那 56 条此前完全不可见，分布很集中：`tomcat-embed-core` 10.1.46
-（16 条，含 9.8/9.1 若干）、`spring-webmvc`/`spring-expression`/`spring-core`
-6.2.11（15 条）、`jackson-*` 2.19.2（7 条）、`logback-core`、`micrometer-core`、
-`commons-lang3`、`log4j-api`、`spring-boot*` 3.5.6，以及 Temporal SDK 1.27.0
-拉进来的 `protobuf-java` 3.21.7 与 `grpc-*` 1.54.1。
+Maven 那 56 条此前**完全不可见**。整顿之后三边全部归零，`audit` 现在是绿的
+（三套测试也全绿：Java 365、Python 125、前端 28+11）。
 
-已实测过整顿效果（只在临时拷贝上抬版本，仓内 pom 未动）：
+**Maven** — 抬 `spring-boot-starter-parent` 3.5.6 → 3.5.16 与
+`temporal.version` 1.27.0 → 1.38.0 解决绝大多数（Boot BOM 连带抬了
+tomcat / spring / jackson / logback / micrometer；Temporal 抬掉了
+`protobuf-java` 3.21.7 与 `grpc-*` 1.54.1）。剩下 4 项在 `<properties>` 里
+**显式压过 Boot BOM**——这些是安全下限，不是选型，Boot 升级后要逐个回头看，
+钉的版本追上了就删掉，留着一个比 BOM 低的值反而会把版本按回去：
 
-* `spring-boot-starter-parent` 3.5.6 → **3.5.16**，`temporal.version`
-  1.27.0 → **1.38.0** ⇒ **56 → 8 条**
-* 剩下 8 条要在 `<properties>` 里显式压过 Boot BOM 钉的版本：
-  `tomcat.version` 10.1.55 → 10.1.58（3 条，含 9.8/9.1/9.1）、
-  `jackson-bom.version` 2.21.4 → 2.21.5（3 条）、
-  `commons-lang3.version` → 3.18.0、`log4j2.version` → 2.25.5
+| 属性 | 值 | 为什么 |
+| --- | --- | --- |
+| `tomcat.version` | 10.1.59 | 3 条，含 9.8/9.1/9.1；Boot 3.5.16 钉 10.1.55 |
+| `jackson-bom.version` | 2.21.5 | 3 条；Boot 3.5.16 钉 2.21.4 |
+| `commons-lang3.version` | 3.18.0 | GHSA-j288-q9x7-2f5v；Boot 仍钉 3.17.0 |
+| `log4j2.version` | 2.25.5 | GHSA-qv9r-c865-cp47；Boot 仍钉 2.24.3 |
 
-**npm** 侧按规范 §9 的方法整顿，**不是抑制**：直接依赖（`react-router`、`vite`）
-抬 `package.json` 的 caret 下限；纯传递依赖走根 `pnpm.overrides`，跨 major 用
-`pkg@1` / `pkg@5` 选择器分别定；peer-only 依赖的 caret override 会被 pnpm
-**静默忽略**（还反过来报自己 override unmet），必须精确版 pin。
+> **一个只有实际构建才能发现的坑**：告警写的 tomcat 修复版是 **10.1.58**，
+> 而 Apache **跳过了这个版本号**——Central 上 10.1.57 之后直接是 10.1.59。
+> 照着告警写，SBOM 那一步（不下载 jar）照样生成、照样报「0 个漏洞」，
+> 而 `mvn verify` 会以 `was not found in repo.maven.apache.org` 失败。
+> 抄告警里的版本号是不够的，得跑一次真构建。
 
-**PyPI** 侧三个包都是直接钉的：`pillow` 11.2.1 → 12.3.0、
+**npm** — 按规范 §9 分三类，**不是抑制**：
+
+* 直接依赖抬 `package.json` 的 caret 下限：`react-router` ^7.18.2、
+  `vite` ^7.3.5、`vitest` ^4.1.11（唯一跨 major 的一个，`@vitest/coverage-v8`
+  必须跟着走）。
+* 纯传递依赖走根 `pnpm.overrides`。树里同时存在多个 major 的必须用 `pkg@N`
+  选择器**分别定**，一个笼统的 override 会把不该动的那一支也按过去：
+  `minimatch@3`/`minimatch@9`（树里还有个 10.2.6 不能碰）、
+  `brace-expansion@1`/`brace-expansion@2`（还有个 5.0.9）、`ajv@6`、`glob@10`。
+  其余单版本的直接写：`@babel/core`、`@humanfs/node`、
+  `baseline-browser-mapping`、`browserslist`、`flatted`、`js-yaml`、`nanoid`、
+  `picomatch`、`postcss`、`rollup`。
+* **peer 精确同版的一族只能整体精确钉**：tiptap 全家的 peer 要求是
+  `@tiptap/pm@<完全相同的版本>`。原来 `@tiptap/pm` 是精确钉、其余是 caret，
+  抬下限后 caret 漂到 3.31.3 而 pm 停在 3.30.5，`pnpm install` 直接报
+  unmet peer。五个包一起精确钉到 3.31.3。
+
+（`pnpm.overrides` 是 JSON，写不进注释——每一条的来由与摘除条件就记在这张表
+和上面这段里。删 override 的条件是：上游那个直接依赖自己抬到了修复版以上。）
+
+**PyPI** — 三个都是直接钉的：`Pillow` 11.2.1 → 12.3.0、
 `python-multipart` 0.0.20 → 0.0.31、`pytest` 8.4.0 → 9.0.3。
-
-这三件都会动运行时依赖版本，需要一次完整回归，所以列进 §5 的待决策，
-不在这一轮里顺手做。
 
 ## 5. 待决策清单
 
@@ -286,12 +306,14 @@ osv-scanner 直接对着仓内清单文件扫，三个生态的成色完全不�
 4. **是否要 beta 环境** — 基准产品是 prod only（ADR-002）。本产品有 Temporal
    与数据库迁移，一个 beta 环境的价值可能更高，代价是第二套宿主机资源。
 5. **三镜像的 tag 与推送策略** — 建议同 SHA 同批。
-6. **依赖告警的整顿窗口**（§4b.2）——三个生态一共 142 条，其中 Maven 侧有
-   7 条 Critical。整顿方案已经实测过（Maven 56 → 8），但会动运行时依赖版本，
-   需要一次完整回归。三个生态**要合成一次做完**：`audit` 是一道门，
-   三边都干净它才转得了正。
+6. **Temporal SDK 1.38.0 与服务端 1.27.2 的配合** —— SDK 与 server 是两条
+   独立的版本线（不是同一个数字），server 1.27.2 距最新的 1.29.x 只差两个
+   小版本，按 Temporal 的兼容策略应当没问题。单元测试覆盖不到这一层
+   （集成测试 `-DskipITs` 跳过），上线前应在本地整栈上确认 worker 能注册、
+   工作流能跑通一轮。
 
 ~~**Maven 依赖树在 CI 里怎么解析**~~ —— 已解决，见 §4b.1。
+~~**依赖告警的整顿窗口**~~ —— 已做完，142 → 0，见 §4b.2。
 
 ---
 
@@ -302,8 +324,9 @@ osv-scanner 直接对着仓内清单文件扫，三个生态的成色完全不�
 2. 写 `.github/workflows/ci.yml`（Java + Python + 前端三套测试与覆盖率）。
 3. 首次推送 `main`，让 CI 跑一次产出必需检查的 context。
 4. 开启 secret scanning + push protection（治理规范 §2 的第一层）。
-5. 整顿 SCA 告警（§4b.2）——**必须在应用 ruleset 之前**，否则 `audit` 一成为
-   必需检查，所有 PR 立刻卡死。npm / Maven / PyPI 三边要一起做完。
+5. ~~整顿 SCA 告警~~ —— 已完成（§4b.2），`audit` 现在是绿的，可以转正为
+   必需检查了。这一步必须在应用 ruleset 之前，否则 `audit` 一成为必需检查、
+   所有 PR 立刻卡死。
 6. 应用分支 ruleset（**顺序不能反**：空仓上先加限制性 ruleset 会挡住首次导入）。
 
 **阶段二：部署链（依赖运维给主机信息）**
