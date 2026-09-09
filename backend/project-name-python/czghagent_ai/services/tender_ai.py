@@ -100,13 +100,18 @@ class TenderAiService:
                 response_length=0,
                 response_hash=None,
             )
+        # 只送条款目录，<b>不送整份招标文件</b>。
+        #
+        # 详细设计 §5.2：技术评分由确定性规则建立带稳定 ID 的原文条款目录，
+        # 模型「只确认原文顺序」。目录里已经带着每条的原文，排序不需要别的东西。
+        #
+        # 两个都送有两处代价，而且都不报错：一是把整份招标文件重复塞进一次
+        # 只需要排序的调用，白付一份输入 token；二是给了模型在目录之外「找」
+        # 条款的材料，而这条路径的全部意义就是不让模型碰分值和证明材料。
         scoring_payload = {
             "documentId": request.document_id,
             "title": request.title,
             "biddingMode": request.bidding_mode,
-            "segments": [
-                segment.model_dump(by_alias=True) for segment in request.segments
-            ],
             "clauseCatalog": catalog.to_prompt(),
         }
         try:
@@ -677,7 +682,6 @@ def normalize_outline_tree(raw: dict[str, Any]) -> None:
             continue
         leaf_brief = node.get("taskBrief", node.get("task_brief", ""))
         leaf_keywords = node.get("mustKeywords", node.get("must_keywords", []))
-        leaf_scoring = node.get("scoringPointIds", node.get("scoring_point_ids", []))
         _set_outline_value(node, "mustKeywords", "must_keywords", [])
         _set_outline_value(node, "scoringPointIds", "scoring_point_ids", [])
         parent_key = node_key
@@ -697,7 +701,11 @@ def normalize_outline_tree(raw: dict[str, Any]) -> None:
                 "plannedPages": 0,
                 "taskBrief": leaf_brief if is_leaf else "",
                 "mustKeywords": leaf_keywords if is_leaf else [],
-                "scoringPointIds": leaf_scoring if is_leaf else [],
+                # 任务简述和关键词随着叶子下移——它们描述「要写什么」，
+                # 换个层级仍然成立。评分点<b>不下移</b>：覆盖关系是
+                # 「哪一节响应哪条评分」的事实声明，而这个节点是系统补出来的，
+                # 模型从没为它做过那个声明。一并作废的还有指向原节点的 coverage。
+                "scoringPointIds": [],
             }
             generated.append(child)
             parent_key = child_key
@@ -742,7 +750,14 @@ def normalize_outline_tree(raw: dict[str, Any]) -> None:
             normalized = True
 
     for node in valid_nodes:
-        _set_outline_value(node, "scoringPointIds", "scoring_point_ids", [])
+        # 评分点只挂在叶子上（详细设计 §5.3：「每个叶子维护 taskBrief、
+        # 必含关键词和评分点 ID」）。非叶子清空，叶子<b>原样保留</b>。
+        #
+        # 这一行原来写在 level 过滤之前，于是把每一个叶子的评分点也清掉了
+        # ——正文阶段据评分点召回冻结的评分原文，清空的表现是每一章都
+        # 召不回自己该响应的评分要求，而目录看起来完全正常。
+        if node.get("level") != 3:
+            _set_outline_value(node, "scoringPointIds", "scoring_point_ids", [])
         if node.get("level") != 1:
             continue
         node_key = str(node.get("nodeKey", node.get("node_key", "")))
@@ -764,12 +779,42 @@ def normalize_outline_tree(raw: dict[str, Any]) -> None:
         nodes[:] = ordered_nodes
         normalized = True
 
-    raw["coverage"] = []
+    # 覆盖关系由叶子<b>推导</b>，不采用模型给的那一份。
+    #
+    # 模型给的映射可以指向不存在的、或者已经不是叶子的节点，而它一旦被
+    # 采信，界面会显示某条评分「已覆盖」而实际上没有任何章节在响应它。
+    # 从叶子推导得到的映射与树永远一致——因为它就是树的一个投影。
+    raw["coverage"] = _coverage_from_leaves(valid_nodes)
     if not normalized:
         return
     warnings = raw.setdefault("warnings", [])
     if isinstance(warnings, list):
         warnings.append("AI outline tree and page budgets were normalized.")
+
+
+def _coverage_from_leaves(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """按叶子上的评分点归集出「哪条评分由哪些章节响应」。
+
+    保持首次出现顺序而不是排序：目录的阅读顺序就是评审的阅读顺序，
+    按字典序重排会让这张表和目录对不上。
+    """
+    grouped: dict[str, list[str]] = {}
+    for node in nodes:
+        if node.get("level") != 3:
+            continue
+        node_key = str(node.get("nodeKey", node.get("node_key", "")))
+        if not node_key:
+            continue
+        for point in node.get("scoringPointIds", node.get("scoring_point_ids", [])) or []:
+            key = str(point).strip()
+            if not key:
+                continue
+            keys = grouped.setdefault(key, [])
+            if node_key not in keys:
+                keys.append(node_key)
+    return [
+        {"scoringPointId": point, "nodeKeys": keys} for point, keys in grouped.items()
+    ]
 
 
 def _order_outline_dicts(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:

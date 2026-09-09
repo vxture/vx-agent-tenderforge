@@ -11,6 +11,7 @@ from typing import Any
 from czghagent_ai.services.ai_provider import AiProviderDiagnostics
 from czghagent_ai.services.structured_output import AiStructuredResult
 from czghagent_ai.tender_models import (
+    CoverageItem,
     OutlineExpansionNode,
     OutlineExpansionResponse,
     OutlineNode,
@@ -470,10 +471,42 @@ def merge_outline(
                     planned_pages=0,
                     task_brief=leaf.task_brief.strip(),
                     must_keywords=leaf.must_keywords,
-                    scoring_point_ids=[],
+                    # 评分点原样带过来。同一个构造里 task_brief 和 must_keywords
+                    # 都保留了，唯独这个被清空——而正文阶段正是据它召回本章该
+                    # 响应的冻结评分原文（§5.3/§5.4）。丢了不报错，
+                    # 只是每一章都召不回自己要响应的评分要求。
+                    scoring_point_ids=leaf.scoring_point_ids,
                 ))
     warnings.append("目录已按一二级骨架和系统分配的三级章节配额分批生成。")
-    return OutlineResponse(nodes=output, coverage=[], warnings=warnings)
+    return OutlineResponse(
+        nodes=output, coverage=_coverage_from_leaves(output), warnings=warnings
+    )
+
+
+def _coverage_from_leaves(nodes: list[OutlineNode]) -> list[CoverageItem]:
+    """按叶子上的评分点归集出「哪条评分由哪些章节响应」。
+
+    分批装配自己拼出整棵树，所以覆盖关系也只能在这里推导——模型每批只看见
+    自己那几个分支，谁都给不出全局映射。而从叶子推导出来的映射与树永远一致，
+    因为它就是树的一个投影。
+
+    保持首次出现顺序而不是排序：目录的阅读顺序就是评审的阅读顺序。
+    """
+    grouped: dict[str, list[str]] = {}
+    for node in nodes:
+        if node.level != 3:
+            continue
+        for point in node.scoring_point_ids:
+            key = point.strip()
+            if not key:
+                continue
+            keys = grouped.setdefault(key, [])
+            if node.node_key not in keys:
+                keys.append(node.node_key)
+    return [
+        CoverageItem(scoring_point_id=point, node_keys=keys)
+        for point, keys in grouped.items()
+    ]
 
 
 def merged_outline_errors(
