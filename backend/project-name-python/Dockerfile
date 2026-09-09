@@ -2,6 +2,21 @@
 # MODEL: gpt-5
 # DATE: 2026-07-29
 FROM python:3.12-slim
+# 构建期身份注入（治理规范 025 §4.1）。四个 ARG 都带**诚实默认值**：不传也能
+# 构建，值落 dev/unknown/local 而不是假装成某个版本。liveness 端点只读这些，
+# 不再自己编——`sha:"dev"` 那类事故的根治点就在这里。
+#
+# DEPLOY_STAGE 的默认取 local 而不是规范示例里的 dev：本仓同一个镜像也用于
+# 本地开发，而 dev 在本产品的 DeployStage 里已经算「部署态」，会触发
+# 「拒绝以替身启动」那道闸门——默认成 dev 等于本地栈起不来。
+ARG APP_VERSION=dev
+ARG GIT_SHA=unknown
+ARG BUILD_TIME=unknown
+ARG DEPLOY_STAGE=local
+ENV APP_VERSION=${APP_VERSION}
+ENV GIT_SHA=${GIT_SHA}
+ENV BUILD_TIME=${BUILD_TIME}
+ENV DEPLOY_STAGE=${DEPLOY_STAGE}
 RUN sed -i \
         -e 's|http://deb.debian.org/debian-security|https://mirrors.aliyun.com/debian-security|g' \
         -e 's|http://deb.debian.org/debian|https://mirrors.aliyun.com/debian|g' \

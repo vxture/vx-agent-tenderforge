@@ -29,7 +29,6 @@ from czghagent_ai.services.atlas_provider import (
     AtlasNotEntitledError,
     AtlasProvider,
     AtlasTaskIdMissingError,
-    AtlasTokenRejectedError,
 )
 from czghagent_ai.services.document_parser import DocumentParserService
 from czghagent_ai.services.document_qa import DocumentQaError

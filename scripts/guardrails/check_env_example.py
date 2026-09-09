@@ -42,11 +42,20 @@ APPLICATION_YML = (
 COMPOSE_ONLY: dict[str, str] = {}
 
 #: application.yml 引用但<b>刻意</b>不放进 compose 白名单的键。
+_BUILD_INJECTED = (
+    "构建期注入（治理规范 025 §4.1）：由 Dockerfile 的 ARG→ENV 提供，"
+    "刻意<b>不</b>放进 compose 的 environment。它回答的是「这是哪一次构建」，"
+    "一旦能被宿主机 .env 改写，就不再是那个问题的答案了。"
+)
+
 APPLICATION_ONLY: dict[str, str] = {
     "SERVER_PORT": (
         "8081 在健康检查与 nginx 上游里是写死的；放开这个开关等于给人一个"
         "能把整栈弄坏的旋钮，而它坏掉的表现是容器健康但代理 502。"
     ),
+    "APP_VERSION": _BUILD_INJECTED,
+    "GIT_SHA": _BUILD_INJECTED,
+    "BUILD_TIME": _BUILD_INJECTED,
 }
 
 

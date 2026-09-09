@@ -3,8 +3,10 @@
 # DATE: 2026-09-08
 import asyncio
 import logging
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -16,6 +18,7 @@ from czghagent_ai.api.internal import router as internal_router
 from czghagent_ai.errors import ServiceError, envelope
 from czghagent_ai.services.ai_provider import AiProviderNotConfiguredError
 from czghagent_ai.task_context import TaskIdMiddleware
+
 
 @asynccontextmanager
 async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -127,10 +130,37 @@ async def unexpected_error(_: Request, exception: Exception) -> JSONResponse:
     )
 
 
+def _identity(status: str) -> dict[str, object]:
+    """组织规范 025 §3 的身份块。
+
+    守的不是「有没有值」，是**字段叫什么名字**：跨产品聚合按名字取值，
+    各服务各写各的（``sha`` vs ``gitSha``、``deployStage`` vs ``stage``）
+    会让聚合端读到空，而空值和「这个服务没部署」在那边长得一模一样。
+
+    三个溯源值来自**镜像 ENV**（Dockerfile 的 ARG→ENV），不经过宿主机 .env——
+    它们回答「这是哪一次构建」，一旦能在运行时改写就不再是那个问题的答案。
+    缺失时诚实兜底 ``dev``/``unknown``，规范 §6 把编造列为禁止项。
+
+    ``sha-`` 前缀是镜像 tag 的形态、不是数据，这里剥掉。
+    """
+    git_sha = os.environ.get("GIT_SHA", "unknown")
+    return {
+        "status": status,
+        "service": "tenderforge-ai",
+        "product": "tenderforge",
+        "version": os.environ.get("APP_VERSION", "dev"),
+        "gitSha": git_sha.removeprefix("sha-"),
+        "stage": os.environ.get("DEPLOY_STAGE", "local"),
+        "buildTime": os.environ.get("BUILD_TIME", "unknown"),
+        # time 证明的是「实时应答 + 时钟正常」，所以每次现取。
+        "time": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+    }
+
+
 @app.get("/health")
 async def health() -> JSONResponse:
     """存活：零依赖。在这里检查模型配置会让一次上游抖动重启掉整个容器。"""
-    return JSONResponse({"status": "UP", "service": "tenderagent-parser"})
+    return JSONResponse(_identity("ok"))
 
 
 @app.get("/ready")
@@ -138,12 +168,10 @@ async def ready() -> JSONResponse:
     try:
         await asyncio.to_thread(create_ai_provider().validate_configuration)
     except AiProviderNotConfiguredError:
-        return JSONResponse(
-            status_code=503,
-            content={
-                "status": "DOWN",
-                "service": "tenderagent-parser",
-                "code": AiProviderNotConfiguredError.code,
-            },
-        )
-    return JSONResponse({"status": "UP", "service": "tenderagent-parser"})
+        body = _identity("fail")
+        body["checks"] = [{"name": "model-exit", "status": "down"}]
+        body["code"] = AiProviderNotConfiguredError.code
+        return JSONResponse(status_code=503, content=body)
+    body = _identity("ready")
+    body["checks"] = [{"name": "model-exit", "status": "up"}]
+    return JSONResponse(body)

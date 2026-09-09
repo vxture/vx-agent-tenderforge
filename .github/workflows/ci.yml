@@ -179,6 +179,16 @@ jobs:
       - name: Ruleset guardrail (no bypass, five checks still required)
         run: python scripts/guardrails/check_ruleset.py
 
+      # ruff 一直在 pyproject 里配着，却从没进过 CI——于是它慢慢积了 6 条：
+      # 一个真正没用的 import、两处 import 顺序、一处该用 datetime.UTC。
+      # 配了不跑的 linter 等于没配，而且比没配更坏：它让人以为查过了。
+      - name: Python lint (ruff)
+        working-directory: backend/project-name-python
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet --disable-pip-version-check ruff==0.11.13
+          python -m ruff check czghagent_ai tests
+
   # ── 质量闸门（聚合器；稳定的必需检查名）─────────────────────────────────
   quality-gate:
     name: quality-gate

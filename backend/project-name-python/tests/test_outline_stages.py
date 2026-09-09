@@ -20,13 +20,14 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-import czghagent_ai.api.internal as internal  # noqa: E402
-from czghagent_ai.app import app  # noqa: E402
-from czghagent_ai.services.tender_ai import TenderAiService  # noqa: E402
 from test_tender_ai import (  # noqa: E402
     AdaptiveOutlineProvider,
     branch_blueprint_response,
 )
+
+import czghagent_ai.api.internal as internal  # noqa: E402
+from czghagent_ai.app import app  # noqa: E402
+from czghagent_ai.services.tender_ai import TenderAiService  # noqa: E402
 
 HEADERS = {"X-Internal-Token": "local-development-token"}
 OUTLINE: dict[str, Any] = {

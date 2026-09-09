@@ -31,7 +31,7 @@ services:
       AI_SERVICE_INTERNAL_TOKEN: ${AI_SERVICE_INTERNAL_TOKEN:-ChangeMe-Internal-Token-2026}
       # 模型出口。配上 ATLAS_API_URL 即切到 Atlas；不配则直连模型供应商，
       # 而那条路在部署阶段被拒绝启动（除非显式 ALLOW_MOCK_ON_DEPLOY）。
-      DEPLOY_STAGE: ${DEPLOY_STAGE:-local}
+      DEPLOY_STAGE: ${DEPLOY_STAGE:?必须显式设置（local/dev/beta/production）——缺省成 local 会静默放行替身}
       ALLOW_MOCK_ON_DEPLOY: ${ALLOW_MOCK_ON_DEPLOY:-false}
       ATLAS_API_URL: ${ATLAS_API_URL:-}
       ATLAS_TIMEOUT_SECONDS: ${ATLAS_TIMEOUT_SECONDS:-90}
@@ -153,8 +153,7 @@ services:
       # 这些变量必须在这里显式列出：compose 的 environment 是白名单，
       # 宿主机 shell 或 .env 里有而这里没列的，容器根本看不到。
       # 漏列的表现不是报错——是「把凭证写进 .env 之后什么都没发生」。
-      DEPLOY_STAGE: ${DEPLOY_STAGE:-local}
-      APP_VERSION: ${APP_VERSION:-dev}
+      DEPLOY_STAGE: ${DEPLOY_STAGE:?必须显式设置（local/dev/beta/production）——缺省成 local 会静默放行替身}
       ALLOW_MOCK_ON_DEPLOY: ${ALLOW_MOCK_ON_DEPLOY:-false}
       # C1 身份 / C1b 换票：这一对 client 凭据同时是 S2S 凭据
       OIDC_RP_ENABLED: ${OIDC_RP_ENABLED:-false}
@@ -235,8 +234,7 @@ services:
       # 这些变量必须在这里显式列出：compose 的 environment 是白名单，
       # 宿主机 shell 或 .env 里有而这里没列的，容器根本看不到。
       # 漏列的表现不是报错——是「把凭证写进 .env 之后什么都没发生」。
-      DEPLOY_STAGE: ${DEPLOY_STAGE:-local}
-      APP_VERSION: ${APP_VERSION:-dev}
+      DEPLOY_STAGE: ${DEPLOY_STAGE:?必须显式设置（local/dev/beta/production）——缺省成 local 会静默放行替身}
       ALLOW_MOCK_ON_DEPLOY: ${ALLOW_MOCK_ON_DEPLOY:-false}
       # C1 身份 / C1b 换票：这一对 client 凭据同时是 S2S 凭据
       OIDC_RP_ENABLED: ${OIDC_RP_ENABLED:-false}

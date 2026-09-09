@@ -2,6 +2,7 @@
 # MODEL: gpt-5
 # DATE: 2026-08-02
 import io
+import time
 
 from docx import Document
 from fastapi.testclient import TestClient
@@ -13,10 +14,45 @@ from czghagent_ai.services.document_parser import DocumentParserService
 client = TestClient(app)
 
 
-def test_health_identifies_tenderagent_parser() -> None:
+# 组织规范 025 §3 的必填身份字段。守的是**字段名**：跨产品聚合按名字取值，
+# 名字漂了聚合端读到空，而空值和「这个服务没部署」在那边长得一模一样。
+_REQUIRED_IDENTITY = {"status", "service", "version", "gitSha", "stage", "buildTime", "time"}
+
+
+def test_health_returns_the_full_identity_block() -> None:
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "UP", "service": "tenderagent-parser"}
+    body = response.json()
+    assert _REQUIRED_IDENTITY <= body.keys()
+    assert body["status"] == "ok"          # 规范定的是字面量 ok，不是 UP
+    assert body["service"] == "tenderforge-ai"
+    assert body["product"] == "tenderforge"
+
+
+def test_health_falls_back_honestly_when_build_info_was_not_injected(
+    monkeypatch: object,
+) -> None:
+    # 规范 §6 把编造版本号列为禁止项。没注入就如实报 unknown。
+    for key in ("APP_VERSION", "GIT_SHA", "BUILD_TIME", "DEPLOY_STAGE"):
+        monkeypatch.delenv(key, raising=False)  # type: ignore[attr-defined]
+    body = client.get("/health").json()
+    assert body["version"] == "dev"
+    assert body["gitSha"] == "unknown"
+    assert body["buildTime"] == "unknown"
+    assert body["stage"] == "local"
+
+
+def test_health_strips_the_image_tag_prefix_from_git_sha(monkeypatch: object) -> None:
+    # `sha-` 是镜像 tag 的形态，不是数据——带着它聚合端拿到的值没法直接 git show。
+    monkeypatch.setenv("GIT_SHA", "sha-763c71c")  # type: ignore[attr-defined]
+    assert client.get("/health").json()["gitSha"] == "763c71c"
+
+
+def test_health_time_is_taken_fresh_so_it_proves_the_clock() -> None:
+    first = client.get("/health").json()["time"]
+    time.sleep(1.1)
+    second = client.get("/health").json()["time"]
+    assert first != second
 
 
 def test_parse_requires_internal_token() -> None:
