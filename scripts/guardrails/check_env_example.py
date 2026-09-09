@@ -39,7 +39,20 @@ APPLICATION_YML = (
 #:
 #: 每一条都要写清楚理由——这个集合是给守卫开的口子，开得越随意，
 #: 守卫越接近装饰品。
-COMPOSE_ONLY: dict[str, str] = {}
+#: compose 引用但<b>刻意</b>不写进 .env.example 的键——它们不是运维旋钮，
+#: 而是 deploy.sh 在部署那一刻导出到环境里的值（shell 环境的优先级高于 .env）。
+#: 写进 .env.example 会引人在宿主机 .env 里钉一个 tag，而那正是「宿主机上跑的
+#: 到底是哪个镜像」这个问题不该有的第二个答案。
+_DEPLOY_INJECTED = (
+    "部署期注入：deploy.sh 从 CI 传来的 IMAGE_TAG / registry 导出到环境，"
+    "不经过宿主机 .env。本地不设时 compose 回落到 ghcr.io/vxture/...:local。"
+)
+
+COMPOSE_ONLY: dict[str, str] = {
+    "IMAGE_REGISTRY": _DEPLOY_INJECTED,
+    "IMAGE_NAMESPACE": _DEPLOY_INJECTED,
+    "IMAGE_TAG": _DEPLOY_INJECTED,
+}
 
 #: application.yml 引用但<b>刻意</b>不放进 compose 白名单的键。
 _BUILD_INJECTED = (

@@ -1,0 +1,288 @@
+name: deploy
+
+# tag 触发的生产部署。`v*.*.*` → 构建三个镜像 → 在 worker-02 上起栈。
+#
+# 部署机 vx-worker-02 在 tailnet 内、无公网（治理规范 §5 domestic profile），
+# 所以要先 join tailnet 再 SSH。`production` 这个 GitHub Environment 带
+# **Required reviewers**，deploy 作业会停在审批门上等人点同意——
+# 零保护的表现是 tag 一推就直接上线，没有任何人看过（varda 首上线教训）。
+#
+# 本产品的 DB 结构变更目前由 Flyway 在 api 启动时自动跑（V1–V30）。
+# 治理规范要求「常规部署链不跑 migration/seed」，这是一条**已登记的偏离**，
+# 见 docs/30-design/10-detailed-design.md §12。别把它当成疏漏顺手改掉——
+# 改它要连带把 30 个迁移转成 ddl 单一权威，那是独立排期的事。
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      explicit_environment:
+        description: "调试用的环境覆盖（目前只有 production）"
+        required: false
+        type: choice
+        default: auto
+        options:
+          - auto
+          - production
+
+# 按目标环境串行，**不按 tag**。在飞的部署不取消——中途掐断一次
+# `compose up -d` 会留下一个半新半旧的栈，而那种状态没有任何地方会报告。
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  PRODUCT_CODE: tenderforge
+
+jobs:
+  detect:
+    name: detect-target-environment
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      environment: ${{ steps.route.outputs.environment }}
+    steps:
+      - name: Route tag to GitHub Environment
+        id: route
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          case "$TAG" in
+            v*.*.*) environment=production ;;
+            *) echo "deploy.yml 被一个不支持的 tag 触发：$TAG" >&2; exit 1 ;;
+          esac
+          echo "environment=$environment" >> "$GITHUB_OUTPUT"
+          echo "路由：tag=$TAG -> environment=$environment"
+
+  call-build:
+    name: docker-build
+    uses: ./.github/workflows/build.yml
+    needs: detect
+    permissions:
+      contents: read
+      packages: write
+    with:
+      pass_sha: ${{ github.sha }}
+    secrets:
+      NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+      ALIYUN_ACR_USERNAME: ${{ secrets.ALIYUN_ACR_USERNAME }}
+      ALIYUN_ACR_PASSWORD: ${{ secrets.ALIYUN_ACR_PASSWORD }}
+
+  deploy:
+    name: deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: [detect, call-build]
+    permissions:
+      contents: read
+      packages: read
+      issues: write
+    environment:
+      name: ${{ needs.detect.outputs.environment }}
+    steps:
+      - name: Checkout deploy sources
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Validate deployment secrets
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          ENV_FILE_BASE64: ${{ secrets.ENV_FILE_BASE64 }}
+          ALIYUN_ACR_REGISTRY: ${{ vars.ALIYUN_ACR_REGISTRY }}
+          ALIYUN_ACR_NAMESPACE: ${{ vars.ALIYUN_ACR_NAMESPACE }}
+          TAILSCALE_OAUTH_CLIENT_ID: ${{ secrets.TAILSCALE_OAUTH_CLIENT_ID }}
+          TAILSCALE_OAUTH_CLIENT_SECRET: ${{ secrets.TAILSCALE_OAUTH_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          # 一次报全，不要第一个缺的就退出——运维配环境时最不想要的
+          # 就是「改一个、跑一次、再发现下一个缺」。
+          missing=()
+          for key in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS \
+                     ENV_FILE_BASE64 ALIYUN_ACR_REGISTRY ALIYUN_ACR_NAMESPACE \
+                     TAILSCALE_OAUTH_CLIENT_ID TAILSCALE_OAUTH_CLIENT_SECRET; do
+            [ -n "${!key:-}" ] || missing+=("$key")
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::环境缺少这些配置：${missing[*]}" >&2
+            echo "DEPLOY_* 与 ENV_FILE_BASE64 是**环境级** secret，不从别的仓继承，" >&2
+            echo "必须在本仓的 production 环境里重建（治理规范 §6）。" >&2
+            exit 1
+          fi
+
+      - name: Join tailnet and prepare SSH
+        uses: ./.github/actions/tailnet-ssh-connect
+        with:
+          tailscale-oauth-client-id: ${{ secrets.TAILSCALE_OAUTH_CLIENT_ID }}
+          tailscale-oauth-secret: ${{ secrets.TAILSCALE_OAUTH_CLIENT_SECRET }}
+          tailscale-tag: ${{ vars.TAILSCALE_OAUTH_CLIENT_TAG }}
+          deploy-host: ${{ secrets.DEPLOY_HOST }}
+          deploy-port: ${{ secrets.DEPLOY_PORT }}
+          deploy-ssh-key: ${{ secrets.DEPLOY_SSH_KEY }}
+          deploy-ssh-passphrase: ${{ secrets.DEPLOY_SSH_KEY_PASSPHRASE }}
+          deploy-known-hosts: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+
+      - name: Bootstrap .env on target host
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_DIR: ${{ secrets.DEPLOY_DIR }}
+          ENV_FILE_B64: ${{ secrets.ENV_FILE_BASE64 }}
+        run: |
+          set -euo pipefail
+          port="${DEPLOY_PORT:-22}"
+          deploy_dir="${DEPLOY_DIR:-/srv/md0/${PRODUCT_CODE}/deploy}"
+          ssh_opts=(-i ~/.ssh/deploy_key -p "$port" -o ServerAliveInterval=30 \
+                    -o ServerAliveCountMax=20 -o ConnectTimeout=30)
+          # .env 只在**首次**投递。之后运维在主机上改的值是权威——
+          # 每次部署都覆盖它，等于每次发布都悄悄回滚一次运维的调整。
+          if ssh "${ssh_opts[@]}" "$DEPLOY_USER@$DEPLOY_HOST" "test -f '$deploy_dir/.env'"; then
+            echo "[bootstrap] $deploy_dir/.env 已存在，跳过"
+          else
+            ssh "${ssh_opts[@]}" "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$deploy_dir'"
+            printf '%s' "$ENV_FILE_B64" | ssh "${ssh_opts[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+              "base64 -d > '$deploy_dir/.env' && chmod 600 '$deploy_dir/.env'"
+            echo "[bootstrap] .env 已创建"
+          fi
+
+      - name: Deploy over SSH
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_DIR: ${{ secrets.DEPLOY_DIR }}
+          PASSED_SHA: ${{ github.sha }}
+          IMAGE_TAG: ${{ needs.call-build.outputs.image_tag }}
+          ALIYUN_ACR_REGISTRY: ${{ vars.ALIYUN_ACR_REGISTRY }}
+          ALIYUN_ACR_NAMESPACE: ${{ vars.ALIYUN_ACR_NAMESPACE }}
+          ALIYUN_ACR_USERNAME: ${{ secrets.ALIYUN_ACR_USERNAME }}
+          ALIYUN_ACR_PASSWORD: ${{ secrets.ALIYUN_ACR_PASSWORD }}
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          port="${DEPLOY_PORT:-22}"
+          deploy_dir="${DEPLOY_DIR:-/srv/md0/${PRODUCT_CODE}/deploy}"
+          image_tag="$IMAGE_TAG"
+          test -n "$image_tag"
+          ssh_opts=(-i ~/.ssh/deploy_key -p "$port" -o ServerAliveInterval=30 \
+                    -o ServerAliveCountMax=20 -o ConnectTimeout=30)
+
+          # 只投递部署需要的那几样，一次 staged rsync --delete。
+          # 运维的 .env 就在 $deploy_dir 下，所以 --delete 要**排除**它——
+          # 否则每次部署都会把它删掉，然后 bootstrap 那步看到文件不存在又
+          # 重新投递一份 CI 里的版本，运维改过的值就此消失，且无声无息。
+          ssh "${ssh_opts[@]}" "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$deploy_dir'"
+          stage="$(mktemp -d)"
+          cp -a deploy/. "$stage/"
+          cp -a docker-compose.yml "$stage/docker-compose.yml"
+          rsync -az --delete --exclude='.env' --exclude='VERSION' \
+            -e "ssh -i ~/.ssh/deploy_key -p $port -o ConnectTimeout=30" \
+            "$stage/" "$DEPLOY_USER@$DEPLOY_HOST:$deploy_dir/"
+          rm -rf "$stage"
+
+          # 交付校验：投过去的 compose 必须是本产品的。一个被截断或者投错
+          # 产品的 compose 绝不能走到 up -d——那会在别人的栈上起容器。
+          ssh "${ssh_opts[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "grep -q 'container_name: ${PRODUCT_CODE}-api' '$deploy_dir/docker-compose.yml'" || {
+              echo "::error::投过去的 compose 里没有 ${PRODUCT_CODE}-api，拒绝继续" >&2
+              exit 1
+            }
+          ssh "${ssh_opts[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "printf '%s\n' '$PASSED_SHA' > '$deploy_dir/VERSION'"
+
+          cat > /tmp/remote-deploy.sh <<'REMOTE_SCRIPT'
+          set -euo pipefail
+          cd "$REPO_DIR"
+          export IMAGE_REGISTRY="ghcr.io"
+          export IMAGE_NAMESPACE="vxture"
+          export IMAGE_TAG="$IMAGE_TAG"
+          export FALLBACK_IMAGE_REGISTRY="$ALIYUN_ACR_REGISTRY"
+          export FALLBACK_IMAGE_NAMESPACE="$ALIYUN_ACR_NAMESPACE"
+          if [ -n "${GHCR_TOKEN:-}" ]; then
+            printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+          fi
+          if [ -n "${ALIYUN_ACR_USERNAME:-}" ] && [ -n "${ALIYUN_ACR_PASSWORD:-}" ]; then
+            for attempt in 1 2 3 4 5; do
+              printf '%s' "$ALIYUN_ACR_PASSWORD" \
+                | timeout 45 docker login "$ALIYUN_ACR_REGISTRY" -u "$ALIYUN_ACR_USERNAME" --password-stdin \
+                && break || sleep $((attempt * 5))
+            done
+          fi
+          bash deploy/deploy.sh all
+          REMOTE_SCRIPT
+          scp -i ~/.ssh/deploy_key -P "$port" -o ConnectTimeout=30 \
+            /tmp/remote-deploy.sh "$DEPLOY_USER@$DEPLOY_HOST:/tmp/remote-deploy.sh"
+
+          remote_env=(
+            "PRODUCT_CODE=$PRODUCT_CODE" "REPO_DIR=$deploy_dir" "IMAGE_TAG=$image_tag"
+            "ALIYUN_ACR_REGISTRY=$ALIYUN_ACR_REGISTRY" "ALIYUN_ACR_NAMESPACE=$ALIYUN_ACR_NAMESPACE"
+            "ALIYUN_ACR_USERNAME=$ALIYUN_ACR_USERNAME" "ALIYUN_ACR_PASSWORD=$ALIYUN_ACR_PASSWORD"
+            "GHCR_USERNAME=$GHCR_USERNAME" "GHCR_TOKEN=$GHCR_TOKEN"
+          )
+          remote_cmd=""
+          for item in "${remote_env[@]}"; do
+            key="${item%%=*}"; value="${item#*=}"
+            printf -v escaped '%q=%q ' "$key" "$value"
+            remote_cmd+="$escaped"
+          done
+          remote_cmd+="bash /tmp/remote-deploy.sh"
+          # 从 stdin 喂过去，不走 argv——argv 会出现在目标主机的 ps/proc 里，
+          # 而里面带着 ACR 密码和 GHCR 令牌。
+          printf '%s\n' "$remote_cmd" | ssh "${ssh_opts[@]}" "$DEPLOY_USER@$DEPLOY_HOST" bash -s
+
+      - name: Notify on deploy failure (open/update issue)
+        if: failure()
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const env = '${{ needs.detect.outputs.environment }}';
+            const title = `Deploy failure: ${env}`;
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const tag = context.ref.replace('refs/tags/', '');
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', labels: 'deploy-failure' });
+            const existing = issues.find((i) => i.title === title);
+            const body = `部署到 **${env}** 失败，提交 \`${context.sha.substring(0, 7)}\`（tag \`${tag}\`）。\n\n运行记录：${runUrl}`;
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: existing.number, body });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo,
+                title, body, labels: ['deploy-failure'] });
+            }
+
+      - name: Close deploy-failure issue on success
+        if: success()
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const env = '${{ needs.detect.outputs.environment }}';
+            const title = `Deploy failure: ${env}`;
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', labels: 'deploy-failure' });
+            const existing = issues.find((i) => i.title === title);
+            if (existing) {
+              await github.rest.issues.update({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: existing.number, state: 'closed' });
+            }

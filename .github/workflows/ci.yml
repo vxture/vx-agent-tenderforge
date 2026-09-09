@@ -189,6 +189,16 @@ jobs:
           python -m pip install --quiet --disable-pip-version-check ruff==0.11.13
           python -m ruff check czghagent_ai tests
 
+      # 本仓的 shell 脚本要挂进容器执行、要在部署主机上跑，出错的代价比
+      # 一般脚本高。shellcheck 第一次跑就在 sca-scan.sh 里挑出两处
+      # ${var#$pattern} 的未加引号展开——那类问题在正常路径上完全不显形。
+      - name: Shell lint (shellcheck)
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck deploy/deploy.sh scripts/ci/sca-scan.sh
+
   # ── 质量闸门（聚合器；稳定的必需检查名）─────────────────────────────────
   quality-gate:
     name: quality-gate

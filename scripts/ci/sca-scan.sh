@@ -89,7 +89,7 @@ scan_tree() {
   local label=$1 artifact=$2 floor=$3 report=$4 status=0 scanned found
 
   if [[ ! -f $artifact ]]; then
-    problems+=("找不到 $label 的扫描对象：${artifact#$ROOT/}——这半边等于没扫")
+    problems+=("找不到 $label 的扫描对象：${artifact#"$ROOT"/}——这半边等于没扫")
     return 0
   fi
 
@@ -99,7 +99,7 @@ scan_tree() {
 
   scanned=$(grep -E "Scanned .* file and found [0-9]+ packages" "$report" | head -1 || true)
   if [[ -z $scanned ]]; then
-    problems+=("osv-scanner 不认 ${artifact#$ROOT/}——它靠文件名挑提取器，名字不对整个文件就被跳过")
+    problems+=("osv-scanner 不认 ${artifact#"$ROOT"/}——它靠文件名挑提取器，名字不对整个文件就被跳过")
   else
     found=$(printf '%s' "$scanned" | grep -oE "[0-9]+ packages" | grep -oE "[0-9]+")
     if (( found < floor )); then

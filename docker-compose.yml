@@ -5,6 +5,10 @@ name: tenderforge
 
 services:
   mysql:
+    # 规范 §7 的容器命名 vx-<stack>-<engine>-db-<env>。<b>服务名仍用短名</b>，
+    # 因为服务名才是网络别名、DATABASE_URL 只认它——改容器名永远不该断连接串。
+    # （服务名从 mysql 改成 db 属于库层整改，owner 决定本轮不动。）
+    container_name: vx-tenderforge-mysql-db-${DEPLOY_STAGE}
     image: mysql:8.4
     restart: unless-stopped
     environment:
@@ -23,6 +27,8 @@ services:
       retries: 20
 
   ai:
+    container_name: tenderforge-ai
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-vxture}/tenderforge-ai:${IMAGE_TAG:-local}
     build:
       context: .
       dockerfile: backend/project-name-python/Dockerfile
@@ -50,8 +56,12 @@ services:
       AI_MODEL_THINKING_BUDGET_TOKENS: ${AI_MODEL_THINKING_BUDGET_TOKENS:-4096}
       AI_MODEL_THINKING_DISABLED_OPERATIONS: ${AI_MODEL_THINKING_DISABLED_OPERATIONS:-project_overview_source_selection,project_overview_extraction,technical_scoring_extraction,outline_skeleton_planning,outline_branch_expansion,chapter_drafting}
       AI_MODEL_THINKING_ENABLED_OPERATIONS: ${AI_MODEL_THINKING_ENABLED_OPERATIONS:-bid_strategy_planning,branch_blueprint_planning,section_revision,consistency_review}
+    # 容器探针**只探 liveness**（规范 025 §2 铁律 / 020 §4）。
+    # 探就绪的表现是：一次数据库或上游抖动就把一个本来健康的容器判成
+    # unhealthy 并重启——重启解决不了依赖不可用，只是让服务在依赖恢复期间
+    # 也没了。就绪供发布闸门与编排用，不给探针用。
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -103,7 +113,10 @@ services:
       - "${TEMPORAL_UI_HOST:-127.0.0.1}:${TEMPORAL_UI_PORT:-8233}:8080"
 
   api:
-    image: tenderagent-java:local
+    # 部署时由 deploy.sh 注入 IMAGE_* 指向 registry；本地不设这些变量时
+    # 回落到 :local，配合下面的 build: 走本地构建。
+    container_name: tenderforge-api
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-vxture}/tenderforge-api:${IMAGE_TAG:-local}
     build:
       context: .
       dockerfile: backend/project-name-java/Dockerfile
@@ -183,14 +196,24 @@ services:
       USAGE_FLUSH_BATCH_SIZE: ${USAGE_FLUSH_BATCH_SIZE:-100}
     volumes:
       - private-files:/app/data/private
+    # 容器探针**只探 liveness**（规范 025 §2 铁律 / 020 §4）。
+    # 探就绪的表现是：一次数据库或上游抖动就把一个本来健康的容器判成
+    # unhealthy 并重启——重启解决不了依赖不可用，只是让服务在依赖恢复期间
+    # 也没了。就绪供发布闸门与编排用，不给探针用。
+    # /actuator/health 不行：Spring Boot 默认把 DataSource 的健康指示器算进去，
+    # 于是它实际是个就绪端点。/api/health 是零依赖的那一个。
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8081/actuator/health"]
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8081/api/health"]
       interval: 10s
       timeout: 5s
       retries: 20
 
   worker:
-    image: tenderagent-java:local
+    # worker 与 api 是**同一个镜像**、不同的启动形态（SPRING_MAIN_WEB_APPLICATION_TYPE=none）。
+    # 两者共用一个 tag 是有意的：分开会让「api 与 worker 跑着不同代码」成为可能，
+    # 而那种错位的表现是工作流活动调用一个 api 侧已经改过签名的服务。
+    container_name: tenderforge-worker
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-vxture}/tenderforge-api:${IMAGE_TAG:-local}
     restart: unless-stopped
     depends_on:
       api:
@@ -266,6 +289,8 @@ services:
       - private-files:/app/data/private
 
   web:
+    container_name: tenderforge-web
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-vxture}/tenderforge-web:${IMAGE_TAG:-local}
     build:
       context: .
       dockerfile: frontend/project-name-web/Dockerfile
