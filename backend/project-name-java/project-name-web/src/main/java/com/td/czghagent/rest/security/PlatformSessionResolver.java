@@ -43,6 +43,20 @@ public class PlatformSessionResolver {
      * 三者对调用方是同一件事：请重新登录。区分它们只对攻击者有用。
      */
     public Optional<CurrentUser> resolve(String cookieValue) {
+        return resolveSession(cookieValue).map(RpSession::toCurrentUser);
+    }
+
+    /**
+     * 解析会话并保留<strong>平台 access token</strong>。
+     *
+     * <p>它是 C1b 换票的原料：调 Atlas 时用它换一张 {@code aud=atlas} 的票，
+     * 平台从中解出 org/workspace/user，于是 Atlas 的审计里落到人头上而不是只有产品。
+     *
+     * <p>这张票<strong>绝不出本进程</strong>，更不下发浏览器——浏览器只有那个
+     * 不透明的 HttpOnly cookie。「浏览器零令牌」的第二个理由就在这里：
+     * 它不只是一张凭证，还是换票的原料。
+     */
+    public Optional<RpSession> resolveSession(String cookieValue) {
         LocalDateTime now = LocalDateTime.now();
         String tokenHash = SessionToken.hash(cookieValue);
         Optional<RpSession> found = sessions.findByTokenHash(tokenHash, now);
@@ -61,6 +75,6 @@ public class PlatformSessionResolver {
             return Optional.empty();
         }
         sessions.touch(tokenHash, now);
-        return Optional.of(session.toCurrentUser());
+        return Optional.of(session);
     }
 }

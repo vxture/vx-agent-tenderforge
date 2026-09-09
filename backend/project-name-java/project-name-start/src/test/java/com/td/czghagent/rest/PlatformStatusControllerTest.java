@@ -69,8 +69,8 @@ class PlatformStatusControllerTest {
     @Test
     void reportsDegradedWheneverAnIdentityStandInIsInUse() {
         assertThat(controller(true, false).status().get("degraded")).isEqualTo(true);
-        assertThat(controller(false, false, "local", false, false).status().get("degraded"))
-                .isEqualTo(false);
+        assertThat(controllerWithSecretsConfigured().status().get("degraded"))
+                .as("四条通道全部接通才不是降级").isEqualTo(false);
     }
 
     /**
@@ -137,7 +137,10 @@ class PlatformStatusControllerTest {
         assertThat(channelState(body, "C2")).isEqualTo("mock");
         assertThat(channelState(body, "C3-up")).isEqualTo("mock");
         assertThat(channelState(body, "C3-down")).isEqualTo("not_configured");
-        assertThat(channelState(body, "atlas")).isEqualTo("not_configured");
+        assertThat(channelState(body, "atlas"))
+                .as("模型出口没有「未配置」这一态——没接 Atlas 就是在直连，"
+                        + "而直连是一个正在发生的事实，不是一个空位")
+                .isEqualTo("direct");
     }
 
     /** Atlas 未接通时明说这是已知的契约违规，不含糊成「待接入」。 */
@@ -145,6 +148,35 @@ class PlatformStatusControllerTest {
     void namesTheAtlasGapAsAKnownContractViolation() {
         assertThat(channelDetail(controller(true, false).status(), "atlas"))
                 .contains("契约违规");
+    }
+
+    /**
+     * 直连是<strong>自成一态</strong>，不是「未配置」。
+     *
+     * <p>合并成 not_configured 会让这一格读起来像「这条通道还没启用」，
+     * 而真相是它正在被一条未登记的通道替代——产品跑得好好的，
+     * 只是每一次推理都没进平台的账。两者需要的动作完全不同。
+     */
+    @Test
+    void distinguishesStillOnTheDirectModelConnection() {
+        assertThat(channelState(controller(false, true, "local").status(), "atlas"))
+                .isEqualTo("direct");
+        assertThat(channelState(controller(false, true, "production").status(), "atlas"))
+                .as("部署态还在直连是更严重的状态").isEqualTo("degraded_direct");
+    }
+
+    /**
+     * 还在直连就算降级。
+     *
+     * <p>直连不产生编造的数据，所以最容易被认为「不算问题」。
+     * 但它让平台侧的推理账永久缺一块——编造的数据发现后可以重来，
+     * 没记下的消耗补不回来。
+     */
+    @Test
+    void countsTheDirectModelConnectionAsDegraded() {
+        assertThat(controller(false, true, "local", false, false).status().get("degraded"))
+                .as("身份、权益、用量都是真的，唯独模型出口还在直连")
+                .isEqualTo(true);
     }
 
     @Test

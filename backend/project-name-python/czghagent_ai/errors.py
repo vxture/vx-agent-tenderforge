@@ -21,6 +21,9 @@ RETRYABLE_CODES: frozenset[str] = frozenset(
         "AI_PROVIDER_ERROR",
         "AI_MODEL_TIMEOUT",
         "AI_MODEL_AUTH_FAILED",
+        # Atlas 拒了这张票。可重试，但重试的方式是<b>由 Java 侧重铸</b>：
+        # 这个服务不铸票，原样再送一遍同一张必然再被拒。
+        "AI_ATLAS_TOKEN_REJECTED",
         "PARSER_UNAVAILABLE",
         "DOCUMENT_RENDER_UNAVAILABLE",
         "INTERNAL_ERROR",

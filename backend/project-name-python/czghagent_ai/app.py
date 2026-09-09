@@ -3,26 +3,43 @@
 # DATE: 2026-09-08
 import asyncio
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from czghagent_ai.api.internal import create_ai_provider
+from czghagent_ai.api.internal import create_ai_provider, describe_model_exit
 from czghagent_ai.api.internal import router as internal_router
 from czghagent_ai.errors import ServiceError, envelope
 from czghagent_ai.services.ai_provider import AiProviderNotConfiguredError
 from czghagent_ai.task_context import TaskIdMiddleware
+
+@asynccontextmanager
+async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
+    """启动时把模型出口打到日志里。
+
+    放在这里而不是装配处：装配在模块导入期完成，那时 uvicorn 还没配好日志，
+    写出去的行谁也看不见。而这一行恰恰是最该被看见的事实——
+    「产品跑得好好的，只是推理没进平台的账」是一种没有任何症状的偏差，
+    日志是它唯一的症状。用 warning 级别，因为直连就是需要被注意的状态。
+    """
+    logging.getLogger("czghagent_ai").warning(describe_model_exit())
+    yield
+
 
 app = FastAPI(
     title="TenderAgent 文档解析服务",
     version="1.0.0",
     docs_url="/docs",
     redoc_url=None,
+    lifespan=_lifespan,
 )
 app.add_middleware(TaskIdMiddleware)
 app.include_router(internal_router)
+
 logger = logging.getLogger("czghagent_ai.errors")
 
 # 状态码到错误码的兜底映射。

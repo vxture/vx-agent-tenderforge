@@ -95,7 +95,7 @@ Web，并将 `WEB_HOST` 收回 `127.0.0.1`、在 `CORS_ALLOWED_ORIGINS` 中配�
 | C2 权益（`GET /platform/entitlements`，45s 缓存不落库） | **代码已落地**，同上；`GET /api/entitlement` 发能力集与两条门控公式 |
 | C3 上行（`POST /usage/consume`，缓冲 + 冲洗，永远 200） | **代码已落地**，同上；见 §10.4 |
 | C3 下发（provisioning webhook，HMAC 原始字节验签） | **代码已落地**，等平台配置投递地址与密钥；见 §10.5 |
-| Atlas 唯一模型出口 | **未接入，当前直连模型供应商——这是已知的契约违规** |
+| Atlas 唯一模型出口 | **代码已落地**，见 §8.3；未配 `ATLAS_API_URL` 时仍直连，部署态拒绝以直连启动 |
 | 被调方半边（八条验票、`/.well-known/vxture-tools`） | 未接入 |
 
 **登记的偏离，两条，均带失效条件：**
@@ -603,6 +603,58 @@ Python 根据 `AI_MODEL_REQUEST_DIALECT` 转换思考开关：`deepseek` 发送
 工作流 RetryOptions 重试。数据库 `bid_ai_run` 保留逻辑调用的最近状态，`bid_ai_run_attempt`
 逐次记录每个真实业务尝试的耗时、输入/输出/reasoning/cache Token、finish reason 和错误。
 审计不保存密钥、完整提示词、模型原始响应或敏感正文。
+
+### 8.3 Atlas：唯一模型出口
+
+配上 `ATLAS_API_URL` 即切到 `POST /v1/chat`；不配则退回直连模型供应商，
+而那条路在部署阶段**拒绝启动**（除非显式 `ALLOW_MOCK_ON_DEPLOY`）。
+
+直连能跑，而且跑得很好，这正是它危险的地方：整个产品一切正常，只是每一次推理
+都没进平台的账。这种偏差没有任何症状，只会在月底对量时表现为一个没人解释得了的
+缺口。所以 `/api/status` 把「直连」列为**独立一态**（`direct` / `degraded_direct`），
+不并进 `not_configured`——后者读起来像「这条通道还没启用」，而真相是它正在被
+一条未登记的通道替代。还在直连也计入 `degraded`。
+
+**票在 Java 侧铸，Python 只转呈。** Atlas 要 `aud=atlas` 的 S2S 票，而铸票凭据就是
+本产品的 OIDC client 对；复制进 Python 意味着产品身份凭据有第二份副本、两个轮换点。
+票只活 300 秒，也没有「配一个长期 token」这条路。有用户会话时走 OBO（Atlas 审计
+落到人头上），后台任务走 service 模式。Atlas 回 401 时由 Java 作废缓存、重铸、
+**只重一次**——其余失败一概不重试，因为每次调用都被计量，而最值得重试的操作恰好
+都不幂等。
+
+**请求体只有** `{endpointCode, messages, tenantId, taskId, requestId}`。没有 temperature、
+没有 max_tokens、没有 response_format、没有 thinking 开关——这不是遗漏，Atlas 的路由
+优先级是 `modelCode > endpointCode > taskProfile`，生成参数属于 endpoint 的配置。
+于是 §8.1 那张表变成了对 Atlas 线的一份**配置请求**，逐条记在
+`atlas_endpoints.py` 里；`required_endpoint_codes()` 列出需要授权的全部 endpoint。
+
+`tenantId` 取自票里的 claim，**不是产品码**。送产品码看起来能跑：Atlas 只校验它非空，
+而产品授权那条路径在租户断言之前就返回了。一旦授权缺失或 endpoint 被改指，控制流
+落到 UUID 断言，失败表现为 `400 INVALID_TENANT_ID`——读起来像请求体写错了。非 UUID
+还会让 Atlas 的请求日志写进 NULL，本产品流量从每一张租户汇总表里消失且全程无报错。
+
+**不上报 token 用量。** Atlas 自己按 `atlas.chat` 计量推理消耗；产品再报一次就是同一次
+推理被记两遍。产品报的是自己的业务单元（C3 上行，§10.4）。上游没报用量时 Atlas 返回
+三个 0 而内部记 NULL，客户端把它读成"没有用量"而不是"用量为零"。
+
+**Temporal 边界要重建上下文。** `task_id` 与租户轴由入站 HTTP 过滤器建立，而绝大多数
+模型调用发生在活动里——那是另一个线程、通常是另一个进程。不补这一层的表现是：
+Atlas 强制要求 `taskId`，缺失即 400，于是主流程全部失败而手工点的同步接口一切正常。
+`PlatformActivityContext` 在活动入口重建两者，租户从**标书行**上取而不是从 ownerId 拼。
+
+**三条尚未闭合的依赖，都在平台侧：**
+
+1. `ATLAS_API_URL` 与平台凭据（铸不出票就调不了 Atlas）。
+2. Atlas 的 endpoint 授权。缺一个，对应 operation 全部 `403 NOT_ENTITLED`，
+   与令牌是否有效无关。授权到位前保持 `ATLAS_USE_DEDICATED_ENDPOINTS=false`，
+   全部走 `chat/default`——链路能通，但所有 operation 共用一套生成参数。
+3. **平台身份**。铸票要真实 workspace，而本地口令登录的租户是 `local:<用户id>`，
+   平台那边不存在。也就是说 **Atlas 迁移在 C1 切换之前无法真正生效**——
+   这两件事是耦合的，不是可以分别排期的。
+
+**登记的缺口：**入站 HTTP 请求上的 `task_id` 目前不传进工作流（工作流输入类型要加
+字段，对在途工作流是一次版本变更）。后果是 agent 发起的解读在 Atlas 那边归到产品
+自铸的键上，而不是发起方那条链。
 
 ## 9. 文件解析、存储与导出
 

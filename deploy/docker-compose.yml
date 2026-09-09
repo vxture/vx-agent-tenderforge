@@ -29,6 +29,15 @@ services:
     restart: unless-stopped
     environment:
       AI_SERVICE_INTERNAL_TOKEN: ${AI_SERVICE_INTERNAL_TOKEN:-ChangeMe-Internal-Token-2026}
+      # 模型出口。配上 ATLAS_API_URL 即切到 Atlas；不配则直连模型供应商，
+      # 而那条路在部署阶段被拒绝启动（除非显式 ALLOW_MOCK_ON_DEPLOY）。
+      DEPLOY_STAGE: ${DEPLOY_STAGE:-local}
+      ALLOW_MOCK_ON_DEPLOY: ${ALLOW_MOCK_ON_DEPLOY:-false}
+      ATLAS_API_URL: ${ATLAS_API_URL:-}
+      ATLAS_TIMEOUT_SECONDS: ${ATLAS_TIMEOUT_SECONDS:-90}
+      # 专属 endpoint 授权到位之前保持 false——那时全部走 chat/default，
+      # 链路能通但所有 operation 共用一套生成参数。
+      ATLAS_USE_DEDICATED_ENDPOINTS: ${ATLAS_USE_DEDICATED_ENDPOINTS:-false}
       AI_MODEL_API_KEY: ${AI_MODEL_API_KEY:-}
       AI_MODEL_BASE_URL: ${AI_MODEL_BASE_URL:-https://api.deepseek.com}
       AI_MODEL_REQUEST_DIALECT: ${AI_MODEL_REQUEST_DIALECT:-deepseek}

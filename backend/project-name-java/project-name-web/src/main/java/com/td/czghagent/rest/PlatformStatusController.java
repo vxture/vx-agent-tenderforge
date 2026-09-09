@@ -88,7 +88,10 @@ public class PlatformStatusController {
         // 只看身份的话，一套真身份配上替身权益会报 degraded=false——
         // 而那时每个人拿到的能力都是编造的，用量一笔也没入账。
         body.put("degraded", oidcGateway.isMock()
-                || entitlementResolver.isMock() || usageConsumeClient.isMock());
+                || entitlementResolver.isMock() || usageConsumeClient.isMock()
+                // 直连也算降级：它不产生编造的数据，但它让平台侧的推理账
+                // 永久性地缺一块，而那比编造的数据更难在事后补回来。
+                || !atlasConfigured);
         body.put("channels", List.of(
                 channel("C1", "身份（OIDC RP）", oidcChannelState(), oidcDetail()),
                 channel("C1b", "S2S 换票",
@@ -110,8 +113,15 @@ public class PlatformStatusController {
                         webhookVerifier.isConfigured()
                                 ? "HMAC 对原始字节验签、按 id 幂等、按 seq 拒倒序"
                                 : "未配密钥，所有开通/停用投递都会被拒收"),
-                channel("atlas", "模型出口", atlasConfigured ? "configured" : "not_configured",
-                        atlasConfigured ? "POST /v1/chat" : "当前仍直连模型供应商，属已知契约违规")
+                // 模型出口的四态和 C1 同构。"direct" 单独成一态而不是并进
+                // not_configured：后者读起来像「这条通道还没启用」，
+                // 而真相是<strong>它正在被另一条未登记的通道替代</strong>——
+                // 产品跑得好好的，只是每一次推理都没进平台的账。
+                channel("atlas", "模型出口", atlasChannelState(),
+                        atlasConfigured
+                                ? "POST /v1/chat，S2S 票每次现铸；Atlas 自行计量推理消耗"
+                                : "当前仍直连模型供应商：功能正常，但所有推理消耗都不入平台的账，"
+                                        + "属已知契约违规")
         ));
         return body;
     }
@@ -140,6 +150,14 @@ public class PlatformStatusController {
             return "active";
         }
         return deployStage.isDeployed() ? "degraded_mock" : "mock";
+    }
+
+    /** 已接通 / 部署态仍在直连 / 本地直连。 */
+    private String atlasChannelState() {
+        if (atlasConfigured) {
+            return "active";
+        }
+        return deployStage.isDeployed() ? "degraded_direct" : "direct";
     }
 
     private String oidcDetail() {

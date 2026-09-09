@@ -6,6 +6,7 @@ package com.td.czghagent.rest.security;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.td.czghagent.application.query.service.AuthQueryService;
 import com.td.czghagent.domain.model.CurrentUser;
+import com.td.czghagent.domain.model.PlatformCallerContext;
 import com.td.czghagent.rest.support.ErrorEnvelope;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -66,8 +67,14 @@ public class AuthenticationFilter extends OncePerRequestFilter {
         String cookieValue = RpSessionCookie.read(request);
         CurrentUser user = null;
         String token = null;
+        String platformAccessToken = null;
         if (cookieValue != null) {
-            user = platformSessions.resolve(cookieValue).orElse(null);
+            com.td.czghagent.domain.model.RpSession session =
+                    platformSessions.resolveSession(cookieValue).orElse(null);
+            if (session != null) {
+                user = session.toCurrentUser();
+                platformAccessToken = session.accessToken();
+            }
         }
         if (user == null) {
             token = bearerToken(request);
@@ -83,7 +90,37 @@ public class AuthenticationFilter extends OncePerRequestFilter {
         }
         request.setAttribute(RequestIdentity.USER, user);
         request.setAttribute(RequestIdentity.TOKEN, token);
-        filterChain.doFilter(request, response);
+        // 出站调用点埋在十几层业务函数底下，而只有这里知道这次请求替谁在跑。
+        // 本地口令登录的用户没有平台票，platformAccessToken 为空——
+        // 那时铸币退回 service 模式，而过渡租户会让它铸不出来。这是实情，不是缺陷。
+        try {
+            PlatformCallerContext.run(user.tenant(), platformAccessToken, () -> {
+                try {
+                    filterChain.doFilter(request, response);
+                } catch (IOException | ServletException exception) {
+                    // 受检异常穿不过 Runnable，包一层交给外面原样重抛——
+                    // 在这里吞掉会把业务失败变成一个没有堆栈的 500。
+                    throw new FilterFailure(exception);
+                }
+            });
+        } catch (FilterFailure wrapper) {
+            wrapper.rethrow();
+        }
+    }
+
+    /** 只为把受检异常抬过 {@link PlatformCallerContext#run} 而存在，不逃出本类。 */
+    private static final class FilterFailure extends RuntimeException {
+        private FilterFailure(Exception cause) {
+            super(cause);
+        }
+
+        private void rethrow() throws IOException, ServletException {
+            Throwable cause = getCause();
+            if (cause instanceof IOException ioException) {
+                throw ioException;
+            }
+            throw (ServletException) cause;
+        }
     }
 
     private String bearerToken(HttpServletRequest request) {
