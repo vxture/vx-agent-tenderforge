@@ -1,0 +1,24 @@
+#!/usr/bin/env sh
+# 治理规范 §2 的第四层检测里的第三层：提交前本地 gitleaks。
+#
+# 前三层是 GitHub push protection（推送即拦）、这个钩子（提交前拦）、
+# 以及 CI 的 secret-scan（合并前拦）。第四层是「仓库公开」——不靠私有兜底，
+# 所以「凭证永不入库」是绝对铁律，没有例外。
+#
+# 这一层拦得最早，代价也最小：一旦密钥进了本地历史，就只能走
+# 「源头 revoke + 干净重导」，改历史是不够的。
+#
+# gitleaks 不在时**跳过而不是阻断**：一个装不上工具就没法提交的钩子，
+# 三天之内就会被人用 --no-verify 绕过去，而那会连带绕过所有钩子。
+# 真正的强制在 CI 那一层。
+
+set -eu
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "[pre-commit] 未安装 gitleaks，跳过本地扫描（CI 仍会强制检查）"
+  echo "[pre-commit] 安装：https://github.com/gitleaks/gitleaks/releases"
+  exit 0
+fi
+
+echo "[pre-commit] gitleaks 扫描暂存区…"
+gitleaks protect --staged --config .gitleaks.toml --redact --no-banner --exit-code 1

@@ -108,31 +108,45 @@
 
 ### 3.2 仓库级（`vx-agent-bid`）
 
-| 类型 | 名称 | 值来源 | 备注 |
-| --- | --- | --- | --- |
-| secret | `DEPLOY_HOST` | 运维 | 部署主机的 tailnet 名 |
-| secret | `DEPLOY_USER` | 运维 | |
-| secret | `DEPLOY_PORT` | 运维 | 通常 22 |
-| secret | `DEPLOY_DIR` | 运维 | 栈根目录，建议 `/srv/md0/tenderforge` |
-| secret | `DEPLOY_SSH_KEY` | **所有者** | 授权在目标主机上的私钥 |
-| secret | `DEPLOY_SSH_KEY_PASSPHRASE` | 所有者 | 可选 |
-| secret | `DEPLOY_KNOWN_HOSTS` | 所有者 | `ssh-keyscan`，**fail-closed，无 TOFU 兜底** |
-| secret（Dependabot 命名空间） | `VXTURE_PACKAGES_READ_TOKEN` | 所有者 | **classic PAT**，只要 `read:packages`；细粒度 token 不被 GitHub Packages npm 源接受 |
-
-`VXTURE_PACKAGES_READ_TOKEN` 那条值得单独强调：**Dependabot 与 Actions 是两个
-互不可见的密钥命名空间**。漏配的表现是 npm 侧依赖更新永久且安静地失败——
-`github-actions` 照常出 PR，`npm` 再也不出，而没有任何地方报告"坏了"。
-加完之后要去 Insights → Dependency graph → Dependabot 手动跑一次
-"Check for updates"，确认日志里没有 401。
-
-### 3.3 环境级（`production` Environment，带必需审批人）
+治理规范 §3 把仓库级限定为「仓库专属的**公开标识**」——不是凭证，不是主机信息。
 
 | 类型 | 名称 | 备注 |
 | --- | --- | --- |
-| secret | `ENV_FILE_BASE64` | 宿主机 `.env` 的 base64。**只在目标文件不存在时写入**——重新裁这个密钥不会更新正在运行的主机，漂移是静默的 |
+| var | `ALIYUN_ACR_NAMESPACE` | **按实际 ACR 取**，不要想当然写 `vxture`；错的 namespace 表现为 `pull access denied` |
+| secret（Dependabot 命名空间） | `VXTURE_PACKAGES_READ_TOKEN` | **classic PAT**，只要 `read:packages` |
 
-环境级只放这一个，是刻意的：宿主机 `.env` 里装着 OIDC client secret、
-平台内部令牌、webhook 密钥、数据库口令——它们必须被审批门挡一道。
+`VXTURE_PACKAGES_READ_TOKEN` 那条值得单独强调：**Dependabot 与 Actions 是两个
+互不可见的密钥命名空间**，而 GitHub Packages 的 npm 源**不接受细粒度 token**。
+漏配的表现是 npm 侧依赖更新永久且安静地失败——`github-actions` 照常出 PR，
+`npm` 再也不出，而没有任何地方报告「坏了」。加完之后要去
+Insights → Dependency graph → Dependabot 手动跑一次 "Check for updates"，
+确认日志里没有 401。
+
+### 3.3 环境级（`production` Environment，带必需审批人）
+
+治理规范 §6：**每个部署目标一个环境**，各自携带本目标的主机信息。
+同一个 deploy job 靠 `environment: <route>` 路由到正确主机。
+
+| 类型 | 名称 | 备注 |
+| --- | --- | --- |
+| secret | `DEPLOY_HOST` | 目标主机的 tailnet 名 |
+| secret | `DEPLOY_USER` | |
+| secret | `DEPLOY_PORT` | |
+| secret | `DEPLOY_DIR` | **必须是精确的 stack 目录**——含 compose 与 `.env` 的<b>那一层</b>。差一级的表现是镜像能拉、compose 找不到 env_file 而失败 |
+| secret | `DEPLOY_SSH_KEY`（+ 可选 `_PASSPHRASE`） | |
+| secret | `DEPLOY_KNOWN_HOSTS` | **必填**。连接动作对空 known_hosts **fail-closed**，拒绝 `ssh-keyscan` 的 TOFU 回落 |
+| secret | `ENV_FILE_BASE64` | 宿主机 `.env` 的 base64 |
+
+**必需审批人必须配。** 零保护 = tag 一推就直接部署、不停等审批。
+配 reviewers 可以用 `gh api --method PUT repos/{o}/{r}/environments/{env}`；
+但**部署本身的 Approve 是所有者手点**，不自审。
+
+`ENV_FILE_BASE64` **只在目标文件不存在时写入**——重新裁这个密钥不会更新正在
+运行的主机，漂移是静默的。
+
+**迁仓/新仓不继承**：`DEPLOY_*`（环境级）与 `NAMESPACE`（仓库级）不会带到新仓，
+必须重建；而组织级共享凭证（ACR / tailscale / npm）在组织配一次、
+把本仓加入共享名单即可。
 
 ### 3.4 宿主机 `.env`（不进 GitHub，由 `ENV_FILE_BASE64` 投递）
 
@@ -180,6 +194,44 @@
 
 ---
 
+## 4b. SCA 闸门的现状（实测，**不是推测**）
+
+治理规范 §9 要求 `audit` 是 `main` 的硬阻断检查。本地用 CI 里同一条命令实跑了
+osv-scanner 2.4.0，结果是**这道门今天开不了**，两个原因：
+
+### 4b.1 npm 侧有大量待修告警
+
+`frontend/project-name-web/pnpm-lock.yaml`（478 个包）上报出 js-yaml、minimatch、
+nanoid、picomatch、postcss、react-router、rollup、vite、vitest 等多条，
+其中若干 CVSS ≥ 8。
+
+规范 §9 写明了整顿方法，**不是抑制**：
+
+* **直接依赖** → 抬 `package.json` 的 caret 下限到修复版（诚实声明安全下限）
+* **纯传递依赖** → 根 `pnpm.overrides`；跨 major 用 `pkg@1` / `pkg@5` 选择器分别定
+* **peer-only 依赖** → caret override 会被 pnpm **静默忽略**（还反过来报自己
+  override unmet），必须**精确版 pin**
+
+`react-router` 与 `vite` 是直接依赖，走第一条；其余多为传递依赖。
+
+### 4b.2 Maven 侧实际上没被扫
+
+这一条更值得注意，因为它**看起来是绿的**。osv-scanner 打印
+「Scanned pom.xml 并找到 6 个包」，紧接着报
+`failed to merge parents: 无法拉取 spring-boot-starter-parent:3.5.6`
+——于是只有各模块**直接声明**的那几个依赖被扫，Spring Boot 拉进来的
+整棵传递树一个都没扫到。
+
+我第一版的「三个生态都扫到」检查只 grep 文件名是否出现，会一路放行这种情况。
+已加强成同时拒绝 `failed resolution` / `Error during extraction`，实测确认会拒。
+
+**待解**：让 osv-scanner 在 CI 里能解析 Maven 父 POM。可选路径是先跑
+`mvn dependency:tree` 导出后再扫，或给 osv-scanner 配可达的 Maven registry。
+在解决之前，`audit` 会因为这条硬失败——**这是对的**：一个报告绿色而实际
+没扫 Java 依赖的闸门，比没有闸门更坏。
+
+---
+
 ## 5. 待决策清单
 
 1. **端口** — 必须向组织端口登记表申请。仓内现有的 `5274` 是遗留值，要删。
@@ -189,6 +241,9 @@
 4. **是否要 beta 环境** — 基准产品是 prod only（ADR-002）。本产品有 Temporal
    与数据库迁移，一个 beta 环境的价值可能更高，代价是第二套宿主机资源。
 5. **三镜像的 tag 与推送策略** — 建议同 SHA 同批。
+6. **npm 侧告警的整顿窗口**（§4b.1）——抬下限会动前端依赖版本，需要一次回归。
+7. **Maven 依赖树在 CI 里怎么解析**（§4b.2）——在此之前 `audit` 无法转正为
+   必需检查，而先把它设成必需会让所有 PR 卡死。
 
 ---
 
@@ -198,8 +253,10 @@
 1. 补齐 `deploy/.env.example` 的 36 个键，删掉 restate 的端口。
 2. 写 `.github/workflows/ci.yml`（Java + Python + 前端三套测试与覆盖率）。
 3. 首次推送 `main`，让 CI 跑一次产出必需检查的 context。
-4. 应用分支 ruleset（**顺序不能反**：空仓上先加限制性 ruleset 会挡住首次导入）。
-5. 开启 secret scanning + push protection。
+4. 开启 secret scanning + push protection（治理规范 §2 的第一层）。
+5. 整顿 SCA 告警（§4b）——**必须在应用 ruleset 之前**，否则 `audit` 一成为
+   必需检查，所有 PR 立刻卡死。
+6. 应用分支 ruleset（**顺序不能反**：空仓上先加限制性 ruleset 会挡住首次导入）。
 
 **阶段二：部署链（依赖运维给主机信息）**
 6. 写 `build.yml`（三镜像，GHCR 主 + ACR 备）与 `deploy/deploy.sh`。
