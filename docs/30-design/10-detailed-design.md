@@ -1,7 +1,7 @@
 # TenderAgent 详细设计
 
-> 本文是当前系统的唯一产品与技术事实源，内容对应仓库现行代码和 Flyway V1-V25 的最终
-> 数据库状态。本文不记录开发历史、提案过程或未实现规划。
+> 本文是当前系统的唯一产品与技术事实源，内容对应仓库现行代码与
+> `deploy/database/ddl/` 定义的数据库结构。本文不记录开发历史、提案过程或未实现规划。
 
 ## 1. 产品范围
 
@@ -174,7 +174,7 @@ Web，并将 `WEB_HOST` 收回 `127.0.0.1`、在 `CORS_ALLOWED_ORIGINS` 中配�
 | `project-name-application-query` | 会话、账户、管理员和标书只读用例 |
 | `project-name-infrastructure` | JDBC 仓储、文件系统、密码、HTTP AI/文档客户端 |
 | `project-name-web` | Controller、DTO、认证过滤器、统一响应和异常映射 |
-| `project-name-start` | Spring Boot 入口、配置、账号引导和 Flyway V1-V25 |
+| `project-name-start` | Spring Boot 入口、配置与账号引导（结构不在这里，见 `deploy/database/ddl/`） |
 
 依赖方向为 Web/Start -> Application -> Domain，Infrastructure 实现 Domain 端口。读写应用层
 分离，但共用领域模型和数据库事务。
@@ -760,13 +760,22 @@ Java `BidDocumentExporter` 的本地实现用于文档服务关闭时的开发/�
 | `bid_layout_job` | 排版任务、输入哈希、页数、QA 和失败信息 |
 | `bid_export` | 版本化 DOCX 对象、QA 状态和创建人 |
 
-Flyway 从 `classpath:sql` 依次执行 V1-V25。V1-V12 创建的是仓库旧产品所需结构，V13 引入
-TenderAgent，V14 删除旧产品表，V15-V22 完成主体业务结构；V23-V25 是已执行的兼容迁移，
-其中策略阶段、技术域蓝图、解决方案契约和软预算字段由当前稳定正文流程保留以读取历史数据，
-不再由默认生成链路创建新的蓝图或全文压缩记录。全部既有脚本都是存量数据库升级和 Flyway
-checksum 的一部分，不能删除、改名或改写；新结构只允许追加 V26+。
-全部既有脚本都是存量数据库升级和 Flyway checksum 的一部分，不能删除、改名或改写；新结构
-只允许追加 V25+。
+结构由 **`deploy/database/ddl/` 单一权威**定义，手写、create-once，
+经 `db-init.yml` 施加（`confirm=yes` + `expected_sha` + 生产环境审批门）。
+**应用永远不建表**——它以最小权限角色 `tenderforge_svc` 连库，没有 DDL 权限。
+
+* `00_baseline.sql` —— 39 张表，四个 schema：`vx_provision`（开通）/
+  `local_authz`（本地身份）/ `local_usage`（用量）三个契约 schema 与
+  `bid` 域 schema。外键统一在文件末尾 ALTER（引用关系有环，按依赖排序建表
+  会在环上断掉）。
+* `97_service_role.sql` —— 最小权限角色与 `search_path`。
+* `98_column_locks.sql` —— 列级 UPDATE 白名单。19 张表有可写列，
+  20 张追加型表一律不给。
+* `incr/NNNN_*.sql` —— 结构增量，必须自己幂等（`apply.sh` 会整个重放）。
+
+2026-09-10 之前这里是 Flyway 的 30 个 `V*.sql`，与治理规范
+「常规部署链不跑 migration/seed」冲突。整改过程与暴露出的四个只有真引擎
+才看得见的问题，记在 §13b 的 TD-001/002/003 销号说明里。
 
 ### 10.4 用量缓冲区（C3 上行）
 
@@ -991,38 +1000,51 @@ Spring 的 `RestClient` 把读超时包成普通的 `RestClientException`，
 
 回报渠道是平台仓的 `liaison` issue（规范 §10 起，不再新建 `80-liaison/*.md`）。
 
-### TD-001 · Flyway 启动时自动迁移，而非 `ddl/` 单一权威 + `db-init.yml`
+### ~~TD-001 · Flyway 启动时自动迁移~~ —— 2026-09-10 已销号
+
+改为 `deploy/database/ddl/` 单一权威 + `apply.sh` + `db-init.yml`
+（confirm=yes + expected_sha + 生产环境审批门）。应用侧 Flyway 已从依赖、
+配置与部署链彻底移除，30 个 `V*.sql`（2228 行）删除。
+
+**能做 clean-baseline 而不是逐条翻译，靠的是「本产品从未部署过」**——
+线上不存在任何一个库，没有需要保历史的活库。这个窗口首次上线就没了。
+
+### ~~TD-002 · 库名与服务角色~~ —— 2026-09-10 已销号
+
+库 `vx_tenderforge_db`、角色 `tenderforge_svc`（ADR-007），最小权限
+（SELECT/INSERT/DELETE，无 DDL，无整表 UPDATE）+ 列级 UPDATE 白名单
+（`98_column_locks.sql`，19 张表 158 个可写列，20 张追加型表一律不给）。
+
+### ~~TD-003 · MySQL~~ —— 2026-09-10 已销号
+
+PostgreSQL 18，与组织内其余已部署产品一致。H2 一并移除：集成测试改用
+Testcontainers 起真 Postgres，跑 `deploy/database/ddl/` 里那份文件本身，
+并以受限角色 `tenderforge_svc` 连接。
+
+**这次迁移暴露了四个只有真引擎才看得见的问题**，逐条记在这里，因为它们
+都属于「本地过、生产炸」那一类：
+
+| 问题 | 症状 | 处理 |
+| --- | --- | --- |
+| `TIMESTAMPTZ` 不能按 `LocalDateTime` 读 | 驱动直接拒绝 | JDBC 边界一次显式转换（`JdbcTimes`）。**不把列降级成无时区**——这些列语义上是绝对时刻 |
+| 那次转换第一版写错 | 读回来差整 8 小时 | pgjdbc 固定返回 UTC 偏移，写入侧按会话时区；`atZoneSameInstant` 显式对齐。**这个坑本仓踩过两次，形态不同、症状一样：读的时区与写的时区不是同一个** |
+| 列锁白名单漏 4 列 | `permission denied`，但 Spring 把 42501 映射成 `BadSqlGrammar`，看起来像语法错 | 列名由 `objectColumn()` 运行时拼出，静态提取看不见。补进 `EXTRACTION_FIXUPS` |
+| `getObject(col, Double.class)` 读 `numeric` | 驱动拒绝转换 | 改用守卫写法。`getDouble` 在 NULL 上返回 0.0，而「0 分」和「没打分」必须是两件事 |
+
+**第三条最值得记**：护栏 `check_column_locks.py` 用与白名单同一个提取器算
+期望值，所以它**结构上抓不到自己的盲点**。抓到它的是「集成测试以受限角色
+连库」——那个当时只是「更严格一点」的设计决定。护栏是必要而不充分的，
+这一条写进了它自己的文档。
+
+### TD-006 · 表名单数，规范目标形态是复数
 
 | | |
 | --- | --- |
-| **规范条款** | §7「DDL 单一权威 = 手写 `deploy/database/ddl/*.sql`」；§11「常规部署链不跑 migration/seed，DB 结构变更是独立授权动作」 |
-| **本仓现状** | Flyway 在 api 启动时自动跑 V1–V30 |
-| **实现处标注** | `.github/workflows/deploy.yml` 抬头注释 |
-| **理由** | 30 个迁移已在这条路径上跑通并验证过；转成 `ddl/apply.sh` 的 clean-baseline 形态要重写全部迁移、重建本地栈、重做一次完整回归。owner 2026-09-10 决定本轮不动。 |
-| **风险** | MySQL 没有 DDL 事务：一次失败的迁移会留下 `success=0` 的行，之后每次启动都失败，需人工删行才能恢复。**本轮已踩过两次。** |
-| **回收条件** | 库层整改排期时一并做——转 `ddl/` 单一权威、关掉部署态的 `flyway.enabled`、新建 `db-init.yml`（`confirm=yes` + `expected_sha` + 审批门）。 |
-
-### TD-002 · 库名与服务角色仍是 `czghagent`
-
-| | |
-| --- | --- |
-| **规范条款** | ADR-007「库名 `vx_<product_code>_db`，角色 `<code>_svc`」；§7「最小权限服务角色 + 列锁」 |
-| **本仓现状** | 库 `czghagent`、角色 `czghagent`、全量授权、无列锁 |
-| **实现处标注** | `docker-compose.yml` 的 mysql 服务注释 |
-| **理由** | 改库名要动 Flyway 迁移、连接串与本地栈重建，与 TD-001 是同一件事的两半。 |
-| **风险** | 跨产品对账时按 `vx_*_db` 找不到本产品的库；角色权限过大，一次注入的爆炸半径是整库而不是白名单列。 |
-| **回收条件** | 同 TD-001。 |
-
-### TD-003 · MySQL 而非 Postgres
-
-| | |
-| --- | --- |
-| **规范条款** | 无明文条款，但组织内已部署产品（arda / karda / runos / atlas / varda）**全部是 Postgres**，容器命名规约 `vx-<stack>-<engine>-db-<env>` 也是按 pg 写的 |
-| **本仓现状** | MySQL 8.4 |
-| **实现处标注** | `docker-compose.yml` 的 mysql 服务注释 |
-| **理由** | 引擎迁移的成本远大于前两条，且 owner 2026-09-10 明确「当前是 mysql，还需要修正」——即已知、待排期，不是疏漏。 |
-| **风险** | 运维要维护第二种引擎；备份、监控、db-maintenance 的白名单函数都要写两套。 |
-| **回收条件** | 与 TD-001/002 合并成一次库层整改，或 owner 明确接受长期双引擎。 |
+| **规范条款** | data_platform_100 §3.2.1「table 复数」 |
+| **本仓现状** | 39 张表全部单数（`bid_document`、`app_user`…） |
+| **实现处标注** | `deploy/database/ddl/00_baseline.sql` 抬头 |
+| **理由** | 同一节明写「存量表单复数混用待各域逐域改造时统一，改造前<b>不视为违规</b>」；基准产品 vxtpl 的基线也是单数。复数化会牵动 19 个 JdbcTemplate 类里的每一条 SQL。 |
+| **回收条件** | 与规范说的「各域字段级章节逐域改造」同步做。 |
 
 ### TD-004 · 三个镜像，而非级联规则的 `{code}-app` 一个
 

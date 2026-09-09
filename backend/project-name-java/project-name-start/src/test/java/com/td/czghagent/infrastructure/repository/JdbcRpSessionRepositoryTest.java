@@ -3,6 +3,7 @@
 // DATE: 2026-09-08
 package com.td.czghagent.infrastructure.repository;
 
+import com.td.czghagent.PostgresBackedTest;
 import com.td.czghagent.domain.model.RpSession;
 import com.td.czghagent.domain.model.TenantScope;
 import com.td.czghagent.domain.repository.RpSessionRepository;
@@ -28,13 +29,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 被发现用了 MySQL 专有语法。
  */
 @SpringBootTest(properties = {
-        "spring.datasource.url=jdbc:h2:mem:rp-session-test;MODE=MySQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE",
-        "spring.datasource.username=sa",
-        "spring.datasource.password=",
         "app.bootstrap.enabled=false",
         "app.storage.root=${java.io.tmpdir}/rp-session-${random.uuid}"
 })
-class JdbcRpSessionRepositoryTest {
+class JdbcRpSessionRepositoryTest extends PostgresBackedTest {
 
     @Autowired
     private RpSessionRepository repository;

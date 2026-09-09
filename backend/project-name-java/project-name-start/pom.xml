@@ -27,21 +27,54 @@
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
         <dependency>
-            <groupId>org.flywaydb</groupId>
-            <artifactId>flyway-core</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.flywaydb</groupId>
-            <artifactId>flyway-mysql</artifactId>
-        </dependency>
-        <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <!--
+            集成测试跑**真 Postgres**，不是嵌入式替身。基线用了 schema、UUID、
+            TIMESTAMPTZ 与 gen_random_uuid()，H2 哪个兼容模式都跑不了；更要紧的是
+            「测试跑一种引擎、生产跑另一种」这件事本身——不成立的 SQL 只会在生产暴露。
+        -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+
     </dependencies>
     <build>
         <plugins>
+        <!--
+            把 deploy/database/ddl/*.sql 复制进测试 classpath。集成测试跑的必须是
+            **生产用的那一份文件**——抄一份进 test/resources 会过期，而过期的表现是
+            测试全绿、生产建不出表。文件搬走了这一步会直接失败，不会静默跳过。
+        -->
+        <plugin>
+            <artifactId>maven-resources-plugin</artifactId>
+            <executions>
+                <execution>
+                    <id>copy-ddl-for-tests</id>
+                    <phase>generate-test-resources</phase>
+                    <goals><goal>copy-resources</goal></goals>
+                    <configuration>
+                        <outputDirectory>${project.build.testOutputDirectory}/ddl</outputDirectory>
+                        <resources>
+                            <resource>
+                                <directory>${project.basedir}/../../../deploy/database/ddl</directory>
+                                <includes><include>*.sql</include></includes>
+                            </resource>
+                        </resources>
+                    </configuration>
+                </execution>
+            </executions>
+        </plugin>
+
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>

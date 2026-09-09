@@ -35,14 +35,15 @@
             <artifactId>poi-ooxml</artifactId>
             <version>5.4.1</version>
         </dependency>
+        <!--
+            唯一的数据库驱动。此前这里是 h2（本地）+ mysql-connector-j（生产）
+            两个——那意味着每一条 SQL 都要在两种方言下都成立，而不成立的
+            那些只在生产暴露。现在本地与生产跑同一个引擎，测试用
+            Testcontainers 起真 Postgres。
+        -->
         <dependency>
-            <groupId>com.h2database</groupId>
-            <artifactId>h2</artifactId>
-            <scope>runtime</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.mysql</groupId>
-            <artifactId>mysql-connector-j</artifactId>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
             <scope>runtime</scope>
         </dependency>
         <dependency>

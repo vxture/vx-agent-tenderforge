@@ -4,30 +4,25 @@
 name: tenderforge
 
 services:
-  mysql:
-    # 规范 §7 的容器命名 vx-<stack>-<engine>-db-<env>。<b>服务名仍用短名</b>，
-    # 因为服务名才是网络别名、DATABASE_URL 只认它——改容器名永远不该断连接串。
-    #
-    # <b>两条已登记的偏离在这里</b>（见 docs/30-design/10-detailed-design.md §13b）：
-    #   TD-002 库名与角色仍是 czghagent，不是 ADR-007 的 vx_tenderforge_db +
-    #          tenderforge_svc；服务角色也还没有最小权限与列锁。
-    #   TD-003 引擎是 MySQL，而组织内已部署的产品全部是 Postgres。
-    # 两条都是 owner 2026-09-10 明确「本轮不动、待排期」，不是疏漏。
-    # 改它们要连带动 Flyway 迁移、连接串与本地栈重建——同一件事的三个面。
-    container_name: vx-tenderforge-mysql-db-${DEPLOY_STAGE}
-    image: mysql:8.4
+  # 服务名 `db` 是**短名**（规范 §7）：它才是网络别名、DATABASE_URL 只认它，
+  # 所以改容器名永远不该断连接串。容器名按 vx-<stack>-<engine>-db-<env>。
+  #
+  # 应用**不建表**：它以最小权限角色 tenderforge_svc 连库，连 CREATE 的权限
+  # 都没有。结构由 deploy/database/ddl 单一权威 + db-init.yml 施加。
+  # 首次起栈需要先跑一次 db-init（本地：bash deploy/database/apply.sh）。
+  db:
+    container_name: vx-tenderforge-postgres-db-${DEPLOY_STAGE}
+    image: postgres:18-alpine
     restart: unless-stopped
     environment:
-      MYSQL_DATABASE: czghagent
-      MYSQL_USER: czghagent
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-ChangeMe-Mysql-2026}
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-ChangeMe-Root-2026}
+      POSTGRES_DB: vx_tenderforge_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_ROOT_PASSWORD:?生产必须显式设置——默认口令的数据库等于没有口令}
       TZ: Asia/Shanghai
-    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_0900_ai_ci
     volumes:
-      - mysql-data:/var/lib/mysql
+      - db-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d vx_tenderforge_db"]
       interval: 10s
       timeout: 5s
       retries: 20
@@ -73,15 +68,15 @@ services:
       retries: 10
 
   temporal-db-init:
-    image: mysql:8.4
+    image: postgres:18-alpine
     depends_on:
-      mysql:
+      db:
         condition: service_healthy
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-ChangeMe-Root-2026}
-      TEMPORAL_DB_PASSWORD: ${TEMPORAL_DB_PASSWORD:-ChangeMe-Temporal-2026}
+      POSTGRES_PASSWORD: ${POSTGRES_ROOT_PASSWORD:?生产必须显式设置}
+      TEMPORAL_DB_PASSWORD: ${TEMPORAL_DB_PASSWORD:?生产必须显式设置}
     volumes:
-      - ./deploy/mysql/init-temporal.sh:/init-temporal.sh:ro
+      - ./deploy/postgres/init-temporal.sh:/init-temporal.sh:ro
     command: ["sh", "/init-temporal.sh"]
     restart: "no"
 
@@ -92,11 +87,11 @@ services:
       temporal-db-init:
         condition: service_completed_successfully
     environment:
-      DB: mysql8
-      DB_PORT: 3306
-      MYSQL_USER: temporal
-      MYSQL_PWD: ${TEMPORAL_DB_PASSWORD:-ChangeMe-Temporal-2026}
-      MYSQL_SEEDS: mysql
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_USER: temporal
+      POSTGRES_PWD: ${TEMPORAL_DB_PASSWORD:?生产必须显式设置}
+      POSTGRES_SEEDS: db
       DBNAME: temporal
       VISIBILITY_DBNAME: temporal_visibility
       DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/docker.yaml
@@ -128,7 +123,7 @@ services:
       dockerfile: backend/project-name-java/Dockerfile
     restart: unless-stopped
     depends_on:
-      mysql:
+      db:
         condition: service_healthy
       ai:
         condition: service_healthy
@@ -136,10 +131,14 @@ services:
         condition: service_healthy
     environment:
       SPRING_PROFILES_ACTIVE: prod
-      DATABASE_URL: jdbc:mysql://mysql:3306/czghagent?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
-      DATABASE_USERNAME: czghagent
-      DATABASE_PASSWORD: ${MYSQL_PASSWORD:-ChangeMe-Mysql-2026}
-      DATABASE_DRIVER: com.mysql.cj.jdbc.Driver
+      # 读写时间列用同一个会话时区，往返才精确（见 JdbcTimes）。
+      # 钉住它是为了重启或换主机之后挂钟时间不漂——存进去的绝对时刻
+      # 不会变，但它渲染成几点会变。
+      TZ: Asia/Shanghai
+      DATABASE_URL: jdbc:postgresql://db:5432/vx_tenderforge_db?stringtype=unspecified
+      DATABASE_USERNAME: tenderforge_svc
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:?生产必须显式设置}
+      DATABASE_DRIVER: org.postgresql.Driver
       # 调优项。compose 的 environment: 是白名单——不在这里列出来，
       # 写进 .env 就完全没有反应，服务照常起来、照常用默认值、没有任何报错。
       # SERVER_PORT 刻意不放开：8081 在健康检查和 nginx 上游里是写死的，
@@ -231,10 +230,14 @@ services:
     environment:
       SPRING_MAIN_WEB_APPLICATION_TYPE: none
       SPRING_PROFILES_ACTIVE: prod
-      DATABASE_URL: jdbc:mysql://mysql:3306/czghagent?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
-      DATABASE_USERNAME: czghagent
-      DATABASE_PASSWORD: ${MYSQL_PASSWORD:-ChangeMe-Mysql-2026}
-      DATABASE_DRIVER: com.mysql.cj.jdbc.Driver
+      # 读写时间列用同一个会话时区，往返才精确（见 JdbcTimes）。
+      # 钉住它是为了重启或换主机之后挂钟时间不漂——存进去的绝对时刻
+      # 不会变，但它渲染成几点会变。
+      TZ: Asia/Shanghai
+      DATABASE_URL: jdbc:postgresql://db:5432/vx_tenderforge_db?stringtype=unspecified
+      DATABASE_USERNAME: tenderforge_svc
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:?生产必须显式设置}
+      DATABASE_DRIVER: org.postgresql.Driver
       # 调优项。compose 的 environment: 是白名单——不在这里列出来，
       # 写进 .env 就完全没有反应，服务照常起来、照常用默认值、没有任何报错。
       # SERVER_PORT 刻意不放开：8081 在健康检查和 nginx 上游里是写死的，
@@ -317,7 +320,7 @@ services:
       retries: 10
 
 volumes:
-  mysql-data:
+  db-data:
   private-files:
 
 secrets:

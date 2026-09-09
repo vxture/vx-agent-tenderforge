@@ -3,6 +3,7 @@
 // DATE: 2026-09-09
 package com.td.czghagent.infrastructure.repository;
 
+import com.td.czghagent.PostgresBackedTest;
 import com.td.czghagent.domain.model.UsageEvent;
 import com.td.czghagent.domain.model.UsageMetric;
 import com.td.czghagent.domain.repository.UsageBufferRepository;
@@ -29,15 +30,12 @@ import static org.assertj.core.api.Assertions.assertThat;
  * V26 就是在「只在 MySQL 上成立的 DDL」这件事上先失败了一次。
  */
 @SpringBootTest(properties = {
-        "spring.datasource.url=jdbc:h2:mem:usage-buffer-test;MODE=MySQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE",
-        "spring.datasource.username=sa",
-        "spring.datasource.password=",
         "app.bootstrap.enabled=false",
         // 冲洗任务在后台跑会去认领测试刚写进去的行——关掉它。
         "app.platform.usage-flush-enabled=false",
         "app.storage.root=${java.io.tmpdir}/usage-buffer-${random.uuid}"
 })
-class UsageBufferIntegrationTest {
+class UsageBufferIntegrationTest extends PostgresBackedTest {
 
     private static final LocalDateTime NOW = LocalDateTime.parse("2026-09-09T10:00:00");
 

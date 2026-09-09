@@ -328,7 +328,7 @@ final class JdbcBidTaskExportPersistence {
                 """, (rs, row) -> new BidWorkspace.GenerationTask(
                 rs.getString("id"), rs.getString("status"), rs.getInt("total_units"),
                 rs.getInt("completed_units"), rs.getString("error_message"),
-                rs.getObject("created_at", LocalDateTime.class),
+                JdbcTimes.localDateTime(rs, "created_at"),
                 BidJdbcMappers.nullableTime(rs, "finished_at")), bidId)
                 .stream().findFirst().orElse(null);
     }
@@ -341,7 +341,7 @@ final class JdbcBidTaskExportPersistence {
                 rs.getString("id"), rs.getString("status"), rs.getString("stage"),
                 rs.getInt("progress"), rs.getLong("input_revision"),
                 rs.getString("workflow_run_id"),
-                rs.getString("error_message"), rs.getObject("created_at", LocalDateTime.class),
+                rs.getString("error_message"), JdbcTimes.localDateTime(rs, "created_at"),
                 BidJdbcMappers.nullableTime(rs, "started_at"),
                 BidJdbcMappers.nullableTime(rs, "finished_at")), bidId)
                 .stream().findFirst().orElse(null);

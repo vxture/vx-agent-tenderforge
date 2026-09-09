@@ -39,9 +39,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest(properties = {
-        "spring.datasource.url=jdbc:h2:mem:tender-writing-test;MODE=MySQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE",
-        "spring.datasource.username=sa",
-        "spring.datasource.password=",
         "app.bootstrap.enabled=false",
         // 冲洗任务在后台跑会去认领测试刚写进去的行——关掉它。
         "app.platform.usage-flush-enabled=false",
@@ -49,7 +46,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 })
 @AutoConfigureMockMvc
 @Import(TenderWritingIntegrationTest.ParserConfiguration.class)
-class TenderWritingIntegrationTest {
+class TenderWritingIntegrationTest extends PostgresBackedTest {
 
     @Autowired
     private MockMvc mockMvc;
@@ -472,15 +469,20 @@ class TenderWritingIntegrationTest {
                 WHERE task_id = ? AND status = 'SUCCEEDED'
                 """, Integer.class, generationTaskId)).isEqualTo(succeededBeforeResume);
 
-        jdbcTemplate.update(
+        // 夹具走 owner 连接：往标题里塞前后空白，验应用会不会规范化。
+        // 生产改评分条款走的是删+插，从不 UPDATE 标题——所以这几列落在列锁
+        // 白名单之外是对的，用受限角色去做只会得到与被测行为无关的
+        // permission denied（见 PostgresBackedTest#fixtureJdbc）。
+        JdbcTemplate fixture = fixtureJdbc();
+        fixture.update(
                 "UPDATE bid_scoring_criterion SET title = CONCAT(' ', title, ' ') WHERE bid_id = ?",
                 bidId
         );
-        jdbcTemplate.update(
+        fixture.update(
                 "UPDATE bid_outline_node SET title = CONCAT(' ', title, ' ') WHERE bid_id = ?",
                 bidId
         );
-        jdbcTemplate.update(
+        fixture.update(
                 "UPDATE bid_chapter SET title = CONCAT(' ', title, ' ') WHERE bid_id = ?",
                 bidId
         );

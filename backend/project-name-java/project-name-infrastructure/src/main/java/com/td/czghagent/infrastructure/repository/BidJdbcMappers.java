@@ -25,8 +25,8 @@ final class BidJdbcMappers {
             rs.getString("writing_method"), rs.getString("title"), rs.getInt("target_pages"),
             rs.getString("bidding_mode"), rs.getString("workflow_step"), rs.getString("status"),
             rs.getBoolean("content_stale"), rs.getString("error_message"),
-            rs.getObject("created_at", LocalDateTime.class),
-            rs.getObject("updated_at", LocalDateTime.class), rs.getLong("revision"));
+            JdbcTimes.localDateTime(rs, "created_at"),
+            JdbcTimes.localDateTime(rs, "updated_at"), rs.getLong("revision"));
 
     static final RowMapper<BidWorkspace.Criterion> CRITERION = (rs, row) ->
             new BidWorkspace.Criterion(
@@ -49,21 +49,21 @@ final class BidJdbcMappers {
             new BidWorkspace.Chapter(
                     rs.getString("id"), rs.getString("outline_node_id"), rs.getString("title"),
                     rs.getString("content"), rs.getString("generation_status"),
-                    rs.getObject("updated_at", LocalDateTime.class), rs.getLong("revision"));
+                    JdbcTimes.localDateTime(rs, "updated_at"), rs.getLong("revision"));
 
     static final RowMapper<BidReferenceAsset> ASSET = (rs, row) ->
             new BidReferenceAsset(
                     rs.getString("id"), rs.getString("owner_id"), rs.getString("category"),
                     rs.getString("display_name"), rs.getString("original_file_name"),
                     rs.getString("media_type"), rs.getLong("file_size"),
-                    rs.getObject("created_at", LocalDateTime.class),
-                    rs.getObject("updated_at", LocalDateTime.class), rs.getLong("revision"));
+                    JdbcTimes.localDateTime(rs, "created_at"),
+                    JdbcTimes.localDateTime(rs, "updated_at"), rs.getLong("revision"));
 
     static final RowMapper<BidExport> EXPORT = (rs, row) -> new BidExport(
             rs.getString("id"), rs.getString("bid_id"), rs.getInt("version_no"),
             rs.getString("file_name"), rs.getLong("file_size"),
             rs.getString("layout_job_id"), rs.getString("qa_status"),
-            rs.getObject("created_at", LocalDateTime.class));
+            JdbcTimes.localDateTime(rs, "created_at"));
 
     private BidJdbcMappers() {
     }
@@ -104,19 +104,24 @@ final class BidJdbcMappers {
     }
 
     /**
-     * 读一个可空的 DATETIME 列。
+     * 读一个可空的时间列。
      *
-     * <p>走 {@code getObject(..., LocalDateTime.class)} 而不是
-     * {@code getTimestamp(...).toLocalDateTime()}：后者会把库里的墙钟时间按
-     * <strong>服务端时区解释、再转成 JVM 默认时区</strong>，而 JVM 在容器里是 UTC、
-     * MySQL 是 Asia/Shanghai——于是每一个时间戳读回来都少 8 小时。
+     * <p>库列是 {@code TIMESTAMPTZ}，领域用 {@link LocalDateTime}，两者之间那次
+     * 显式转换在 {@link JdbcTimes} 里——驱动拒绝直接转，理由和做法都记在那。
      *
-     * <p>更要命的是这个偏移<strong>不对称</strong>：写参数时绑定的 LocalDateTime 不做转换，
-     * 原样落库。所以「读出来再拿去比较」这件事必然错位，键集游标翻页就是撞在这上面
-     * ——第二页永远为空，而且不报任何错。
+     * <p>这里保留一层包装而不是让调用方直接用 {@code JdbcTimes}：这个方法名
+     * 说的是「可空」，而可空是这些列的要害。{@code finished_at} 之类的列
+     * 「还没结束」就是 {@code NULL}，读成一个默认时刻会让「未完成」和
+     * 「在纪元零点完成」变成同一件事，而这件事不会有任何报错。
+     *
+     * <p>历史注记：MySQL 时代这里的坑是 {@code getTimestamp(...).toLocalDateTime()}
+     * 会按服务端时区解释再转 JVM 默认时区，而写入侧不转——读写不对称，
+     * 键集游标翻页的第二页永远为空且不报错。换到 Postgres 之后这个坑换了形态：
+     * 驱动干脆拒绝隐式转换（见 JdbcTimes），把「按哪个时区解释」逼成一个
+     * 必须显式回答的问题。<strong>拒绝比猜错好</strong>。
      */
     static LocalDateTime nullableTime(ResultSet resultSet, String column) throws SQLException {
-        return resultSet.getObject(column, LocalDateTime.class);
+        return JdbcTimes.localDateTime(resultSet, column);
     }
 
     static Integer nullableInteger(Object value) {

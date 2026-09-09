@@ -142,7 +142,7 @@ probe() {
 
 cmd_verify() {
   local tries=0 ok_api=false ok_ai=false ok_web=false
-  # 60 次 × 3 秒 = 3 分钟。Java 冷启动 + Flyway 迁移在这台机器上要一分多钟，
+  # 60 次 × 3 秒 = 3 分钟。Java 冷启动在这台机器上要一分多钟，
   # vxtpl 那边的 20 次（1 分钟）对本产品不够——超时的表现会是「部署失败」，
   # 而实际只是还没起完。
   until [ "$tries" -ge 60 ]; do

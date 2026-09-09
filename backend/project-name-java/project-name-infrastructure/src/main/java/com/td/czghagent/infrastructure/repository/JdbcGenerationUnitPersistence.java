@@ -422,7 +422,7 @@ class JdbcGenerationUnitPersistence {
                 BidJdbcMappers.nullableTime(rs, "compacted_at"),
                 rs.getString("content"), rs.getString("content_hash"),
                 rs.getString("summary"), rs.getString("previous_summary"),
-                rs.getString("error_message"), rs.getObject("updated_at", LocalDateTime.class));
+                rs.getString("error_message"), JdbcTimes.localDateTime(rs, "updated_at"));
     }
 
     private String limit(String value) {

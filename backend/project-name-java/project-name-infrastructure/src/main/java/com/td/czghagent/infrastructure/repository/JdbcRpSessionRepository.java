@@ -33,8 +33,8 @@ public class JdbcRpSessionRepository implements RpSessionRepository {
             rs.getString("roles"),
             rs.getString("access_token"),
             rs.getString("refresh_token"),
-            rs.getObject("access_expires_at", LocalDateTime.class),
-            rs.getObject("expires_at", LocalDateTime.class)
+            JdbcTimes.localDateTime(rs, "access_expires_at"),
+            JdbcTimes.localDateTime(rs, "expires_at")
     );
 
     private static final RowMapper<AuthorizationRequest> AUTHORIZATION_REQUEST =
@@ -43,7 +43,7 @@ public class JdbcRpSessionRepository implements RpSessionRepository {
                     rs.getString("nonce"),
                     rs.getString("code_verifier"),
                     rs.getString("return_to"),
-                    rs.getObject("expires_at", LocalDateTime.class)
+                    JdbcTimes.localDateTime(rs, "expires_at")
             );
 
     private final JdbcTemplate jdbcTemplate;

@@ -50,8 +50,8 @@
 | | vxtpl | TenderForge |
 | --- | --- | --- |
 | 镜像数 | 1（Next.js 单体） | **3**：java、python、web |
-| 有状态服务 | Postgres + Redis | **MySQL 8.4 + Temporal**（含 `auto-setup` 与一次性 `temporal-db-init`） |
-| DB 结构变更 | 独立 `db-init.yml`，**绝不走部署链** | 应用启动时 **Flyway** 自动迁移（V1–V30） |
+| 有状态服务 | Postgres + Redis | **PostgreSQL 18 + Temporal**（含 `auto-setup` 与一次性 `temporal-db-init`） |
+| DB 结构变更 | 独立 `db-init.yml`，**绝不走部署链** | **同左**（2026-09-10 整改完成，见详细设计 §13b） |
 | 构建期密钥 | `NODE_AUTH_TOKEN`（CI 环境变量） | 前端 Dockerfile 用 **BuildKit secret** `github_packages_token` |
 | 持久化卷 | Postgres 数据 | `mysql-data` + **`private-files`**（招标原件与导出的 DOCX） |
 | 长任务 | 无 | Temporal 工作流，正文生成可跑数分钟 |
@@ -64,24 +64,18 @@
 
 建议：`ghcr.io/vxture/tenderforge-{api,ai,web}:sha-<short>`，三者同 tag 同批推送。
 
-### 2.2 Flyway 与 db-init 的冲突（**需决策**）
+### 2.2 DB 结构变更路径（**已整改**）
 
-基准仓的规矩写得很硬：「DB 结构变更走 `db-init.yml`，绝不走部署链」，
-理由是一次失败的结构变更不该由一次常规发布触发。
+2026-09-10 之前本产品是 Flyway 在 api 启动时自动跑迁移，与治理规范
+「常规部署链不跑 migration/seed」冲突。现已改成规范要求的形态：
 
-本产品目前是 Flyway 在 api 启动时自动跑迁移。两者不能同时成立。三个选项：
+* DDL 单一权威 = `deploy/database/ddl/`（`00_baseline` + `97_service_role`
+  + `98_column_locks` + `incr/`），手写、create-once
+* 施加通道 = `db-init.yml`（`confirm=yes` + `expected_sha` + 生产环境审批门）
+* 应用以最小权限角色连库，**连 CREATE 的权限都没有**——就算有人把 Flyway
+  加回来，建表也会被库直接拒绝。配置可以被改错，权限不会
 
-1. **保持 Flyway 自动迁移**。优点：迁移与代码同批次，不可能漏；本产品已有 30 个
-   迁移在这条路上跑通过。缺点：与基准仓纪律不一致；MySQL 没有 DDL 事务，
-   一次失败的迁移会留下 `success=0` 的行，之后每次启动都失败——
-   这个坑本轮已经踩过两次，需要人工删行才能恢复。
-2. **改成 `flyway.enabled=false` + 独立工作流**。与基准仓一致，但要新写
-   迁移执行链路，且失去"迁移与代码同批"的保证。
-3. **折中**：保留 Flyway，但在部署链之外加一个 `db-migrate.yml` 用于**预检**
-   （`flyway validate` / `info`），发布前先看清楚这一批会跑哪些迁移。
-
-我的建议是 **3**：不改变已验证的执行路径，同时把"这次发布会动数据库结构吗"
-变成发布前可见的事实，而不是发布后从日志里读。
+整改过程与暴露出的四个问题记在详细设计 §13b。
 
 ### 2.3 Temporal 是第二个有状态服务
 
