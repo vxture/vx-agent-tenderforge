@@ -449,6 +449,12 @@ class TenderAiService:
             payload["commitmentRegistry"] = request.commitment_registry
         if request.term_registry:
             payload["termRegistry"] = request.term_registry
+        blueprint = _branch_blueprint_prompt(request)
+        if blueprint:
+            # 分支蓝图是本章所在技术域的规划卡片。请求模型上一直有这个字段，
+            # 调用方也一直在填，但它到这里就断了——填了等于没填，
+            # 而没有任何迹象说明它被忽略了。
+            payload["branchBlueprint"] = blueprint
         return payload
 
     async def revise(self, request: RevisionRequest) -> RevisionResponse:
@@ -790,6 +796,47 @@ def normalize_outline_tree(raw: dict[str, Any]) -> None:
     warnings = raw.setdefault("warnings", [])
     if isinstance(warnings, list):
         warnings.append("AI outline tree and page budgets were normalized.")
+
+
+def _branch_blueprint_prompt(request: ChapterDraftRequest) -> dict[str, Any] | None:
+    """把分支蓝图裁成这一章能用的样子。
+
+    两件事必须做，而且都不是格式问题：
+
+    <b>去掉 chapterId。</b>它是内部标识，正文提示词里出现内部 id，模型就有机会
+    把它写进正文——那会直接出现在交给评审的标书里。这个载荷里所有其它标识
+    （requestId、评分点 id、章节 id）都已经被剥掉了，蓝图不能是唯一的漏洞。
+
+    <b>只留本章那一片。</b>蓝图覆盖整个二级分支的全部章节；把兄弟章节的
+    技术决策和交付物一并送进来，模型会把它们也写进本章——表现是相邻章节
+    互相重复，而每一章单独看都是合理的。
+    """
+    blueprint = request.branch_blueprint
+    if blueprint is None:
+        return None
+    prompt: dict[str, Any] = {
+        "solutionPositioning": blueprint.solution_positioning,
+        "sharedDecisions": blueprint.shared_decisions,
+        "sharedConstraints": blueprint.shared_constraints,
+    }
+    if blueprint.assumptions:
+        prompt["assumptions"] = blueprint.assumptions
+    if blueprint.prohibited_claims:
+        prompt["prohibitedClaims"] = blueprint.prohibited_claims
+    leaf = next(
+        (item for item in blueprint.chapters if item.chapter_id == request.chapter.id),
+        None,
+    )
+    if leaf is not None:
+        prompt["chapter"] = {
+            "objective": leaf.objective,
+            "technicalDecisions": leaf.technical_decisions,
+            "implementationActions": leaf.implementation_actions,
+            "deliverables": leaf.deliverables,
+            "validationMethods": leaf.validation_methods,
+            "presentation": leaf.presentation,
+        }
+    return prompt
 
 
 def _coverage_from_leaves(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
