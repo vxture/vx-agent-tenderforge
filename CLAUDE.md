@@ -1,8 +1,15 @@
-# TenderForge — AI 协作纲领
+# 标书编写智能体（TenderForge）— AI 协作纲领
 
-产品码 `tenderforge`，仓 `vx-agent-bid`，域名 `tenderforge.vxture.com`。
-组织登记：L3 行业智能体 #5，端口子块 4050–4059（prod 4050 / beta 4051），
-主机 vx-worker-02，stack_root `/srv/md0/tenderforge`。
+产品名 **标书编写智能体**，产品码 `tenderforge`，仓 `vx-agent-tenderforge`，
+域名 `tenderforge.vxture.com`。组织登记：L3 行业智能体 #5，
+端口子块 4050–4059（prod 4050 / beta 4051），主机 vx-worker-02，
+stack_root `/srv/md0/tenderforge`。
+
+> **别和 `bidproposal` 搞混。** 组织里另有一个「标书方案智能体 /
+> Proposal Writing Agent」（产品码 `bidproposal`，仓 `vx-agent-bidproposal`），
+> 那是 Ruyin 桌面端的云端能力面，从 vxtpl 复制而来的 Node 服务，与本仓
+> 是两个产品。本仓一度叫 `vx-agent-bid`，与那条线撞名，2026-09-10 改名。
+> 平台仓 issue #198 的正文里还留着指向旧仓名的链接，那是过期的。
 
 ## 先读什么
 

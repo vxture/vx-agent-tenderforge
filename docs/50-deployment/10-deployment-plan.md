@@ -11,7 +11,7 @@
 
 | 项 | 状态 |
 | --- | --- |
-| 远端仓库 | `github.com/vxture/vx-agent-bid`，`main` 停在初始提交 `6759760` |
+| 远端仓库 | `github.com/vxture/vx-agent-tenderforge`，`main` 停在初始提交 `6759760` |
 | 本地未推送 | `feat/platform-integration` 上 **23 个提交** |
 | `.github/workflows/` | **不存在**（基准仓有 8 个工作流） |
 | `deploy/deploy.sh` | **不存在**（基准仓有 159 行的宿主机生命周期脚本） |
@@ -106,7 +106,7 @@
 
 **本产品直接复用，不新增组织级条目。**
 
-### 3.2 仓库级（`vx-agent-bid`）
+### 3.2 仓库级（`vx-agent-tenderforge`）
 
 治理规范 §3 把仓库级限定为「仓库专属的**公开标识**」——不是凭证，不是主机信息。
 
