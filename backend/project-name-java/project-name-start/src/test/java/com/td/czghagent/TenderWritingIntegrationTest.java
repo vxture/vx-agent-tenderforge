@@ -649,13 +649,10 @@ class TenderWritingIntegrationTest {
         // 所以主流程不再有一条笼统的 OUTLINE 记录。这不只是命名变化——
         // 每个阶段单独入账，才可能回答「这个任务卡在第几批、试了几次」。
         //
-        // BRANCH_BLUEPRINT 仍然不在主流程里：Python 侧的实现和路由已经补齐，
-        // 正文载荷也已经能接收它，但 Java 侧还没有在写正文前为每个二级分支
-        // 生成蓝图。那是本次之后剩下的最后一段。
         assertThat(auditedOperations).contains(
                 "INTERPRETATION_PROJECT_OVERVIEW", "INTERPRETATION_TECHNICAL_SCORING",
                 "OUTLINE_STRATEGY", "OUTLINE_SKELETON", "OUTLINE_EXPANSION",
-                "CHAPTER_DRAFT", "REVIEW");
+                "BRANCH_BLUEPRINT", "CHAPTER_DRAFT", "REVIEW");
         assertThat(auditedOperations)
                 .as("单次调用那条路径已经不再被主流程使用")
                 .doesNotContain("OUTLINE");
@@ -666,7 +663,7 @@ class TenderWritingIntegrationTest {
                     'INTERPRETATION_PROJECT_OVERVIEW',
                     'INTERPRETATION_TECHNICAL_SCORING',
                     'OUTLINE_STRATEGY', 'OUTLINE_SKELETON', 'OUTLINE_EXPANSION',
-                    'CHAPTER_DRAFT', 'REVIEW')
+                    'BRANCH_BLUEPRINT', 'CHAPTER_DRAFT', 'REVIEW')
                   AND (finish_reason IS NULL OR response_length IS NULL OR response_hash IS NULL)
                 """, Integer.class, bidId);
         assertThat(missingDiagnostics).isZero();
@@ -693,6 +690,28 @@ class TenderWritingIntegrationTest {
         // 展开走 fast 档：它是量最大的一段（每批一次调用），
         // 用 quality 档跑完一份大标书的价钱是另一个量级。
         assertThat(expansionModels).containsExactly("deepseek-v4-flash");
+        // 技术域蓝图：<b>一个二级分支一份</b>，不是一章一份。
+        //
+        // 一章一份既贵（每章多一次 quality 档调用），又恰好毁掉它自己的作用——
+        // 蓝图存在的意义是让同一分支下的各章互相知道对方在写什么，
+        // 而各章各自生成的蓝图之间没有任何一致性。
+        Integer blueprintCount = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM bid_snapshot_branch_blueprint b
+                JOIN bid_generation_snapshot s ON s.id = b.snapshot_id
+                WHERE s.bid_id = ?
+                """, Integer.class, bidId);
+        Integer branchCount = jdbcTemplate.queryForObject("""
+                SELECT COUNT(DISTINCT o.parent_source_outline_id)
+                FROM bid_snapshot_outline o
+                JOIN bid_generation_snapshot s ON s.id = o.snapshot_id
+                WHERE s.bid_id = ? AND o.level_no = 3
+                """, Integer.class, bidId);
+        assertThat(blueprintCount)
+                .as("每个有章节的二级分支恰好一份蓝图")
+                .isEqualTo(branchCount);
+        // 这个夹具里每个二级分支只有一章，所以上面那条<b>分不出</b>「一分支一份」
+        // 和「一章一份」——实测确认过。它证明的是链路接通和落库，不是复用。
+        // 复用由 BidBranchBlueprintServiceTest 覆盖，那里同一分支下有两章。
         assertThat(parsed.path("criteria")).isNotEmpty();
     }
 
