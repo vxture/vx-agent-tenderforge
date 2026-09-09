@@ -46,7 +46,11 @@ REVOKE UPDATE ON bid.bid_document FROM tenderforge_svc;
 GRANT UPDATE (bidding_mode, content_hash, content_stale, content_status, content_version, error_message, interpretation_hash, interpretation_status, interpretation_version, outline_hash, outline_status, outline_version, revision, stale_reason, status, target_pages, title, updated_at, workflow_step)
   ON bid.bid_document TO tenderforge_svc;
 REVOKE UPDATE ON bid.bid_generation_task FROM tenderforge_svc;
-GRANT UPDATE (completed_units, error_message, finished_at, heartbeat_at, snapshot_hash, snapshot_id, started_at, status, workflow_run_id)
+-- retry_count 一度漏在这里：那条 UPDATE 的 SET 子句里有个带自己 WHERE 的
+-- 子查询（completed_units = (SELECT ... WHERE ...)），静态提取停在了那个
+-- WHERE 上，后面的列全丢了。提取器已改成按括号深度切。
+GRANT UPDATE (completed_units, error_message, finished_at, heartbeat_at,
+              retry_count, snapshot_hash, snapshot_id, started_at, status, workflow_run_id)
   ON bid.bid_generation_task TO tenderforge_svc;
 REVOKE UPDATE ON bid.bid_generation_snapshot FROM tenderforge_svc;
 -- bid_generation_snapshot: 代码里没有任何 UPDATE —— 追加型，不给 UPDATE。
@@ -113,7 +117,14 @@ GRANT UPDATE (chapter_id)
 REVOKE UPDATE ON bid.bid_snapshot_requirement FROM tenderforge_svc;
 -- bid_snapshot_requirement: 代码里没有任何 UPDATE —— 追加型，不给 UPDATE。
 REVOKE UPDATE ON bid.bid_source_file FROM tenderforge_svc;
-GRANT UPDATE (error_message, extracted_text, overview_error_message, overview_status, parse_finished_at, parse_progress, parse_stage, parse_started_at, parse_status, scoring_error_message, scoring_status, updated_at)
+-- overview_* 与 scoring_* 这两套列是 JdbcBidDraftPersistence.objectColumn()
+-- 按解读对象类型**运行时拼**出来的，源码里不存在 `overview_content = ?`
+-- 这样的字面量——静态提取看不见它们，是以受限角色跑的集成测试报
+-- permission denied 才发现的。
+GRANT UPDATE (error_message, extracted_text, parse_finished_at, parse_progress,
+              parse_stage, parse_started_at, parse_status, updated_at,
+              overview_status, overview_content, overview_error_message, overview_completed_at,
+              scoring_status, scoring_content, scoring_error_message, scoring_completed_at)
   ON bid.bid_source_file TO tenderforge_svc;
 REVOKE UPDATE ON bid.bid_source_segment FROM tenderforge_svc;
 -- bid_source_segment: 代码里没有任何 UPDATE —— 追加型，不给 UPDATE。

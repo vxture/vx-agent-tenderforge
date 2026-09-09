@@ -3,6 +3,7 @@
 // DATE: 2026-09-09
 package com.td.czghagent.rest;
 
+import com.td.czghagent.PostgresBackedTest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -33,16 +34,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 以及各种处置最终落成什么状态码。这三件事都只在真实请求上才成立或不成立。
  */
 @SpringBootTest(properties = {
-        "spring.datasource.url=jdbc:h2:mem:provisioning-test;MODE=MySQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE",
-        "spring.datasource.username=sa",
-        "spring.datasource.password=",
         "app.bootstrap.enabled=false",
         "app.platform.usage-flush-enabled=false",
         "app.platform.provision-webhook-secret=" + ProvisioningWebhookIntegrationTest.SECRET,
         "app.storage.root=${java.io.tmpdir}/provisioning-${random.uuid}"
 })
 @AutoConfigureMockMvc
-class ProvisioningWebhookIntegrationTest {
+class ProvisioningWebhookIntegrationTest extends PostgresBackedTest {
 
     static final String SECRET = "whsec_integration";
     private static final String PATH = "/api/platform/provisioning/webhook";

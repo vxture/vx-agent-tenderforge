@@ -186,7 +186,12 @@ class JdbcGenerationSnapshotPersistence {
                 SELECT * FROM bid_snapshot_requirement WHERE snapshot_id = ? ORDER BY sort_order, id
                 """, (rs, row) -> new BidGenerationSnapshot.Requirement(
                 rs.getString("source_criterion_id"), rs.getString("item_type"), rs.getString("title"),
-                rs.getString("description"), rs.getObject("score", Double.class),
+                rs.getString("description"),
+                // pgjdbc 拒绝 getObject(col, Double.class) 读 numeric：
+                //   conversion to class java.lang.Double from numeric not supported
+                // 而 getDouble 在 NULL 上返回 0.0——score 可空，
+                // 「0 分」和「没打分」必须是两件事，所以先判 null。
+                rs.getObject("score") == null ? null : rs.getDouble("score"),
                 rs.getString("source_excerpt"), rs.getString("source_locator"), rs.getInt("sort_order")
         ), snapshotId);
     }
@@ -233,7 +238,7 @@ class JdbcGenerationSnapshotPersistence {
                 rs.getInt("interpretation_version"), rs.getInt("outline_version"),
                 rs.getString("solution_contract"), rs.getString("writing_bible"), rs.getString("term_registry"),
                 rs.getString("commitment_registry"), rs.getString("prompt_version"),
-                rs.getObject("created_at", LocalDateTime.class));
+                JdbcTimes.localDateTime(rs, "created_at"));
     }
 
     private String join(List<String> values) {

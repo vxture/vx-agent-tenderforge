@@ -146,7 +146,7 @@ final class JdbcBidReviewPersistence {
                 rs.getString("id"), rs.getString("task_id"), rs.getString("chapter_id"),
                 rs.getInt("unit_index"), rs.getString("status"), rs.getInt("attempt_count"),
                 rs.getInt("word_budget"), rs.getString("summary"), rs.getString("error_message"),
-                rs.getObject("updated_at", LocalDateTime.class)), taskId);
+                JdbcTimes.localDateTime(rs, "updated_at")), taskId);
     }
 
     private List<BidProductionState.GenerationEvent> loadEvents(String bidId) {
@@ -156,7 +156,7 @@ final class JdbcBidReviewPersistence {
                 """, (rs, row) -> new BidProductionState.GenerationEvent(
                 rs.getString("id"), rs.getString("task_id"), rs.getString("chapter_id"),
                 rs.getString("event_type"), rs.getString("message"),
-                rs.getObject("occurred_at", LocalDateTime.class)), bidId);
+                JdbcTimes.localDateTime(rs, "occurred_at")), bidId);
     }
 
     private List<BidProductionState.ReviewIssue> loadReviewIssues(String bidId) {
@@ -178,7 +178,7 @@ final class JdbcBidReviewPersistence {
                 rs.getInt("target_pages"),
                 BidJdbcMappers.nullableInteger(rs.getObject("actual_pages")),
                 rs.getString("qa_status"), rs.getString("qa_summary"),
-                rs.getString("error_message"), rs.getObject("created_at", LocalDateTime.class),
+                rs.getString("error_message"), JdbcTimes.localDateTime(rs, "created_at"),
                 BidJdbcMappers.nullableTime(rs, "finished_at")), bidId)
                 .stream().findFirst().orElse(null);
     }

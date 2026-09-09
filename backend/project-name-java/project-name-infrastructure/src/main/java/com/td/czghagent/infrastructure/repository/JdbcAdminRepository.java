@@ -23,8 +23,8 @@ public class JdbcAdminRepository implements AdminRepository {
             resultSet.getString("id"), resultSet.getString("username"),
             resultSet.getString("display_name"), resultSet.getString("role_code"),
             resultSet.getString("avatar_url"), resultSet.getBoolean("enabled"),
-            resultSet.getObject("created_at", LocalDateTime.class),
-            resultSet.getObject("updated_at", LocalDateTime.class), resultSet.getLong("revision")
+            JdbcTimes.localDateTime(resultSet, "created_at"),
+            JdbcTimes.localDateTime(resultSet, "updated_at"), resultSet.getLong("revision")
     );
 
     private static final RowMapper<AuditLogEntry> AUDIT_MAPPER = (resultSet, rowNumber) ->
@@ -37,7 +37,7 @@ public class JdbcAdminRepository implements AdminRepository {
                     resultSet.getString("detail_summary"), resultSet.getString("task_id"),
                     resultSet.getString("org_id"), resultSet.getString("workspace_id"),
                     resultSet.getString("trace_id"), resultSet.getString("ip_address"),
-                    resultSet.getObject("occurred_at", LocalDateTime.class)
+                    JdbcTimes.localDateTime(resultSet, "occurred_at")
             );
 
     private static final String AUDIT_JOINS = """

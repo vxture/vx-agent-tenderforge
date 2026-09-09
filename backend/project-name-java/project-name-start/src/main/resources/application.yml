@@ -11,16 +11,27 @@ spring:
   profiles:
     default: dev
   datasource:
-    url: ${DATABASE_URL:jdbc:h2:file:./data/database/czghagent;MODE=MySQL;DATABASE_TO_LOWER=TRUE}
-    username: ${DATABASE_USERNAME:sa}
+    # 默认值指向同机的开发 Postgres，而不是一个文件型嵌入库：本产品的基线用了
+    # schema、UUID 类型、TIMESTAMPTZ 与 gen_random_uuid()，H2 无论哪个兼容模式
+    # 都跑不了。一个「本地能起、生产跑另一种引擎」的配置，代价是每一条 SQL 都
+    # 要在两种方言下都成立，而不成立的那些只在生产暴露。
+    #
+    # stringtype=unspecified 是这里唯一的技巧：id 列是 UUID 类型，而应用侧
+    # 19 个 JdbcTemplate 类全用 setString 绑参。不加它，PG 驱动会把参数标成
+    # varchar 送过去，报「column id is of type uuid but expression is of type
+    # character varying」。加上之后驱动送无类型字面量，由 PG 自己按目标列
+    # 转换——这比改几百处绑参安全得多。
+    url: ${DATABASE_URL:jdbc:postgresql://127.0.0.1:5432/vx_tenderforge_db?stringtype=unspecified}
+    username: ${DATABASE_USERNAME:tenderforge_svc}
     password: ${DATABASE_PASSWORD:}
-    driver-class-name: ${DATABASE_DRIVER:org.h2.Driver}
+    driver-class-name: ${DATABASE_DRIVER:org.postgresql.Driver}
     hikari:
       maximum-pool-size: ${DATABASE_POOL_SIZE:10}
+  # Flyway 已移除（治理规范 §11：常规部署链不跑 migration/seed）。
+  # DDL 单一权威 = deploy/database/ddl/*.sql，只由 db-init.yml 施加。
+  # 应用**永远不建表**——它以最小权限角色连库，连 CREATE 的权限都没有。
   flyway:
-    enabled: true
-    locations: classpath:sql
-    validate-migration-naming: true
+    enabled: false
   servlet:
     multipart:
       max-file-size: ${UPLOAD_MAX_FILE_SIZE:50MB}

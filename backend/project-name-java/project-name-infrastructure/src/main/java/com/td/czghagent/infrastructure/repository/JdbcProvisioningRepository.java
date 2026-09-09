@@ -65,8 +65,10 @@ public class JdbcProvisioningRepository implements ProvisioningRepository {
     /**
      * 落地状态并推进 seq。
      *
-     * <p>先 UPDATE 后 INSERT（而不是 MySQL 的 {@code ON DUPLICATE KEY UPDATE}）：
-     * 后者在 H2 上不认，而这张表的迁移与仓储都要能在测试上下文里跑起来。
+     * <p>先 UPDATE 后 INSERT，而不是 upsert 语法。写成这样最初是为了兼容 H2；
+     * 引擎统一到 Postgres 之后 {@code ON CONFLICT DO UPDATE} 已经可用，但这段
+     * 逻辑的并发正确性是被竞态测试逐条验过的，换写法要连那些验证一起重做。
+     * 保持现状不是惯性——是「已验证过的东西不因为有更漂亮的写法就重写」。
      *
      * <p>UPDATE 带上 {@code last_seq < ?} 是第二道顺序闸门。调用方已经比过一次
      * seq，但那之后到这里之间另一个副本可能刚写完一条更新的——带上这个条件，

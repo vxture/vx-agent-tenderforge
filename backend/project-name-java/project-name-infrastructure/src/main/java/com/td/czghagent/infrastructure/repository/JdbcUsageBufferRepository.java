@@ -25,7 +25,7 @@ public class JdbcUsageBufferRepository implements UsageBufferRepository {
             rs.getLong("amount"),
             rs.getString("end_user_id"),
             rs.getString("task_id"),
-            rs.getObject("occurred_at", LocalDateTime.class),
+            JdbcTimes.localDateTime(rs, "occurred_at"),
             rs.getInt("attempts"));
 
     private final JdbcTemplate jdbcTemplate;
@@ -37,10 +37,11 @@ public class JdbcUsageBufferRepository implements UsageBufferRepository {
     /**
      * 写入一条待冲洗的用量。
      *
-     * <p>{@code INSERT ... SELECT ... WHERE NOT EXISTS} 而不是 MySQL 的
-     * {@code ON DUPLICATE KEY UPDATE}：后者在 H2 上不认，而这张表的迁移与仓储
-     * 都要能在测试上下文里跑起来。竞态由主键兜底——两个并发插入里输的那个
-     * 会撞主键，而撞主键正是「这条已经记过了」的正确答案。
+     * <p>{@code INSERT ... SELECT ... WHERE NOT EXISTS} 而不是 upsert 语法。
+     * 写成这样最初是为了兼容 H2；引擎统一到 Postgres 之后 {@code ON CONFLICT}
+     * 已经可用，但这段的竞态正确性是被并发测试验过的，换写法要连验证一起重做。
+     * 竞态由主键兜底——两个并发插入里输的那个会撞主键，而撞主键正是
+     * 「这条已经记过了」的正确答案。
      */
     @Override
     public void buffer(UsageEvent event, LocalDateTime occurredAt) {

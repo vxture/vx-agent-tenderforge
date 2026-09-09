@@ -41,7 +41,6 @@
             高危告警，且都不在 Spring Boot BOM 的管辖范围内——只能从这里抬。
         -->
         <temporal.version>1.38.0</temporal.version>
-        <flyway.version>11.20.3</flyway.version>
 
         <!--
             以下四个是<b>压过 Spring Boot BOM</b> 的安全下限，不是选型。

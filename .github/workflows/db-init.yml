@@ -1,0 +1,169 @@
+name: db-init
+
+# 生产数据库的结构变更通道。**常规部署链不跑任何 migration/seed**
+# （治理规范 §11）——结构变更是一次独立授权的动作，不该由一次常规发布捎带触发。
+#
+#   gh workflow run db-init.yml -f confirm=yes -f expected_sha=<完整 SHA>
+#
+# 三道闸门，缺一不可：
+#
+#   1. confirm=yes ——必须手打。一个只需要点「Run workflow」的结构变更，
+#      迟早会被人在别的意图下点到。
+#   2. expected_sha ——必须与本次运行的 SHA 逐字相同。**这条才是让分支名
+#      有意义的东西**：不钉版本的话，`main` 在你填表和它真正跑起来之间被推了
+#      新提交，施加的就是另一份 DDL，而没有任何地方会说出来。
+#   3. production 环境的必需审批人——停在门上等人点。
+#
+# 施加的是**这次 checkout 里的** deploy/database/ddl/，也就是 expected_sha
+# 钉住的那一份。
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "手打 yes 确认这是一次结构变更"
+        required: true
+        type: string
+        default: "no"
+      expected_sha:
+        description: "要施加的提交完整 SHA（必须等于本次运行的 SHA）"
+        required: true
+        type: string
+
+# 与 deploy/rollback 同一个串行组：结构变更与部署不能同时动同一个栈。
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  PRODUCT_CODE: tenderforge
+
+jobs:
+  apply:
+    name: apply-ddl
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: production
+    steps:
+      - name: Gate on confirm + expected_sha
+        shell: bash
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          ACTUAL_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$CONFIRM" != "yes" ]; then
+            echo "::error::confirm 必须是 yes。结构变更不接受默认值。" >&2
+            exit 1
+          fi
+          if [ "$EXPECTED_SHA" != "$ACTUAL_SHA" ]; then
+            echo "::error::expected_sha ($EXPECTED_SHA) != 本次运行的 SHA ($ACTUAL_SHA)——拒绝施加。" >&2
+            echo "这不是形式检查：分支在你填表和它跑起来之间可能已经被推了新提交，" >&2
+            echo "那样施加的就是另一份 DDL，而没有任何地方会说出来。" >&2
+            exit 1
+          fi
+          echo "闸门通过：将施加 $ACTUAL_SHA 的 DDL"
+
+      - name: Checkout the pinned revision
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Validate secrets
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          TAILSCALE_OAUTH_CLIENT_ID: ${{ secrets.TAILSCALE_OAUTH_CLIENT_ID }}
+          TAILSCALE_OAUTH_CLIENT_SECRET: ${{ secrets.TAILSCALE_OAUTH_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          missing=()
+          for key in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS \
+                     TAILSCALE_OAUTH_CLIENT_ID TAILSCALE_OAUTH_CLIENT_SECRET; do
+            [ -n "${!key:-}" ] || missing+=("$key")
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::环境缺少这些配置：${missing[*]}" >&2
+            exit 1
+          fi
+
+      - name: Join tailnet and prepare SSH
+        uses: ./.github/actions/tailnet-ssh-connect
+        with:
+          tailscale-oauth-client-id: ${{ secrets.TAILSCALE_OAUTH_CLIENT_ID }}
+          tailscale-oauth-secret: ${{ secrets.TAILSCALE_OAUTH_CLIENT_SECRET }}
+          tailscale-tag: ${{ vars.TAILSCALE_OAUTH_CLIENT_TAG }}
+          deploy-host: ${{ secrets.DEPLOY_HOST }}
+          deploy-port: ${{ secrets.DEPLOY_PORT }}
+          deploy-ssh-key: ${{ secrets.DEPLOY_SSH_KEY }}
+          deploy-ssh-passphrase: ${{ secrets.DEPLOY_SSH_KEY_PASSPHRASE }}
+          deploy-known-hosts: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+
+      - name: Apply DDL over SSH
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_DIR: ${{ secrets.DEPLOY_DIR }}
+          PASSED_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          port="${DEPLOY_PORT:-22}"
+          deploy_dir="${DEPLOY_DIR:-/srv/md0/${PRODUCT_CODE}}"
+          ssh_opts=(-i ~/.ssh/deploy_key -p "$port" -o ServerAliveInterval=30 \
+                    -o ServerAliveCountMax=20 -o ConnectTimeout=30)
+
+          # 只投递 DDL，不碰部署目录里的其它东西。这一步与 deploy.yml 的
+          # rsync --delete 刻意分开：结构变更不该顺带更新 compose 或 deploy.sh。
+          ssh "${ssh_opts[@]}" "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$deploy_dir/deploy/database'"
+          rsync -az --delete \
+            -e "ssh -i ~/.ssh/deploy_key -p $port -o ConnectTimeout=30" \
+            deploy/database/ "$DEPLOY_USER@$DEPLOY_HOST:$deploy_dir/deploy/database/"
+
+          # psql 在 db 容器里，DATABASE_URL 以 **owner** 连接——DDL 需要
+          # 建表与授权的权限，而 tenderforge_svc 恰恰没有（那正是 97 要保证的）。
+          # 口令从宿主机 .env 读，不经过 CI。
+          cat > /tmp/remote-ddl.sh <<'REMOTE_SCRIPT'
+          set -euo pipefail
+          cd "$REPO_DIR"
+          # shellcheck disable=SC1091
+          set -a; . ./.env; set +a
+          container="vx-${PRODUCT_CODE}-postgres-db-${DEPLOY_STAGE}"
+          docker exec -i \
+            -e PGPASSWORD="$POSTGRES_ROOT_PASSWORD" \
+            -e DATABASE_URL="postgresql://postgres@127.0.0.1:5432/vx_${PRODUCT_CODE}_db" \
+            "$container" true 2>/dev/null || {
+              echo "找不到数据库容器 $container——栈没起来，或者 DEPLOY_STAGE 与部署时不一致" >&2
+              exit 1
+            }
+          for f in 00_baseline.sql 97_service_role.sql 98_column_locks.sql; do
+            echo "[ddl] applying $f"
+            docker exec -i -e PGPASSWORD="$POSTGRES_ROOT_PASSWORD" "$container" \
+              psql -U postgres -d "vx_${PRODUCT_CODE}_db" -v ON_ERROR_STOP=1 -q \
+              < "deploy/database/ddl/$f"
+          done
+          for f in deploy/database/ddl/incr/*.sql; do
+            [ -e "$f" ] || continue
+            echo "[ddl] applying incr $(basename "$f")"
+            docker exec -i -e PGPASSWORD="$POSTGRES_ROOT_PASSWORD" "$container" \
+              psql -U postgres -d "vx_${PRODUCT_CODE}_db" -v ON_ERROR_STOP=1 -q < "$f"
+          done
+          # 服务角色的口令由运维在 .env 里定，DDL 文件里没有它。
+          docker exec -i -e PGPASSWORD="$POSTGRES_ROOT_PASSWORD" "$container" \
+            psql -U postgres -d "vx_${PRODUCT_CODE}_db" -v ON_ERROR_STOP=1 -q \
+            -c "ALTER ROLE ${PRODUCT_CODE}_svc PASSWORD '${DATABASE_PASSWORD}'"
+          echo "[ddl] done at $PASSED_SHA"
+          REMOTE_SCRIPT
+          scp -i ~/.ssh/deploy_key -P "$port" -o ConnectTimeout=30 \
+            /tmp/remote-ddl.sh "$DEPLOY_USER@$DEPLOY_HOST:/tmp/remote-ddl.sh"
+          printf '%s\n' "PRODUCT_CODE=$PRODUCT_CODE REPO_DIR=$deploy_dir PASSED_SHA=$PASSED_SHA bash /tmp/remote-ddl.sh" \
+            | ssh "${ssh_opts[@]}" "$DEPLOY_USER@$DEPLOY_HOST" bash -s

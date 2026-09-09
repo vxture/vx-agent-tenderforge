@@ -300,10 +300,19 @@ jobs:
       - name: Enable corepack (pnpm from packageManager)
         run: corepack enable
 
-      # 后端：六个 Maven 模块 + 覆盖率聚合。集成测试跑在 H2 上，
-      # 不需要外部数据库。
+      # 后端：六个 Maven 模块 + 覆盖率聚合。
+      #
+      # 集成测试用 Testcontainers 起**真 Postgres**，跑 deploy/database/ddl 里
+      # 那份基线，并以受限角色 tenderforge_svc 连接（见 PostgresBackedTest）。
+      # ubuntu-latest 自带 docker，不需要额外 service 容器。
+      #
+      # TZ 与 compose 里给 api/worker 的一致：时间列是 TIMESTAMPTZ，读写用同一个
+      # 会话时区往返才精确。runner 默认 UTC，不钉住的话本地过、CI 过，但两边
+      # 验的不是同一件事。
       - name: Java tests and coverage
         working-directory: backend/project-name-java
+        env:
+          TZ: Asia/Shanghai
         run: mvn -B -Pcoverage-report verify -DskipITs
 
       - name: Python tests
