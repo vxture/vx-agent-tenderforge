@@ -63,6 +63,12 @@
         <commons-lang3.version>3.18.0</commons-lang3.version>
         <!-- GHSA-qv9r-c865-cp47，Boot 3.5.16 仍钉 2.24.3 -->
         <log4j2.version>2.25.5</log4j2.version>
+        <!--
+            GHSA-j92g-9f8w-j867（CVSS 8.2），Boot 3.5.16 钉的是 42.7.11。
+            这一条是 audit 闸门在 PostgreSQL 迁移的 PR 上当场抓到的——
+            新引入一个依赖就等于新引入它的全部已知漏洞，而这件事没有别的信号。
+        -->
+        <postgresql.version>42.7.12</postgresql.version>
     </properties>
 
     <modules>
