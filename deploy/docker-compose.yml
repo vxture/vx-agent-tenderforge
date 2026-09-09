@@ -121,6 +121,13 @@ services:
       DATABASE_USERNAME: czghagent
       DATABASE_PASSWORD: ${MYSQL_PASSWORD:-ChangeMe-Mysql-2026}
       DATABASE_DRIVER: com.mysql.cj.jdbc.Driver
+      # 调优项。compose 的 environment: 是白名单——不在这里列出来，
+      # 写进 .env 就完全没有反应，服务照常起来、照常用默认值、没有任何报错。
+      # SERVER_PORT 刻意不放开：8081 在健康检查和 nginx 上游里是写死的，
+      # 放开等于给人一个能把整栈弄坏的开关。
+      DATABASE_POOL_SIZE: ${DATABASE_POOL_SIZE:-10}
+      UPLOAD_MAX_FILE_SIZE: ${UPLOAD_MAX_FILE_SIZE:-50MB}
+      UPLOAD_MAX_REQUEST_SIZE: ${UPLOAD_MAX_REQUEST_SIZE:-55MB}
       PRIVATE_STORAGE_ROOT: /app/data/private
       AI_SERVICE_BASE_URL: http://ai:8000
       AI_SERVICE_INTERNAL_TOKEN: ${AI_SERVICE_INTERNAL_TOKEN:-ChangeMe-Internal-Token-2026}
@@ -200,6 +207,13 @@ services:
       DATABASE_USERNAME: czghagent
       DATABASE_PASSWORD: ${MYSQL_PASSWORD:-ChangeMe-Mysql-2026}
       DATABASE_DRIVER: com.mysql.cj.jdbc.Driver
+      # 调优项。compose 的 environment: 是白名单——不在这里列出来，
+      # 写进 .env 就完全没有反应，服务照常起来、照常用默认值、没有任何报错。
+      # SERVER_PORT 刻意不放开：8081 在健康检查和 nginx 上游里是写死的，
+      # 放开等于给人一个能把整栈弄坏的开关。
+      DATABASE_POOL_SIZE: ${DATABASE_POOL_SIZE:-10}
+      UPLOAD_MAX_FILE_SIZE: ${UPLOAD_MAX_FILE_SIZE:-50MB}
+      UPLOAD_MAX_REQUEST_SIZE: ${UPLOAD_MAX_REQUEST_SIZE:-55MB}
       PRIVATE_STORAGE_ROOT: /app/data/private
       AI_SERVICE_BASE_URL: http://ai:8000
       AI_SERVICE_INTERNAL_TOKEN: ${AI_SERVICE_INTERNAL_TOKEN:-ChangeMe-Internal-Token-2026}

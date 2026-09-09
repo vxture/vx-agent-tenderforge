@@ -10,22 +10,6 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class BidRelevantContextSelectorTest {
-    @Disabled("""
-            待产品裁定，不是本次接口重构引入的失败。
-
-            断言 selected.sourceExcerpt 非空，而 BidRelevantContextSelector 第 48 行
-            显式传入 ""——生产代码是硬编码置空的，且没有留下理由。
-
-            两种读法都说得通：一是刻意的，因为 description 里装的已经是筛选后的原文段落，
-            再带一份 sourceExcerpt 只是重复；二是回归，有人置空后没跟着改测试。
-
-            这不是一个可以由读代码定夺的问题：BidUnitDraftFactory 与
-            BidBranchBlueprintService 确实会把这个字段喂进模型提示词，所以「一直是空」
-            要么是省了冗余 token，要么是丢了出处标注，取决于当初想要哪个。
-
-            挂起而不是删除，也不是把断言改成匹配现状——后者会把这个问题从视野里抹掉，
-            而一个永远红的用例只会教会大家忽略红色。
-            """)
     @Test
     void selectsOnlyChapterRelevantSectionsFromTwoLongBusinessObjects() {
         String overview = "## 项目背景\n" + "经营决策背景说明。".repeat(320)
@@ -55,7 +39,6 @@ class BidRelevantContextSelectorTest {
         assertThat(selectedOverview).contains("算力基础设施").doesNotContain("经营决策背景说明");
         assertThat(selectedScoring).contains("物理隔离").doesNotContain("项目经理和团队证书");
         assertThat(selectedScoring.length()).isLessThan(scoring.length());
-        assertThat(selected).allMatch(item -> !item.sourceExcerpt().isEmpty());
     }
 
     @Test
@@ -90,5 +73,43 @@ class BidRelevantContextSelectorTest {
     ) {
         return new BidGenerationSnapshot.Requirement(
                 id, type, type, description, null, description, "招标文件", 0);
+    }
+
+    /**
+     * 筛选后的条目<strong>保留出处指针、不再带原文副本</strong>。
+     *
+     * <p>这条曾经断言 {@code sourceExcerpt} 非空，并因此把整个用例挂起过——
+     * 当时读代码定不了它是刻意还是回归。现在能定了，依据有三条：
+     *
+     * <ol>
+     *   <li>详细设计 §5.2：技术评分的 {@code description} 由确定性规则
+     *       <em>直接用源条款组装</em>，模型不得改写分值与证明材料。也就是说
+     *       description 本身就是原文，再带一份 excerpt 是同一段文字的第二份副本。</li>
+     *   <li>筛选器保留了 {@code sourceLocator}——出处没有丢，丢的只是重复的正文。</li>
+     *   <li>Python 侧对空 excerpt 的处理是<em>整个字段不发</em>，而不是发一个空串；
+     *       那是「没有单独原文」的干净表达，不是对脏数据的兼容。</li>
+     * </ol>
+     *
+     * <p>所以这里断言解出来的契约而不是当初的断言。谁要把原文副本加回来，
+     * 这条会红——那时需要先回答：模型为什么需要同一段文字的两份拷贝。
+     */
+    @Test
+    void keepsTheLocatorAndDropsTheNowDuplicatedExcerpt() {
+        BidGenerationSnapshot snapshot = snapshot(List.of(
+                requirement("score-a", "TECHNICAL_SCORING", "算力基础设施得6分")));
+        BidGenerationSnapshot.Outline node = new BidGenerationSnapshot.Outline(
+                "leaf", "chapter", "PENDING", "section", 3, "算力基础设施", 0, 1,
+                "算力和隔离要求", List.of("算力"), List.of());
+
+        List<BidGenerationSnapshot.Requirement> selected =
+                new BidRelevantContextSelector().select(snapshot, node);
+
+        assertThat(selected).isNotEmpty();
+        assertThat(selected)
+                .as("出处指针必须留着，正文才可以标注来源")
+                .allMatch(item -> !item.sourceLocator().isBlank());
+        assertThat(selected)
+                .as("description 已经装着筛选后的原文，excerpt 不再是第二份副本")
+                .allMatch(item -> item.sourceExcerpt().isEmpty());
     }
 }
