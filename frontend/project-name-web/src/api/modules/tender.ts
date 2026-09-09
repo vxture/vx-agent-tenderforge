@@ -109,8 +109,9 @@ export const tenderApi = {
   listExports: (bidId: string) => apiRequest<BidExport[]>(`/api/bids/${bidId}/exports`),
   createExport: (bidId: string) =>
     apiRequest<BidExport>(`/api/bids/${bidId}/exports`, { method: 'POST' }),
-  downloadLatest: (bidId: string, title: string) =>
-    downloadFile(`/api/bids/${bidId}/exports/latest/download`, `${title}-最新成果.docx`),
+  // 按标识下载：「最新」是调用方从 listExports 结果里挑出来的视角，不是一个路径段（通则 A-2）。
+  downloadExport: (bidId: string, exportId: string, title: string) =>
+    downloadFile(`/api/bids/${bidId}/exports/${exportId}/download`, `${title}-成果.docx`),
   listAssets: (category?: AssetCategory, keyword = '') => {
     const query = new URLSearchParams()
     if (category) query.set('category', category)

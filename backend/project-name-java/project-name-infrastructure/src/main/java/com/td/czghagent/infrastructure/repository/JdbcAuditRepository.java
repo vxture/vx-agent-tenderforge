@@ -1,14 +1,22 @@
 // GENERATED_BY_AI
-// MODEL: gpt-5
-// DATE: 2026-07-29
+// MODEL: claude-opus-5
+// DATE: 2026-09-08
 package com.td.czghagent.infrastructure.repository;
 
+import com.td.czghagent.domain.model.AuditEvent;
 import com.td.czghagent.domain.repository.AuditRepository;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import java.util.UUID;
 
+/**
+ * 审计写入：只有 INSERT。
+ *
+ * <p>这个类里没有 update 也没有 delete，不是还没写——是审计流的更正只能是补偿事件。
+ * 列名按《产品接入通则》X-3 的最小字段集，与 Atlas / Runos / 平台管理面对齐，
+ * 这样一次 agent 任务跨产品的动作可以按同一组名字拼回来。
+ */
 @Repository
 public class JdbcAuditRepository implements AuditRepository {
 
@@ -19,16 +27,19 @@ public class JdbcAuditRepository implements AuditRepository {
     }
 
     @Override
-    public void append(String userId, String actionCode, String targetType,
-                       String targetId, String resultCode, String detailSummary,
-                       String traceId, String ipAddress) {
+    public void append(AuditEvent event) {
         jdbcTemplate.update("""
                         INSERT INTO audit_log(
-                            id, user_id, action_code, target_type, target_id,
-                            result_code, detail_summary, trace_id, ip_address
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            event_id, actor_id, actor_console, action, object_type, object_id,
+                            outcome, detail_summary, task_id, org_id, workspace_id,
+                            trace_id, ip_address
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
-                UUID.randomUUID().toString(), userId, actionCode, targetType,
-                targetId, resultCode, detailSummary, traceId, ipAddress);
+                UUID.randomUUID().toString(),
+                event.actorId(), event.actorConsole(), event.action(),
+                event.objectType(), event.objectId(), event.outcome(),
+                event.detailSummary(), event.taskId(),
+                event.orgId(), event.workspaceId(),
+                event.traceId(), event.ipAddress());
     }
 }

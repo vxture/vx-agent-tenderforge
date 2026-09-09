@@ -24,18 +24,18 @@ import java.util.UUID;
 public class BidOutlineGenerationProcessor {
     private static final int MAX_OUTLINE_REFERENCE_CHARACTERS = 50_000;
     private final BidRepository bidRepository;
-    private final BidAiExecutionService aiExecutionService;
+    private final BidOutlineStagedPlanner stagedPlanner;
     private final BidAssetIngestionService assetIngestionService;
     private final BidCommandSupport support;
 
     public BidOutlineGenerationProcessor(
             BidRepository bidRepository,
-            BidAiExecutionService aiExecutionService,
+            BidOutlineStagedPlanner stagedPlanner,
             BidAssetIngestionService assetIngestionService,
             BidCommandSupport support
     ) {
         this.bidRepository = bidRepository;
-        this.aiExecutionService = aiExecutionService;
+        this.stagedPlanner = stagedPlanner;
         this.assetIngestionService = assetIngestionService;
         this.support = support;
     }
@@ -45,8 +45,8 @@ public class BidOutlineGenerationProcessor {
         if (!progress(taskId, "PREPARING", 10)) {
             return;
         }
-        OperationContext context = context(ownerId, traceId, ipAddress);
-        BidDocument bid = support.requireBid(bidId, context);
+        BidDocument bid = support.requireBid(bidId, ownerId);
+        OperationContext context = context(bid, traceId, ipAddress);
         BidWorkspace workspace = bidRepository.loadWorkspace(bid);
         validateTask(taskId, workspace);
         validate(workspace);
@@ -54,8 +54,11 @@ public class BidOutlineGenerationProcessor {
         if (!progress(taskId, "GENERATING", 35)) {
             return;
         }
-        TenderAiGateway.OutlinePlan plan = aiExecutionService.planOutline(
-                bidId, new TenderAiGateway.OutlineRequest(
+        // 按阶段走，每个阶段的结果落库。重试时从断点继续——不这样做的话，
+        // 一次大标书在第十几批失败，重试会从策略开始重跑，把已经成功的那十几批
+        // 白白丢掉重新付一遍钱，而且重跑出来的目录和上一次并不相同。
+        TenderAiGateway.OutlinePlan plan = stagedPlanner.plan(
+                taskId, bidId, new TenderAiGateway.OutlineRequest(
                         traceId, bid.title(), bid.targetPages(), bid.biddingMode(),
                         BidProductionRules.effectiveCriteria(workspace).stream()
                                 .map(this::toAiCriterion).toList(), references));
@@ -148,9 +151,20 @@ public class BidOutlineGenerationProcessor {
         return bidRepository.updateOutlineTaskProgress(taskId, stage, percentage);
     }
 
-    private OperationContext context(String ownerId, String traceId, String ipAddress) {
+    /**
+     * 为后台执行铸一个操作上下文。
+     *
+     * <p>租户轴取自<strong>标书本身</strong>而不是由 ownerId 现推：ownerId 只说明归属人，
+     * 而一个人可以属于多个工作空间。从人推空间，在多空间场景下会把审计记到错误的空间上，
+     * 且不报任何错。
+     *
+     * <p>显示名与用户名留空：后台路径拿不到，也不该拿——它们只用于界面呈现，
+     * 编一个假的会让审计里出现一个查无此人的名字。
+     */
+    private OperationContext context(BidDocument bid, String traceId, String ipAddress) {
         return new OperationContext(
-                new CurrentUser(ownerId, "", "", "PLANNER", null), traceId, ipAddress);
+                new CurrentUser(bid.ownerId(), "", "", "PLANNER", null, bid.tenant()),
+                traceId, ipAddress);
     }
 
     private String limit(String value) {

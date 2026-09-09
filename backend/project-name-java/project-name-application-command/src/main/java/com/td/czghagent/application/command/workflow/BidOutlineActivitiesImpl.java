@@ -11,16 +11,20 @@ import org.springframework.stereotype.Component;
 @Component
 public class BidOutlineActivitiesImpl implements BidOutlineActivities {
     private final BidOutlineGenerationProcessor processor;
+    private final PlatformActivityContext platformContext;
 
-    public BidOutlineActivitiesImpl(BidOutlineGenerationProcessor processor) {
+    public BidOutlineActivitiesImpl(BidOutlineGenerationProcessor processor,
+                                    PlatformActivityContext platformContext) {
         this.processor = processor;
+        this.platformContext = platformContext;
     }
 
     @Override
     public void process(String taskId, String bidId, String ownerId,
                         String traceId, String ipAddress) {
         try {
-            processor.process(taskId, bidId, ownerId, traceId, ipAddress);
+            platformContext.run(taskId, bidId, ownerId, () ->
+                    processor.process(taskId, bidId, ownerId, traceId, ipAddress));
         } catch (BusinessException exception) {
             throw ApplicationFailure.newNonRetryableFailure(
                     exception.getMessage(), exception.getErrorCode());

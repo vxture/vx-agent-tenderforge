@@ -7,6 +7,7 @@ import com.td.czghagent.domain.exception.BusinessException;
 import com.td.czghagent.domain.model.BidDocument;
 import com.td.czghagent.domain.model.BidWorkspace;
 import com.td.czghagent.domain.port.BidDocumentExporter;
+import com.td.czghagent.infrastructure.integration.TaskHeaders;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.MediaType;
@@ -64,6 +65,7 @@ public class PythonBidDocumentExporter implements BidDocumentExporter {
             ResponseEntity<byte[]> response = client.post()
                     .uri("/internal/tender/document/render")
                     .header("X-Internal-Token", internalToken)
+                    .headers(TaskHeaders::apply)
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(request)
                     .retrieve()

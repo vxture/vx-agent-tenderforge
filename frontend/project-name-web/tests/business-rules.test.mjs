@@ -459,9 +459,20 @@ test('session recovery and standard lists use public design-system patterns', ()
   for (const page of [users, audit, bids, assets]) {
     assert.match(page, /<ListPageTemplate/)
     assert.match(page, /<DataTable/)
-    assert.match(page, /<Pagination/)
     assert.doesNotMatch(page, /<Table(?:\s|>)/)
   }
+
+  // 分页控件按数据来源分两类，不是一条统一规则。
+  // 标书与素材是服务端一次返回的裸数组，页码翻在浏览器里，用 DS 的 Pagination；
+  // 审计是服务端键集游标（通则 A-3），它没有总数也没有页码，
+  // 套一个需要 pageCount 的控件只能靠编造那两个数字——那正是这里要挡住的。
+  for (const page of [bids, assets]) {
+    assert.match(page, /<Pagination/)
+  }
+  assert.doesNotMatch(audit, /<Pagination/)
+  assert.match(audit, /nextCursor/)
+  // 账号是有界管理面对象，一次取完，不该出现任何服务端翻页痕迹。
+  assert.doesNotMatch(users, /<Pagination/)
   for (const page of [users, bids, assets]) {
     assert.match(page, /<ActionMenu/)
   }

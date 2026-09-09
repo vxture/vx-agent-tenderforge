@@ -6,6 +6,7 @@ package com.td.czghagent.infrastructure.repository;
 import com.td.czghagent.domain.exception.BusinessException;
 import com.td.czghagent.domain.model.BidGenerationUnit;
 import com.td.czghagent.domain.repository.BidProductionRepository;
+import java.time.LocalDateTime;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -418,10 +419,10 @@ class JdbcGenerationUnitPersistence {
                 rs.getObject("budget_variance_ratio") == null
                         ? null : rs.getDouble("budget_variance_ratio"),
                 rs.getString("budget_status"),
-                BidJdbcMappers.nullableTime(rs.getTimestamp("compacted_at")),
+                BidJdbcMappers.nullableTime(rs, "compacted_at"),
                 rs.getString("content"), rs.getString("content_hash"),
                 rs.getString("summary"), rs.getString("previous_summary"),
-                rs.getString("error_message"), rs.getTimestamp("updated_at").toLocalDateTime());
+                rs.getString("error_message"), rs.getObject("updated_at", LocalDateTime.class));
     }
 
     private String limit(String value) {

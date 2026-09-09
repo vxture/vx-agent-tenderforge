@@ -681,7 +681,10 @@ def test_outline_adapts_leaf_target_to_a_smaller_valid_skeleton() -> None:
 
     leaves = [node for node in result.data.nodes if node.level == 3]
     assert len(leaves) == 150
-    assert any("由200个调整为150个" in warning for warning in result.data.warnings)
+    # 197 是 500 页的 target_leaf_max（每节 2.8 页）。这里曾经写着 200——
+    # 那是除数被改成 2.75 那一版的产物，而<b>同一份文件里另外六条断言</b>
+    # 都符合 2.6/2.8。一个只出现在诊断文案里的数字最容易被漏掉。
+    assert any("由197个调整为150个" in warning for warning in result.data.warnings)
     expansion_calls = [
         call for call in client.calls if call[0] == "outline_branch_expansion"
     ]

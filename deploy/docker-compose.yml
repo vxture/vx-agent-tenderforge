@@ -29,6 +29,15 @@ services:
     restart: unless-stopped
     environment:
       AI_SERVICE_INTERNAL_TOKEN: ${AI_SERVICE_INTERNAL_TOKEN:-ChangeMe-Internal-Token-2026}
+      # 模型出口。配上 ATLAS_API_URL 即切到 Atlas；不配则直连模型供应商，
+      # 而那条路在部署阶段被拒绝启动（除非显式 ALLOW_MOCK_ON_DEPLOY）。
+      DEPLOY_STAGE: ${DEPLOY_STAGE:-local}
+      ALLOW_MOCK_ON_DEPLOY: ${ALLOW_MOCK_ON_DEPLOY:-false}
+      ATLAS_API_URL: ${ATLAS_API_URL:-}
+      ATLAS_TIMEOUT_SECONDS: ${ATLAS_TIMEOUT_SECONDS:-90}
+      # 专属 endpoint 授权到位之前保持 false——那时全部走 chat/default，
+      # 链路能通但所有 operation 共用一套生成参数。
+      ATLAS_USE_DEDICATED_ENDPOINTS: ${ATLAS_USE_DEDICATED_ENDPOINTS:-false}
       AI_MODEL_API_KEY: ${AI_MODEL_API_KEY:-}
       AI_MODEL_BASE_URL: ${AI_MODEL_BASE_URL:-https://api.deepseek.com}
       AI_MODEL_REQUEST_DIALECT: ${AI_MODEL_REQUEST_DIALECT:-deepseek}
@@ -112,6 +121,13 @@ services:
       DATABASE_USERNAME: czghagent
       DATABASE_PASSWORD: ${MYSQL_PASSWORD:-ChangeMe-Mysql-2026}
       DATABASE_DRIVER: com.mysql.cj.jdbc.Driver
+      # 调优项。compose 的 environment: 是白名单——不在这里列出来，
+      # 写进 .env 就完全没有反应，服务照常起来、照常用默认值、没有任何报错。
+      # SERVER_PORT 刻意不放开：8081 在健康检查和 nginx 上游里是写死的，
+      # 放开等于给人一个能把整栈弄坏的开关。
+      DATABASE_POOL_SIZE: ${DATABASE_POOL_SIZE:-10}
+      UPLOAD_MAX_FILE_SIZE: ${UPLOAD_MAX_FILE_SIZE:-50MB}
+      UPLOAD_MAX_REQUEST_SIZE: ${UPLOAD_MAX_REQUEST_SIZE:-55MB}
       PRIVATE_STORAGE_ROOT: /app/data/private
       AI_SERVICE_BASE_URL: http://ai:8000
       AI_SERVICE_INTERNAL_TOKEN: ${AI_SERVICE_INTERNAL_TOKEN:-ChangeMe-Internal-Token-2026}
@@ -133,6 +149,39 @@ services:
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-ChangeMe-Admin-2026}
       AUTH_SESSION_HOURS: ${AUTH_SESSION_HOURS:-12}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://127.0.0.1:5274,http://localhost:5274}
+      # ── 平台接入（产品接入通则）────────────────────────────────────────
+      # 这些变量必须在这里显式列出：compose 的 environment 是白名单，
+      # 宿主机 shell 或 .env 里有而这里没列的，容器根本看不到。
+      # 漏列的表现不是报错——是「把凭证写进 .env 之后什么都没发生」。
+      DEPLOY_STAGE: ${DEPLOY_STAGE:-local}
+      APP_VERSION: ${APP_VERSION:-dev}
+      ALLOW_MOCK_ON_DEPLOY: ${ALLOW_MOCK_ON_DEPLOY:-false}
+      # C1 身份 / C1b 换票：这一对 client 凭据同时是 S2S 凭据
+      OIDC_RP_ENABLED: ${OIDC_RP_ENABLED:-false}
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-}
+      OIDC_POST_LOGOUT_REDIRECT_URI: ${OIDC_POST_LOGOUT_REDIRECT_URI:-}
+      OIDC_SCOPES: ${OIDC_SCOPES:-}
+      RP_SESSION_TTL: ${RP_SESSION_TTL:-43200}
+      # 生产必须为 true：__Host- 前缀的 cookie 在 http 上会被浏览器直接拒收
+      RP_SESSION_SECURE_COOKIE: ${RP_SESSION_SECURE_COOKIE:-false}
+      # C2 权益 / C3 用量与开通
+      PLATFORM_API_URL: ${PLATFORM_API_URL:-}
+      PLATFORM_INTERNAL_AUTH_TOKEN: ${PLATFORM_INTERNAL_AUTH_TOKEN:-}
+      TENDERFORGE_PROVISION_WEBHOOK_SECRET: ${TENDERFORGE_PROVISION_WEBHOOK_SECRET:-}
+      TENDERFORGE_PROVISION_WEBHOOK_SECRET_NEXT: ${TENDERFORGE_PROVISION_WEBHOOK_SECRET_NEXT:-}
+      CONSOLE_BASE_URL: ${CONSOLE_BASE_URL:-https://console.vxture.com}
+      # Atlas 模型出口
+      ATLAS_API_URL: ${ATLAS_API_URL:-}
+      # 仅本地：驱动权益替身走遍各档位分支（部署态替身根本起不来）
+      MOCK_TIER: ${MOCK_TIER:-}
+      MOCK_STATUS: ${MOCK_STATUS:-}
+      MOCK_BUNDLED: ${MOCK_BUNDLED:-false}
+      MOCK_USAGE_GATED: ${MOCK_USAGE_GATED:-false}
+      USAGE_FLUSH_INTERVAL_MS: ${USAGE_FLUSH_INTERVAL_MS:-15000}
+      USAGE_FLUSH_BATCH_SIZE: ${USAGE_FLUSH_BATCH_SIZE:-100}
     volumes:
       - private-files:/app/data/private
     healthcheck:
@@ -158,6 +207,13 @@ services:
       DATABASE_USERNAME: czghagent
       DATABASE_PASSWORD: ${MYSQL_PASSWORD:-ChangeMe-Mysql-2026}
       DATABASE_DRIVER: com.mysql.cj.jdbc.Driver
+      # 调优项。compose 的 environment: 是白名单——不在这里列出来，
+      # 写进 .env 就完全没有反应，服务照常起来、照常用默认值、没有任何报错。
+      # SERVER_PORT 刻意不放开：8081 在健康检查和 nginx 上游里是写死的，
+      # 放开等于给人一个能把整栈弄坏的开关。
+      DATABASE_POOL_SIZE: ${DATABASE_POOL_SIZE:-10}
+      UPLOAD_MAX_FILE_SIZE: ${UPLOAD_MAX_FILE_SIZE:-50MB}
+      UPLOAD_MAX_REQUEST_SIZE: ${UPLOAD_MAX_REQUEST_SIZE:-55MB}
       PRIVATE_STORAGE_ROOT: /app/data/private
       AI_SERVICE_BASE_URL: http://ai:8000
       AI_SERVICE_INTERNAL_TOKEN: ${AI_SERVICE_INTERNAL_TOKEN:-ChangeMe-Internal-Token-2026}
@@ -175,6 +231,39 @@ services:
       DOCUMENT_SERVICE_BASE_URL: ${DOCUMENT_SERVICE_BASE_URL:-http://ai:8000}
       DOCUMENT_SERVICE_TIMEOUT_SECONDS: ${DOCUMENT_SERVICE_TIMEOUT_SECONDS:-1800}
       BOOTSTRAP_ENABLED: "false"
+      # ── 平台接入（产品接入通则）────────────────────────────────────────
+      # 这些变量必须在这里显式列出：compose 的 environment 是白名单，
+      # 宿主机 shell 或 .env 里有而这里没列的，容器根本看不到。
+      # 漏列的表现不是报错——是「把凭证写进 .env 之后什么都没发生」。
+      DEPLOY_STAGE: ${DEPLOY_STAGE:-local}
+      APP_VERSION: ${APP_VERSION:-dev}
+      ALLOW_MOCK_ON_DEPLOY: ${ALLOW_MOCK_ON_DEPLOY:-false}
+      # C1 身份 / C1b 换票：这一对 client 凭据同时是 S2S 凭据
+      OIDC_RP_ENABLED: ${OIDC_RP_ENABLED:-false}
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-}
+      OIDC_POST_LOGOUT_REDIRECT_URI: ${OIDC_POST_LOGOUT_REDIRECT_URI:-}
+      OIDC_SCOPES: ${OIDC_SCOPES:-}
+      RP_SESSION_TTL: ${RP_SESSION_TTL:-43200}
+      # 生产必须为 true：__Host- 前缀的 cookie 在 http 上会被浏览器直接拒收
+      RP_SESSION_SECURE_COOKIE: ${RP_SESSION_SECURE_COOKIE:-false}
+      # C2 权益 / C3 用量与开通
+      PLATFORM_API_URL: ${PLATFORM_API_URL:-}
+      PLATFORM_INTERNAL_AUTH_TOKEN: ${PLATFORM_INTERNAL_AUTH_TOKEN:-}
+      TENDERFORGE_PROVISION_WEBHOOK_SECRET: ${TENDERFORGE_PROVISION_WEBHOOK_SECRET:-}
+      TENDERFORGE_PROVISION_WEBHOOK_SECRET_NEXT: ${TENDERFORGE_PROVISION_WEBHOOK_SECRET_NEXT:-}
+      CONSOLE_BASE_URL: ${CONSOLE_BASE_URL:-https://console.vxture.com}
+      # Atlas 模型出口
+      ATLAS_API_URL: ${ATLAS_API_URL:-}
+      # 仅本地：驱动权益替身走遍各档位分支（部署态替身根本起不来）
+      MOCK_TIER: ${MOCK_TIER:-}
+      MOCK_STATUS: ${MOCK_STATUS:-}
+      MOCK_BUNDLED: ${MOCK_BUNDLED:-false}
+      MOCK_USAGE_GATED: ${MOCK_USAGE_GATED:-false}
+      USAGE_FLUSH_INTERVAL_MS: ${USAGE_FLUSH_INTERVAL_MS:-15000}
+      USAGE_FLUSH_BATCH_SIZE: ${USAGE_FLUSH_BATCH_SIZE:-100}
     volumes:
       - private-files:/app/data/private
 

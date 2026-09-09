@@ -25,48 +25,33 @@ import static org.mockito.Mockito.when;
 
 class BidContentReviewServiceTest {
     @Test
-    void reviewsEachTopLevelLaneBeforeOneGlobalReview() {
+    void raisesModelReviewIssuesAgainstTheResolvedChapter() {
         BidAiExecutionService ai = mock(BidAiExecutionService.class);
-        when(ai.reviewLane(anyString(), anyString(), anyString(), any()))
+        when(ai.review(anyString(), anyString(), anyString(), anyString(), any()))
                 .thenAnswer(invocation -> review("一级技术域审查完成"));
-        when(ai.reviewGlobal(anyString(), anyString(), anyString(), any()))
-                .thenAnswer(invocation -> review("全文一致性审查完成"));
         BidContentReviewService service = new BidContentReviewService(
-                mock(BidRepository.class), mock(BidProductionRepository.class), ai,
-                new BidRelevantContextSelector());
+                mock(BidRepository.class), mock(BidProductionRepository.class), ai);
 
         List<com.td.czghagent.domain.model.BidProductionState.ReviewIssue> issues =
                 service.reviewSnapshotStrict(
                         "task", snapshot(), chapters(), units());
 
         assertThat(issues).isEmpty();
-        ArgumentCaptor<TenderAiGateway.ReviewRequest> laneRequests =
+        // 现在只发一次全文审查。此前这里断言「两次分轨 + 一次全局」，
+        // 而那套分轨调用在生产路径上已经不存在了——断言一条不会发生的路径，
+        // 等于这个用例什么都没在保护。
+        ArgumentCaptor<TenderAiGateway.ReviewRequest> request =
                 ArgumentCaptor.forClass(TenderAiGateway.ReviewRequest.class);
-        verify(ai, times(2)).reviewLane(
-                anyString(), anyString(), anyString(), laneRequests.capture());
-        assertThat(laneRequests.getAllValues())
-                .allMatch(request -> "LANE".equals(request.payload().get("reviewMode")));
-        ArgumentCaptor<TenderAiGateway.ReviewRequest> globalRequest =
-                ArgumentCaptor.forClass(TenderAiGateway.ReviewRequest.class);
-        verify(ai).reviewGlobal(anyString(), anyString(), anyString(), globalRequest.capture());
-        assertThat(globalRequest.getValue().payload().get("reviewMode")).isEqualTo("GLOBAL");
-        assertThat((List<?>) globalRequest.getValue().payload().get("laneReviews")).hasSize(2);
-        assertThat(globalRequest.getValue().payload())
-                .containsKey("solutionContract")
-                .doesNotContainKeys("requirements", "writingBible", "chapters");
-    }
-
-    @Test
-    void boundsTheTotalLaneExcerptForLargeOutlines() {
-        assertThat(BidContentReviewService.laneExcerptLimit(300) * 300)
-                .isLessThanOrEqualTo(60_000);
-        assertThat(BidContentReviewService.laneExcerptLimit(2)).isEqualTo(6_000);
+        verify(ai, times(1)).review(
+                anyString(), anyString(), anyString(), anyString(), request.capture());
+        assertThat(request.getValue().payload())
+                .containsKeys("chapters", "termRegistry", "commitmentRegistry");
     }
 
     @Test
     void demotesReviewIssuesWithUnknownChapterReferencesToWarnings() {
         BidAiExecutionService ai = mock(BidAiExecutionService.class);
-        when(ai.reviewLane(anyString(), anyString(), anyString(), any()))
+        when(ai.review(anyString(), anyString(), anyString(), anyString(), any()))
                 .thenAnswer(invocation -> new TenderAiGateway.Review(
                         true,
                         List.of(new TenderAiGateway.ReviewIssue(
@@ -74,18 +59,15 @@ class BidContentReviewServiceTest {
                                 "无法定位的问题", "请人工确认", List.of())),
                         new TenderAiGateway.ReviewCoverage(0, 0, List.of()),
                         List.of(), "技术域审查完成"));
-        when(ai.reviewGlobal(anyString(), anyString(), anyString(), any()))
-                .thenAnswer(invocation -> review("全文一致性审查完成"));
 
         BidContentReviewService service = new BidContentReviewService(
-                mock(BidRepository.class), mock(BidProductionRepository.class), ai,
-                new BidRelevantContextSelector());
+                mock(BidRepository.class), mock(BidProductionRepository.class), ai);
 
         List<com.td.czghagent.domain.model.BidProductionState.ReviewIssue> issues =
                 service.reviewSnapshotStrict("task", snapshot(), chapters(), units());
 
         assertThat(issues).anySatisfy(issue -> {
-            assertThat(issue.code()).isEqualTo("AI_REVIEW_INVALID_CHAPTER_REFERENCE");
+            assertThat(issue.code()).isEqualTo("AI_REVIEW_UNLOCATABLE");
             assertThat(issue.severity()).isEqualTo("WARN");
             assertThat(issue.chapterId()).isNull();
         });
@@ -95,7 +77,7 @@ class BidContentReviewServiceTest {
     @Test
     void acceptsOutlineNodeReferenceAndNormalizesItToChapterId() {
         BidAiExecutionService ai = mock(BidAiExecutionService.class);
-        when(ai.reviewLane(anyString(), anyString(), anyString(), any()))
+        when(ai.review(anyString(), anyString(), anyString(), anyString(), any()))
                 .thenAnswer(invocation -> new TenderAiGateway.Review(
                         true,
                         List.of(new TenderAiGateway.ReviewIssue(
@@ -103,12 +85,9 @@ class BidContentReviewServiceTest {
                                 "实现机制不完整", "补充实施动作", List.of())),
                         new TenderAiGateway.ReviewCoverage(0, 0, List.of()),
                         List.of(), "技术域审查完成"));
-        when(ai.reviewGlobal(anyString(), anyString(), anyString(), any()))
-                .thenAnswer(invocation -> review("全文一致性审查完成"));
 
         BidContentReviewService service = new BidContentReviewService(
-                mock(BidRepository.class), mock(BidProductionRepository.class), ai,
-                new BidRelevantContextSelector());
+                mock(BidRepository.class), mock(BidProductionRepository.class), ai);
 
         List<com.td.czghagent.domain.model.BidProductionState.ReviewIssue> issues =
                 service.reviewSnapshotStrict("task", snapshot(), chapters(), units());

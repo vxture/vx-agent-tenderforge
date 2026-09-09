@@ -66,11 +66,19 @@ public class BidQueryService {
         return bidRepository.listExports(bidId);
     }
 
-    public StoredFile latestExport(String bidId, CurrentUser user) {
+    /**
+     * 按标识下载一次成果。
+     *
+     * <p>取代了原来的「下载最新」路由：{@code /exports/latest/download} 把一个筛选条件
+     * 写进了路径段，而路径段只留给资源标识（产品接入通则 A-2）。
+     * 前端从 {@code GET /exports} 拿到列表后自己挑，这样「最新」的定义留在调用方手里，
+     * 而不是被服务端固化成一条无法参数化的路由。
+     */
+    public StoredFile exportFile(String bidId, String exportId, CurrentUser user) {
         BidDocument bid = requireBid(bidId, user);
-        BidRepository.ExportRecord export = bidRepository.findLatestExport(bid.id())
+        BidRepository.ExportRecord export = bidRepository.findExport(bid.id(), exportId)
                 .orElseThrow(() -> new BusinessException(
-                        "BID_EXPORT_NOT_FOUND", "该标书尚无可下载成果", 404
+                        "BID_EXPORT_NOT_FOUND", "该成果不存在", 404
                 ));
         return fileStorage.read(
                 export.objectKey(), export.fileName(),

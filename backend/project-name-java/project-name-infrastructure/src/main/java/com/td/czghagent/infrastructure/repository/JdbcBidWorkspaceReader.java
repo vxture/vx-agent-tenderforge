@@ -10,6 +10,7 @@ import com.td.czghagent.domain.model.BidSummary;
 import com.td.czghagent.domain.model.BidWorkspace;
 import com.td.czghagent.domain.model.BidWorkspaceViews;
 import com.td.czghagent.domain.repository.BidProductionRepository;
+import java.time.LocalDateTime;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.List;
@@ -55,8 +56,8 @@ final class JdbcBidWorkspaceReader {
                 rs.getString("layout_status"), rs.getString("qa_status"),
                 BidJdbcMappers.nullableInteger(rs.getObject("actual_pages")),
                 BidJdbcMappers.nullableInteger(rs.getObject("latest_export_version")),
-                rs.getTimestamp("created_at").toLocalDateTime(),
-                rs.getTimestamp("updated_at").toLocalDateTime()), ownerId);
+                rs.getObject("created_at", LocalDateTime.class),
+                rs.getObject("updated_at", LocalDateTime.class)), ownerId);
     }
 
     Optional<BidDocument> findBid(String bidId, String ownerId) {
@@ -133,7 +134,7 @@ final class JdbcBidWorkspaceReader {
                 """, (rs, row) -> new BidWorkspaceViews.ChapterSummary(
                 rs.getString("id"), rs.getString("outline_node_id"), rs.getString("title"),
                 rs.getString("generation_status"), rs.getInt("table_count"),
-                rs.getTimestamp("updated_at").toLocalDateTime(),
+                rs.getObject("updated_at", LocalDateTime.class),
                 rs.getLong("revision")), bidId);
         return new BidWorkspaceViews.OutlineView(nodes, chapters);
     }
@@ -168,7 +169,7 @@ final class JdbcBidWorkspaceReader {
                 """, (rs, row) -> new BidProductionState.GenerationEvent(
                 rs.getString("id"), rs.getString("task_id"), rs.getString("chapter_id"),
                 rs.getString("event_type"), rs.getString("message"),
-                rs.getTimestamp("occurred_at").toLocalDateTime()), bidId, task.id());
+                rs.getObject("occurred_at", LocalDateTime.class)), bidId, task.id());
         int progress = task.totalUnits() == 0 ? 0
                 : Math.min(100, task.completedUnits() * 100 / task.totalUnits());
         return new BidWorkspaceViews.GenerationProgress(
@@ -189,9 +190,9 @@ final class JdbcBidWorkspaceReader {
                 rs.getInt("parse_progress"), rs.getString("error_message"),
                 rs.getString("overview_status"), rs.getString("overview_error_message"),
                 rs.getString("scoring_status"), rs.getString("scoring_error_message"),
-                rs.getTimestamp("uploaded_at").toLocalDateTime(),
-                BidJdbcMappers.nullableTime(rs.getTimestamp("parse_started_at")),
-                BidJdbcMappers.nullableTime(rs.getTimestamp("parse_finished_at"))), bidId)
+                rs.getObject("uploaded_at", LocalDateTime.class),
+                BidJdbcMappers.nullableTime(rs, "parse_started_at"),
+                BidJdbcMappers.nullableTime(rs, "parse_finished_at")), bidId)
                 .stream().findFirst().orElse(null);
     }
 

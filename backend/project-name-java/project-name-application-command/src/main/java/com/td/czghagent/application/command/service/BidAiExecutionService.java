@@ -131,22 +131,6 @@ public class BidAiExecutionService {
                 qualityModelName, "成稿审查结果", request, () -> gateway.review(request));
     }
 
-    TenderAiGateway.Review reviewLane(
-            String bidId, String taskId, String snapshotId,
-            TenderAiGateway.ReviewRequest request
-    ) {
-        return execute(bidId, taskId, snapshotId, "REVIEW_LANE", "review-lane-v4",
-                qualityModelName, "一级技术域审查结果", request, () -> gateway.review(request));
-    }
-
-    TenderAiGateway.Review reviewGlobal(
-            String bidId, String taskId, String snapshotId,
-            TenderAiGateway.ReviewRequest request
-    ) {
-        return execute(bidId, taskId, snapshotId, "REVIEW_GLOBAL", "review-global-v4",
-                qualityModelName, "全文全局审查结果", request, () -> gateway.review(request));
-    }
-
     String providerName() {
         return providerName;
     }

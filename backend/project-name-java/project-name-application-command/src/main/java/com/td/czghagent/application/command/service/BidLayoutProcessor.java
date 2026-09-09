@@ -4,6 +4,7 @@
 package com.td.czghagent.application.command.service;
 
 import com.td.czghagent.domain.exception.BusinessException;
+import com.td.czghagent.domain.model.AuditEvent;
 import com.td.czghagent.domain.model.BidDocument;
 import com.td.czghagent.domain.model.BidWorkspace;
 import com.td.czghagent.domain.model.StoredFile;
@@ -78,8 +79,10 @@ public class BidLayoutProcessor {
             fileStorage.delete(stored.objectKey());
             throw exception;
         }
-        auditRepository.append(ownerId, "BID_LAYOUT_COMPLETE", "BID", bidId,
-                "SUCCESS", "正式排版和质量检查完成", "layout-" + layoutJobId, "internal");
+        auditRepository.append(AuditEvent.bySystem(
+                ownerId, bid.tenant(), "BID_LAYOUT_COMPLETE", "BID", bidId,
+                AuditEvent.SUCCESS, "正式排版和质量检查完成", "layout-" + layoutJobId
+        ));
     }
 
     /**

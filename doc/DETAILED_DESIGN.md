@@ -71,6 +71,43 @@ Web，并将 `WEB_HOST` 收回 `127.0.0.1`、在 `CORS_ALLOWED_ORIGINS` 中配�
 浏览器不直接访问 Python、MySQL 或 Temporal。Java 调用 Python 时必须携带
 `X-Internal-Token`；模型密钥通过 Compose 从 `deploy/.env` 注入 `ai` 容器。
 
+### 2.1 平台接入
+
+产品码 **`tenderforge`**，是全仓唯一真源，三处承载必须同时改：
+`ProductIdentity.PRODUCT_CODE`（Java）、`BRAND.productCode`（前端）、
+`brand.PRODUCT_CODE`（Python）。
+
+**它是源码字面量，不是环境变量。** 环境变量意味着同一份镜像可以冒充另一个产品上报用量；
+产品码属于「这份代码是谁」，不属于「这次部署在哪」。
+
+**永远不要从 `OIDC_CLIENT_ID` 反推产品码**：beta 环境的 client 是 `tenderforge-beta`，
+产品码仍是 `tenderforge`，非生产栈上两者必然分叉，而分叉的表现是用量报到一个不存在的
+产品上，本地一切看起来正常。
+
+平台四通道的接入状态：
+
+| 通道 | 状态 |
+| --- | --- |
+| 契约层（X-1 封套、X-2 task_id、X-3 审计字段、A-2/3/4 形状、B-1/3/4 动词） | 已落地 |
+| 租户轴（`TenantScope`，见 §10.0） | 写入已落地；读过滤待 OIDC 切换 |
+| C1 身份（OIDC 授权码 + PKCE，服务端会话，反向登出验签） | **代码已落地**，等平台凭证做活体验证；未配置时走替身，部署态拒绝以替身启动 |
+| C1b S2S 换票（RFC 8693，每次调用现铸） | **代码已落地**，同上 |
+| C2 权益（`GET /platform/entitlements`，45s 缓存不落库） | **代码已落地**，同上；`GET /api/entitlement` 发能力集与两条门控公式 |
+| C3 上行（`POST /usage/consume`，缓冲 + 冲洗，永远 200） | **代码已落地**，同上；见 §10.4 |
+| C3 下发（provisioning webhook，HMAC 原始字节验签） | **代码已落地**，等平台配置投递地址与密钥；见 §10.5 |
+| Atlas 唯一模型出口 | **代码已落地**，见 §8.3；未配 `ATLAS_API_URL` 时仍直连，部署态拒绝以直连启动 |
+| 被调方半边（八条验票、`/.well-known/vxture-tools`） | 未接入 |
+
+**登记的偏离，两条，均带失效条件：**
+
+1. `/api/admin/users` 的启停仍是布尔 `enabled`，而 B-3 要求单一字符串 `state`。
+   理由不是迁移成本——这整个资源即将被「平台 IdP 提供身份 + 本地只存 workspace 内业务角色」
+   替换，新资源会一出生就用 `state`。**失效条件：本地账号体系被替换即作废。**
+2. 仓内类型名 `BidWorkspace`（标书编辑聚合）与平台 `workspace`（租户工作空间）同词异义。
+   线上契约没有撞名——`BidWorkspace` 从不作为 JSON 键出现，响应键是
+   `{bid, sourceFile, criteria, outline, chapters, ...}`；这是仓内可读性问题而非契约违规。
+   **失效条件：随产品码级联重命名一并改为 `BidCanvas`。**
+
 ## 3. 仓库与模块
 
 ### 3.1 前端
@@ -226,9 +263,22 @@ DeepSeek 编写正文 -> 导出 Word”。上下文召回、单元预算和技�
 
 ### 5.3 目录
 
-个人大纲素材。Java 目录 Activity 调用 Python 一次；Python 内部先生成一、二级骨架，再按二级
-分支并行批量扩展三级节点，确定性代码完成合并、编号、覆盖检查和一级页数归一。骨架和扩展
-均使用结构化 JSON 契约，扩展批次失败时由外层 Activity 按统一重试策略重新执行。
+个人大纲素材。Java 目录 Activity **按阶段**调用 Python：策略 → 一二级骨架 → 按批扩展三级节点 →
+确定性装配。每个模型阶段的结果落 `bid_outline_stage_result`，重试时按 `input_hash`
+从断点继续——只有输入一模一样才复用。用「阶段做完了」作判据会在解读重新冻结后
+复用陈旧结果，新的评分要求悄悄没进目录而任务显示成功。
+
+不落阶段结果的代价很具体：一份 500 页标书的三级展开有十几批模型调用，中途任何一批
+失败都会让整个活动被重试，于是从策略开始重跑，已经成功的十几批白付一遍钱，
+而且重跑出来的目录和上一次并不相同。
+
+分批由**骨架阶段**定下并发出，不留给调用方自己切：调用方各切各的，重跑一批时的
+分组就可能变，于是「只重跑第 3 批」重跑的其实是另外一批分支。展开走 fast 档
+（量最大的一段），策略与骨架走 quality 档。装配不调模型，是纯确定性代码——
+让模型参与装配意味着同样的输入可能装出不同的树，重跑一批就会改变整份目录。
+
+Python 侧四个阶段**既能被一次性编排，也能单独调用，且共用同一批实现**；
+分成两套的表现是分阶段恢复出来的目录和原来那份不一样，而两边各自看都合理。
 
 Java/Python 的确定性规则负责：
 
@@ -345,8 +395,34 @@ Compose 中 `api` 只提交工作流，`worker` 注册四个队列并执行 Acti
 
 ## 7. Java 对外 API
 
-所有成功 JSON 使用 `{ success, data, errorCode, message, traceId }`。除登录、健康检查和
-OpenAPI 外均需 `Authorization: Bearer <token>`。
+接口形状遵循《产品接入通则》的 MUST 条款。除登录、运行时探针和 OpenAPI 外均需
+`Authorization: Bearer <token>`。
+
+**成功响应直接返回载荷本体**，没有外层信封（A-4）。三种形状按「有没有服务端解析出来的
+结果要回显」来选，不按资源类型选：
+
+| 情形 | 形状 | 本系统的例子 |
+| --- | --- | --- |
+| 无回显内容 | 裸 JSON 数组 | `/api/bids`、`/api/bid-assets`、`/api/admin/users`、`/api/bids/{bidId}/exports` |
+| 无界游标流水 | `{ items, nextCursor }` | `/api/admin/audit-logs` |
+| 单个对象 | 对象本体 | 其余全部 |
+
+集合键一律叫 `items`；`nextCursor` 为 `null` 表示没有下一页。列表 `limit` 由服务端钳制到
+200，**不静默截断语义**——调用方按「返回条数等于上限」判断还有数据。
+
+**失败响应统一为** `{ code, message, retryable, field? }`（X-1）。三个必备字段不可缺省：
+`retryable` 是被调方自己的答复，调用方照读即可，不要按状态码另行推断；`field` 仅字段级
+错误时出现，为空时整体省略而不是置 `null`。错误码是带模块前缀的 `SCREAMING_SNAKE`。
+跨平面同义的拒绝码照抄不自造：`NOT_ENTITLED`、`POLICY_DENIED`、`APPROVAL_REQUIRED`、
+`QUOTA_EXCEEDED`，另有舰队约定的 `RATE_LIMITED`（唯一 `retryable=true` 的拒绝）。
+
+**`X-Vxture-Task-Id`** 是跨产品唯一聚合键（X-2）。调用方送来的值被原样保留并随出站调用
+（Java → Python → 模型）一路带下去；本服务不自产替代值——一个对方查不到的假聚合键比空值
+更难排查。诊断关联仍用 `X-Trace-Id` 响应头，它不进契约字段位。
+
+**动词语义**（B-1、B-3、B-4）：`PATCH` 是部分更新，`PUT` 是全量替换；`DELETE` 只表示从
+目录移除，状态迁移一律走具名路由（`POST :id/deactivate`、`POST :id/activate`、
+`POST /api/auth/logout`）。筛选条件走查询参数，路径段只留给资源标识（A-2）。
 
 ### 7.1 认证、账户与管理
 
@@ -354,14 +430,20 @@ OpenAPI 外均需 `Authorization: Bearer <token>`。
 | --- | --- | --- |
 | `POST` | `/api/auth/login` | 用户名密码登录并创建有过期时间的会话 |
 | `GET` | `/api/auth/me` | 返回当前用户 |
-| `DELETE` | `/api/auth/session` | 注销当前会话 |
+| `GET` | `/api/auth/oidc/login` | 发起平台登录，`302` 跳 IdP；`returnTo` 已白名单化 |
+| `GET` | `/api/auth/oidc/callback` | IdP 回调，种下不透明会话 cookie 并 `302` 回站内 |
+| `POST` | `/api/auth/oidc/backchannel-logout` | 平台反向登出通知；验签后撤销该 subject 的全部会话 |
+| `POST` | `/api/auth/logout` | **唯一的登出入口**，撤销请求携带的任何一种会话，返回 `204` |
+| `GET` | `/api/status` | 平台接入自证：四条通道的真实状态；只报状态不报值 |
 | `POST` | `/api/account/avatar` | 上传、处理并替换当前用户头像 |
 | `GET` | `/api/account/avatar` | 鉴权读取当前用户头像 |
 | `PATCH` | `/api/account/password` | 校验旧密码并修改密码，记录审计 |
 | `PATCH` | `/api/account/profile` | 修改显示名称 |
-| `GET/POST` | `/api/admin/users` | 分页筛选用户 / 创建用户 |
-| `GET/PATCH/DELETE` | `/api/admin/users/{userId}` | 查询、乐观锁更新、停用用户 |
-| `GET` | `/api/admin/audit-logs` | 按关键字、动作、结果和时间分页查询审计 |
+| `GET/POST` | `/api/admin/users` | 按 `limit` 钳制的筛选（裸数组）/ 创建用户 |
+| `GET/PATCH` | `/api/admin/users/{userId}` | 查询 / 乐观锁部分更新 |
+| `POST` | `/api/admin/users/{userId}/deactivate` | 停用账号，幂等 |
+| `POST` | `/api/admin/users/{userId}/activate` | 启用账号，幂等 |
+| `GET` | `/api/admin/audit-logs` | 按关键字、动作、结果和时间查询审计，键集游标翻页 |
 
 ### 7.2 素材与标书
 
@@ -393,11 +475,42 @@ OpenAPI 外均需 `Authorization: Bearer <token>`。
 | `POST` | `/api/bids/{bidId}/content/freeze` | 校验阻断项并冻结正文 |
 | `POST` | `/api/bids/{bidId}/layout-jobs` | 提交异步 DOCX 排版与 QA |
 | `GET/POST` | `/api/bids/{bidId}/exports` | 查询历史成果 / 同步创建兼容导出 |
-| `GET` | `/api/bids/{bidId}/exports/latest/download` | 下载最近成果 |
+| `GET` | `/api/bids/{bidId}/exports/{exportId}/download` | 按标识下载成果 |
 
-错误语义：400 为输入/阶段前置条件，401 为会话无效，403 为角色或所有权拒绝，404 为
-资源不存在，409 为 revision 冲突、冻结阻断或状态不允许，502/503 为 AI/文档服务失败。
-响应中的 `traceId` 用于关联日志和审计。
+错误语义：400 为输入/阶段前置条件，401 为凭证无效（重换凭证后可重试），403 为求值拒绝
+（**不要重试**，否则得到一个永远失败的循环），404 为资源不存在，409 为 revision 冲突、
+冻结阻断或状态不允许，502/503 为 AI/文档服务失败。状态码语义固定，变的只是体内的 `code`。
+
+### 7.2b 身份与会话
+
+**浏览器零 token。** 平台 access / refresh / id token 全部留在服务端 `rp_session`，
+浏览器只拿一个 `HttpOnly; SameSite=Lax` 的不透明 cookie（生产带 `__Host-` 前缀）。
+这不只是防窃取——access token 同时是 S2S 换票的原料（OBO 模式的 `subject_token`），
+一旦下发前端，那条链就断了。
+
+`SameSite=Lax` 而不是 `Strict`：登录回调是从 IdP 域发起的顶层导航，
+Strict 会让浏览器不带上刚种下的 cookie，表现为「登录成功后仍然未登录」。
+
+**两条身份通道并存（过渡态）**：RP 会话（cookie）优先，本地口令会话（Bearer）其次。
+顺序不是偏好——反过来会让一个残留的旧 Bearer 盖掉刚建立的平台身份。
+前端登录页把平台登录做成主入口，本地口令折叠为标注了「过渡通道」的次要入口。
+平台身份验证通过后，本地那条连同 `app_user` 一起退役。
+
+**是否已登录由服务端裁定**，不由 localStorage 里有没有字符串裁定：RP 会话装在
+HttpOnly cookie 里，浏览器读不到它。
+
+**阶段守卫**：`app.oidc.*` 未配置时使用替身身份；替身在部署态（`DEPLOY_STAGE`
+非 local）**拒绝启动**，除非显式设置 `ALLOW_MOCK_ON_DEPLOY`——而那会由
+`/api/status` 的 `degraded` 位如实自报。替身编造的一切带 `mock-` / `local:` 前缀。
+
+### 7.3 运行时面
+
+| 方法 | 路径 | 守卫 | 内容 |
+| --- | --- | --- | --- |
+| `GET` | `/api/health` | 公开 | 存活探针，**按契约零依赖**——只回答进程活着吗、是哪个构建。在这里放数据库检查会让一次抖动重启掉健康容器 |
+| `GET` | `/api/ready` | 公开 | 就绪探针。`blocked` → 503，`ready` → 200。每项检查**只含 status 与耗时**，原始异常文本可能含内网主机名，留在日志里 |
+
+平台的产品健康页探测的是 `/api/ready`；没有它的产品在健康页上恒显示「未实现」。
 
 ## 8. Python 内部 API 与 AI 契约
 
@@ -420,8 +533,20 @@ OpenAPI 外均需 `Authorization: Bearer <token>`。
 | `POST` | `/internal/tender/review` | 全部章节有界摘录 -> 审查问题、覆盖率和摘要；`chapterId` 必须来自 `allowedChapterIds` |
 | `POST` | `/internal/tender/document/render` | 文档模型 -> DOCX bytes 和 QA headers |
 
-除 `/health` 外均校验 `X-Internal-Token`。AI 响应使用 Pydantic 模型，不接受自由文本直接
-进入业务库。Envelope 诊断包含 `finish_reason`、响应长度/哈希、输入/输出、reasoning、缓存命中
+除 `/health` 与 `/ready` 外均校验 `X-Internal-Token`（常量时间比较；「没带」与「带错」
+返回同一个码，区分它们只对攻击者有用）。
+
+**失败响应与 Java 面同一个封套**：`{ code, message, retryable, field? }`。内部服务不构成
+豁免——「承载位置随传输，封套内容统一」。这一面刻意<strong>不</strong>使用 FastAPI 默认的
+`{"detail": ...}`：那是同一个服务上的第二种信封形状，而且它既没有 `code` 也没有
+`retryable`。处理器注册在 <strong>Starlette 的 `HTTPException` 基类</strong>上而不是 FastAPI
+子类，因为路由未命中的 404 由 Starlette 自己抛；只注册子类会让这一面最常被撞到的响应
+成为唯一漏网的那个。
+
+`X-Vxture-Task-Id` 由 Java 侧透传进来，经中间件放进请求作用域的 `ContextVar`，
+再随出站模型调用带出。为空是合法状态，不在此处兜底成新 UUID。
+
+AI 响应使用 Pydantic 模型，不接受自由文本直接进入业务库。Envelope 诊断包含 `finish_reason`、响应长度/哈希、输入/输出、reasoning、缓存命中
 Token 和尝试次数。结构修复无论最终成功或失败，都累计修复前后的可计量 Token 和真实模型
 请求次数，不只记录最后一次响应；错误详情不包含模型原文。结构化输出失败映射为 502；
 未配置或鉴权失败映射为 503；请求模型不合法为 422。
@@ -446,7 +571,19 @@ Token 和尝试次数。结构修复无论最终成功或失败，都累计修�
 正文和目录骨架、分支扩展、局部改写关闭 thinking；全文审查按配置开启 thinking，概要和评分
 抽取关闭 thinking。Java 的 `bid_ai_run` 记录 `OUTLINE`、`CHAPTER_DRAFT`、`REVIEW` 和实际模型。
 目录提示词版本为 `outline-skeleton-v2`、`outline-expansion-v2`，正文契约为
-`chapter-content-v3`。策略和技术域蓝图接口保留用于兼容，但不在默认用户流程中产生调用。
+`chapter-content-v3`。`bid_strategy_planning` 是目录流程的第一阶段：它给每条评分响应编出稳定的 `SP-00N`，
+一路传到三级节点，正文阶段据此召回本章该响应的评分原文。没有它，目录只是一棵结构树，
+和评分表之间没有任何可追溯的连接。
+
+`branch_blueprint_planning` 决定同一二级分支下各三级章节**各写什么、不写什么**。
+写每章正文前先取本章所在分支的蓝图；蓝图按 `input_hash` 落
+`bid_snapshot_branch_blueprint`，**一个分支只生成一次**，分支下各章、并行单元
+和重试全部复用。请求里带上分支下的**全部**章节——只带当前这一章的话，
+模型看不见兄弟章节，给出的规划对每一章都是「把整个技术域讲一遍」，
+而那正是这套机制要防的东西。
+
+蓝图生成失败让当前单元失败重试，不退回「没有蓝图也写」：后者会产出正是这套
+机制要防的那种正文，且没有任何迹象说明它降级了。
 Python 根据 `AI_MODEL_REQUEST_DIALECT` 转换思考开关：`deepseek` 发送
 `thinking: {type: enabled|disabled}`，`dashscope` 发送 `enable_thinking: true|false`，`openai`
 不发送厂商专用思考字段。百炼的 `enable_thinking` 是 OpenAI-compatible 接口的扩展字段，
@@ -492,6 +629,58 @@ Python 根据 `AI_MODEL_REQUEST_DIALECT` 转换思考开关：`deepseek` 发送
 逐次记录每个真实业务尝试的耗时、输入/输出/reasoning/cache Token、finish reason 和错误。
 审计不保存密钥、完整提示词、模型原始响应或敏感正文。
 
+### 8.3 Atlas：唯一模型出口
+
+配上 `ATLAS_API_URL` 即切到 `POST /v1/chat`；不配则退回直连模型供应商，
+而那条路在部署阶段**拒绝启动**（除非显式 `ALLOW_MOCK_ON_DEPLOY`）。
+
+直连能跑，而且跑得很好，这正是它危险的地方：整个产品一切正常，只是每一次推理
+都没进平台的账。这种偏差没有任何症状，只会在月底对量时表现为一个没人解释得了的
+缺口。所以 `/api/status` 把「直连」列为**独立一态**（`direct` / `degraded_direct`），
+不并进 `not_configured`——后者读起来像「这条通道还没启用」，而真相是它正在被
+一条未登记的通道替代。还在直连也计入 `degraded`。
+
+**票在 Java 侧铸，Python 只转呈。** Atlas 要 `aud=atlas` 的 S2S 票，而铸票凭据就是
+本产品的 OIDC client 对；复制进 Python 意味着产品身份凭据有第二份副本、两个轮换点。
+票只活 300 秒，也没有「配一个长期 token」这条路。有用户会话时走 OBO（Atlas 审计
+落到人头上），后台任务走 service 模式。Atlas 回 401 时由 Java 作废缓存、重铸、
+**只重一次**——其余失败一概不重试，因为每次调用都被计量，而最值得重试的操作恰好
+都不幂等。
+
+**请求体只有** `{endpointCode, messages, tenantId, taskId, requestId}`。没有 temperature、
+没有 max_tokens、没有 response_format、没有 thinking 开关——这不是遗漏，Atlas 的路由
+优先级是 `modelCode > endpointCode > taskProfile`，生成参数属于 endpoint 的配置。
+于是 §8.1 那张表变成了对 Atlas 线的一份**配置请求**，逐条记在
+`atlas_endpoints.py` 里；`required_endpoint_codes()` 列出需要授权的全部 endpoint。
+
+`tenantId` 取自票里的 claim，**不是产品码**。送产品码看起来能跑：Atlas 只校验它非空，
+而产品授权那条路径在租户断言之前就返回了。一旦授权缺失或 endpoint 被改指，控制流
+落到 UUID 断言，失败表现为 `400 INVALID_TENANT_ID`——读起来像请求体写错了。非 UUID
+还会让 Atlas 的请求日志写进 NULL，本产品流量从每一张租户汇总表里消失且全程无报错。
+
+**不上报 token 用量。** Atlas 自己按 `atlas.chat` 计量推理消耗；产品再报一次就是同一次
+推理被记两遍。产品报的是自己的业务单元（C3 上行，§10.4）。上游没报用量时 Atlas 返回
+三个 0 而内部记 NULL，客户端把它读成"没有用量"而不是"用量为零"。
+
+**Temporal 边界要重建上下文。** `task_id` 与租户轴由入站 HTTP 过滤器建立，而绝大多数
+模型调用发生在活动里——那是另一个线程、通常是另一个进程。不补这一层的表现是：
+Atlas 强制要求 `taskId`，缺失即 400，于是主流程全部失败而手工点的同步接口一切正常。
+`PlatformActivityContext` 在活动入口重建两者，租户从**标书行**上取而不是从 ownerId 拼。
+
+**三条尚未闭合的依赖，都在平台侧：**
+
+1. `ATLAS_API_URL` 与平台凭据（铸不出票就调不了 Atlas）。
+2. Atlas 的 endpoint 授权。缺一个，对应 operation 全部 `403 NOT_ENTITLED`，
+   与令牌是否有效无关。授权到位前保持 `ATLAS_USE_DEDICATED_ENDPOINTS=false`，
+   全部走 `chat/default`——链路能通，但所有 operation 共用一套生成参数。
+3. **平台身份**。铸票要真实 workspace，而本地口令登录的租户是 `local:<用户id>`，
+   平台那边不存在。也就是说 **Atlas 迁移在 C1 切换之前无法真正生效**——
+   这两件事是耦合的，不是可以分别排期的。
+
+**登记的缺口：**入站 HTTP 请求上的 `task_id` 目前不传进工作流（工作流输入类型要加
+字段，对在途工作流是一次版本变更）。后果是 agent 发起的解读在 Atlas 那边归到产品
+自铸的键上，而不是发起方那条链。
+
 ## 9. 文件解析、存储与导出
 
 支持输入：`.doc`、`.docx`、`.pdf`、`.xlsx`、`.xlsm`、`.csv`、`.txt`、`.md`。
@@ -509,24 +698,49 @@ Java `BidDocumentExporter` 的本地实现用于文档服务关闭时的开发/�
 
 ## 10. 数据模型
 
+### 10.0 租户轴
+
+平台四层模型在本产品侧的投影是 `TenantScope(orgId, workspaceId)`。产品**只持引用，
+不复制平台主数据**——库里存的是标识，不是组织和空间的副本。
+
+**租户列只加在聚合根与直接归属实体上**：`bid_document`、`bid_reference_asset`、
+`audit_log`。其余 30 张 `bid_*` 子表通过 `bid_id` 继承归属。给它们各加一列会得到 30 处
+可能不一致的真相，而任何一处漏更新的表现都是「数据在租户之间静默串味」——没有报错，
+只有一个看起来正常的响应。判据：查询是否需要不经 join 就按租户过滤。
+
+**过渡值**：平台身份接通前，`TenantScope.local(userId)` 产生形如 `local:<userId>` 的值，
+一个本地用户一个工作空间。刻意不是 UUID——平台签发的 workspace 是 UUID，所以它不可能
+与真实值冲突，而且肉眼可辨「这一行还没接上平台身份」。**不留空**是有意的：可空的租户键会让
+一次忘记加过滤的查询静默返回全部行，而那个响应看起来完全正常。
+
+**当前读过滤仍按 `owner_id`**，写入已按租户列落库。今天两者一一对应（`local:<ownerId>`），
+所以两个过滤等价；接通 OIDC 后同一个人可属于多个工作空间，那一刻**必须**把
+`bid_document` / `bid_reference_asset` 的读过滤切到 `workspace_id`。
+切换点由 `TenantScope.isLocal()` 标记：库里还带 `local:` 前缀的行就是尚未迁移的那些。
+
 ### 10.1 账户与审计
 
 | 表 | 作用 |
 | --- | --- |
 | `app_user`、`app_role`、`app_user_role` | 用户、角色和启停状态 |
 | `auth_session` | 哈希会话 Token、过期和注销时间 |
-| `audit_log` | 操作者、动作、目标、结果、trace、IP 和时间 |
+| `audit_log` | 按 X-3 最小字段集：`event_id`、`occurred_at`、`actor_id`、`actor_console`、`object_type`、`object_id`、`action`、`outcome`，另加 `task_id`、`org_id`、`workspace_id`、`trace_id`、`ip_address`、`detail_summary` |
+
+审计表**只追加**：`AuditRepository` 上不暴露 update / delete，更正只能是补偿事件。
+`actor_console` 对本产品界面发起的写填产品码 `tenderforge`，对后台通道（Temporal 活动）
+留空——通则明确 MUST NOT 硬编一个，编出来的控制台名会让审计员按控制台筛查时
+收到一批根本不是从那里发起的动作。
 
 ### 10.2 工作区
 
 | 表 | 作用 |
 | --- | --- |
-| `bid_document` | 标书根、所有者、设置、工作步骤、三段冻结状态/版本/哈希、过期原因 |
+| `bid_document` | 标书根、所有者、**租户轴（`org_id`/`workspace_id`）**、设置、工作步骤、三段冻结状态/版本/哈希、过期原因 |
 | `bid_source_file`、`bid_source_segment` | 当前源文件、对象键、解析和两个 AI 对象状态、稳定文本片段 |
 | `bid_scoring_criterion` | 项目概述、技术评分要求及来源/置信度/人工标记 |
 | `bid_interpretation_version`、`bid_requirement_item` | 冻结解读版本和需求副本 |
 | `bid_requirement_conflict`、`bid_frozen_fact` | V17 历史解读兼容数据；现行两对象解读不再新增记录，下游仍读取存量冻结口径 |
-| `bid_reference_asset`、`bid_asset_chunk`、`bid_asset_selection` | 个人素材、解析分块和标书选择关系 |
+| `bid_reference_asset`、`bid_asset_chunk`、`bid_asset_selection` | 个人素材（带租户轴）、解析分块和标书选择关系 |
 | `bid_outline_node`、`bid_outline_task` | 当前三级目录和异步生成任务 |
 | `bid_outline_regeneration_archive` | 目录重新生成前的 JSON 快照 |
 | `bid_chapter`、`bid_chapter_version` | 当前章节和不可变版本历史 |
@@ -553,6 +767,79 @@ TenderAgent，V14 删除旧产品表，V15-V22 完成主体业务结构；V23-V2
 checksum 的一部分，不能删除、改名或改写；新结构只允许追加 V26+。
 全部既有脚本都是存量数据库升级和 Flyway checksum 的一部分，不能删除、改名或改写；新结构
 只允许追加 V25+。
+
+### 10.4 用量缓冲区（C3 上行）
+
+`platform_usage_event`，主键就是幂等键——重放天然是无操作，并发同键插入撞主键，
+而撞主键正是「这条已经记过了」的正确答案。
+
+计量点两个，都在 `BidContentCommandService`：
+
+| 指标 | 触发点 | 幂等键 |
+| --- | --- | --- |
+| `tenderforge.bid.generations` | 正文生成任务**创建成功**之后 | 任务 id |
+| `tenderforge.document.exports` | 导出事务内、`insertExport` 之后 | export id |
+
+两处的键都取被计量那个东西自己的标识，不是随机 UUID。差别在重试上：
+用户连点三次生成只会产生一个任务，账上也只有一笔；换成随机键，
+连点、前端重试、网关重放会各记一次，而它们在日志里长得和三次真实生成一模一样。
+
+导出那条写在**事务里**，和 export 行同生同死——回滚了就没有这笔账，不需要补偿逻辑。
+这是落库缓冲相对进程内缓冲的实际好处，不只是「重启不丢」。
+
+**没有 token 指标，是刻意的。** 推理用量由 Atlas 作为唯一入口计量，产品再报一次
+等于同一次推理被记两遍。产品报的是自己的业务单元——那些东西 Atlas 看不见。
+
+**过渡租户不上报。** 本地账号的 workspace 是 `local:<用户id>`，平台那边不存在。
+报上去不会失败：平台照收，然后这些数字落进一个没有主人的空间，
+既不出现在任何账单里，也污染了对账。
+
+冲洗由 `UsageFlushJob` 每 15 秒跑一轮，认领用数据库行锁做互斥（api 与 worker
+跑同一个镜像，两边都会起）。**consume 永远答 200**——`gated: true` 是信息不是指令，
+它唯一触发的动作是驱逐该空间的权益缓存，把「用超了」到「界面显示用超了」
+之间的窗口从 45 秒 TTL 压到一次点击。非 200 只意味着「还没记下」，行留着重试，
+**不设尝试上限丢弃**：一条报不上去的用量是账，丢掉它等于悄悄少收一笔钱。
+
+### 10.5 开通事件接收（C3 下发）
+
+接收地址 **`POST /api/platform/provisioning/webhook`**，完整 URL
+`https://tender.vxture.com/api/platform/provisioning/webhook`——需要连同
+`TENDERFORGE_PROVISION_WEBHOOK_SECRET` 一起交给平台线。
+
+这个端点**不要求会话**（调用方是平台，不是浏览器），鉴权全部来自 HMAC 验签。
+验签是控制器里的第一件事，未配置密钥时**一律拒绝**：放行是最糟的兜底，
+一个漏配密钥的部署会变成任何人都能往里发开通事件的开放端点，且看起来完全正常。
+
+签名对**原始请求字节**算，请求体用 `byte[]` 接收而不是 `String`。后者会经过一次
+按声明字符集的解码；当发送方声明的字符集和实际字节不一致时（比如声明
+`charset=ISO-8859-1` 却送 UTF-8），字节被改写，那条投递永远验不过、被平台无限重试。
+`ProvisioningWebhookIntegrationTest#survivesAContentTypeThatLiesAboutItsCharset`
+就是钉这一条的——它是唯一能把两种实现分开的用例。
+
+**回什么码决定平台重不重试**，这是整个端点最容易接错的地方：
+
+| 情形 | 码 | 理由 |
+| --- | --- | --- |
+| 验签不过 | 401 | 签错了的请求重试也不会变对 |
+| 身体不是 JSON、缺投递标识或 workspace | 400 | 同上，且明确 `retryable: false` |
+| 已处理 / 重复 / 过期 / 发错产品 / 类型不认识 | 200 | 后四种都不是错误，是「至少一次」投递的正常产物 |
+| 我们自己没处理成 | 500 | 只有这一条是要平台重试的信号 |
+
+幂等靠投递标识**抢占**（主键冲突即重复），不是「先查后插」——后者在两个副本之间
+有一条缝，同一个开通事件会被处理两遍。顺序靠每 (workspace, product) 的 seq 单调，
+且 `upsertInstance` 的 UPDATE 再带一次 `last_seq < ?` 作为数据库层的第二道闸门：
+一条迟到的开通事件不能把一个已经停用的空间改回去，而那是网络抖动一次就能造成的。
+
+停用是**归档**：改状态、记时间，绝不删数据。平台可能在停用后重新开通。
+
+`platform_workspace_provision` 是**记录，不是门控**。门控只有 C2 一处——
+停用之后平台不再给 tier，界面自然关闭。在这里再判一次会造出第二个说了算的地方。
+
+开通/停用**就是**权益变更，两者都驱逐 C2 缓存；驱逐失败被吞掉并记日志：
+让它冒泡会把一次处理成功的投递变成 500，而平台会永远重试 500。
+
+**目前没有「开通时初始化业务空间」的动作**——本产品不预先创建任何东西，
+标书是用户按需建的。这个位置留着，接上去时要保证可重入。
 
 ## 11. 安全、隔离与审计
 
@@ -584,6 +871,8 @@ checksum 的一部分，不能删除、改名或改写；新结构只允许追�
 
 | 变量 | 默认值 | 作用 |
 | --- | --- | --- |
+| `APP_VERSION` | `dev` | 构建溯源，由镜像构建时从 git ref 注入并由 `/api/health` 回显。**不在 `.env` 里手写**——健康检查要报的是实际构建出来的那个，不是谁打进配置的那个 |
+| `DEPLOY_STAGE` | `local` | 部署阶段。为 `production` 时任何 mock 实现必须拒绝启动，让降级由守卫拦住而不是靠人记得改配置 |
 | `WEB_HOST` / `WEB_PORT` | Compose 默认 `127.0.0.1` / `5274` | 本地 Docker 入口；服务器 `.env` 使用 `0.0.0.0` / `5274`，本地 Vite 开发使用 `5174` |
 | `TEMPORAL_UI_HOST` / `TEMPORAL_UI_PORT` | `127.0.0.1` / `8233` | Temporal UI 运维入口，不开放公网 |
 | `AUTH_SESSION_HOURS` | `12` | 会话时长 |
@@ -638,6 +927,29 @@ npm 凭据。Compose 构建时先在当前 PowerShell 会话设置
 `$env:GITHUB_PACKAGES_TOKEN = gh auth token`。Compose 将该值声明为构建 secret，Dockerfile
 只在 `pnpm install` 的 BuildKit 步骤临时创建受信 npm 配置，并在同一层删除；Token 不得写入
 `deploy/.env`、构建参数、仓库文件或最终 Nginx 镜像。
+
+### 12.3 AI 网关的失败分类
+
+Java 调 Python 的失败分三类，**分错了不会报错，只会把人带向错误的排查方向**：
+
+| 情形 | 码 | 状态 | 用户看到 |
+| --- | --- | --- | --- |
+| 被调方返回结构化错误 | 原样透出被调方的码 | 503/504 原样，其余折 502 | 被调方的消息 + 对象名 + 首条校验错误 |
+| 读超时 | `AI_GATEWAY_TIMEOUT` | 504 | 「已等待约 N 秒，请稍后重试」 |
+| 连不上 | `AI_GATEWAY_UNAVAILABLE` | 502 | 「AI 网关暂不可用」 |
+
+超时判据是**沿 cause 链找 `SocketTimeoutException`**，不是按异常类型。
+Spring 的 `RestClient` 把读超时包成普通的 `RestClientException`，
+而不是老 `RestTemplate` 那个 `ResourceAccessException`——按类型接会让超时分支
+永远不命中，用户在一次三分钟的正文生成超时后收到「服务不可用」。
+
+`AI_ATLAS_TOKEN_REJECTED` 是唯一会触发重试的码，且**只重一次**：作废缓存里
+那张票、重铸、再调一次。其余失败一概不重试——每次调用都被计量，
+而最值得重试的操作恰好都不是幂等的。
+
+**已知同类问题**：文件解析路径（`/internal/parse`）没有超时分类，
+一次大 PDF 的解析超时同样报「解析服务暂不可用」。加一个码是契约变更，
+留待与前端一并处理。
 
 ## 13. 故障恢复与可观测性
 

@@ -13,7 +13,6 @@ import {
   Input,
   ListPageTemplate,
   NativeSelect,
-  Pagination,
   ViewHeader,
 } from '@vxture/design-system'
 
@@ -25,8 +24,8 @@ import { formatDateTime } from './formatters'
 import { useAuditLogsQuery } from './queries'
 
 const DEFAULT_FILTERS: AuditLogFilters = {
-  page: 1,
-  size: 20,
+  limit: 20,
+  cursor: null,
   keyword: '',
   actionCode: '',
   resultCode: '',
@@ -88,11 +87,11 @@ const downloadAuditLogs = (logs: AuditLogEntry[]) => {
   const rows = [
     ['时间', '账号', '对象', '操作', '结果', '说明', '追踪号', 'IP'],
     ...logs.map((log) => [
-      log.createdAt,
-      log.username ?? '',
-      log.targetName ?? '',
-      actionLabels[log.actionCode] ?? log.actionCode,
-      resultLabels[log.resultCode] ?? log.resultCode,
+      log.occurredAt,
+      log.actorName ?? '',
+      log.objectName ?? '',
+      actionLabels[log.action] ?? log.action,
+      resultLabels[log.outcome] ?? log.outcome,
       log.detailSummary ?? '',
       log.traceId,
       log.ipAddress ?? '',
@@ -111,40 +110,40 @@ const downloadAuditLogs = (logs: AuditLogEntry[]) => {
 
 const columns: DataTableColumn<AuditLogEntry>[] = [
   {
-    id: 'createdAt',
+    id: 'occurredAt',
     header: '时间',
     width: 'md',
     cell: (log) => (
       <span className="whitespace-nowrap text-muted-foreground">
-        {formatDateTime(log.createdAt)}
+        {formatDateTime(log.occurredAt)}
       </span>
     ),
   },
   {
-    id: 'username',
+    id: 'actorName',
     header: '账号',
     width: 'sm',
-    cell: (log) => log.username ?? '系统',
+    cell: (log) => log.actorName ?? '系统',
   },
   {
-    id: 'targetName',
+    id: 'objectName',
     header: '对象',
     width: 'md',
-    cell: (log) => <span className="block max-w-sidebar-collapsed truncate">{log.targetName ?? '-'}</span>,
+    cell: (log) => <span className="block max-w-sidebar-collapsed truncate">{log.objectName ?? '-'}</span>,
   },
   {
-    id: 'actionCode',
+    id: 'action',
     header: '操作',
     width: 'sm',
-    cell: (log) => actionLabels[log.actionCode] ?? log.actionCode,
+    cell: (log) => actionLabels[log.action] ?? log.action,
   },
   {
-    id: 'resultCode',
+    id: 'outcome',
     header: '结果',
     align: 'center',
     width: 'xs',
     cell: (log) => {
-      const resultLabel = resultLabels[log.resultCode] ?? log.resultCode
+      const resultLabel = resultLabels[log.outcome] ?? log.outcome
       return <StatusBadge label={resultLabel} status={resultLabel} />
     },
   },
@@ -172,16 +171,37 @@ const columns: DataTableColumn<AuditLogEntry>[] = [
 export default function AuditLogsPage() {
   const [filters, setFilters] = useState(DEFAULT_FILTERS)
   const [draft, setDraft] = useState(DEFAULT_FILTERS)
+  /**
+   * 已经走过的游标，用来实现「上一页」。
+   *
+   * 键集游标只能往前走——服务端给的是「从这里继续」，不是「第 N 页」。
+   * 回退能力因此必须由调用方自己记住来路；这个栈就是那份记忆。
+   * 换筛选条件时清空：旧游标锚在旧结果集上，带着它翻会得到一段无法解释的结果。
+   */
+  const [visited, setVisited] = useState<(string | null)[]>([])
   const auditLogsQuery = useAuditLogsQuery(filters)
 
   const submitFilters = (event: FormEvent) => {
     event.preventDefault()
-    setFilters({ ...draft, page: 1 })
+    setVisited([])
+    setFilters({ ...draft, cursor: null })
   }
 
   const resetFilters = () => {
     setDraft(DEFAULT_FILTERS)
+    setVisited([])
     setFilters(DEFAULT_FILTERS)
+  }
+
+  const goNext = (nextCursor: string) => {
+    setVisited([...visited, filters.cursor])
+    setFilters({ ...filters, cursor: nextCursor })
+  }
+
+  const goPrevious = () => {
+    const previous = visited[visited.length - 1] ?? null
+    setVisited(visited.slice(0, -1))
+    setFilters({ ...filters, cursor: previous })
   }
 
   const result = auditLogsQuery.data
@@ -209,7 +229,7 @@ export default function AuditLogsPage() {
       filters={
         <form onSubmit={submitFilters}>
           <FilterBar
-            count={`共 ${result?.total ?? 0} 条`}
+            count={`本页 ${result?.items.length ?? 0} 条`}
             onReset={resetFilters}
             resetLabel="重置筛选"
             search={
@@ -282,7 +302,7 @@ export default function AuditLogsPage() {
           <DataTable
             columns={columns}
             rows={result?.items ?? []}
-            rowKey={(log) => log.id}
+            rowKey={(log) => log.eventId}
             loading={auditLogsQuery.isLoading}
             loadingRows={10}
             empty={
@@ -297,24 +317,29 @@ export default function AuditLogsPage() {
       }
       footer={
         result ? (
-          <Pagination
-            page={result.page}
-            pageCount={Math.max(1, result.totalPages)}
-            total={result.total}
-            countLabel={`共 ${result.total} 条`}
-            pageSize={result.size}
-            pageSizeOptions={[10, 20, 50]}
-            onPageChange={(page) => setFilters({ ...filters, page })}
-            onPageSizeChange={(size) => {
-              if (typeof size !== 'number') return
-              setDraft({ ...draft, size })
-              setFilters({ ...filters, page: 1, size })
-            }}
-            previousLabel="上一页"
-            nextLabel="下一页"
-            pageSizeLabel="每页条数"
-            pageSizeOptionTemplate="每页 {size} 条"
-          />
+          <div className="flex items-center justify-between gap-md">
+            <span className="text-sm text-muted-foreground">
+              本页 {result.items.length} 条
+            </span>
+            <div className="flex items-center gap-sm">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={visited.length === 0}
+                onClick={goPrevious}
+              >
+                上一页
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={result.nextCursor === null}
+                onClick={() => result.nextCursor && goNext(result.nextCursor)}
+              >
+                下一页
+              </Button>
+            </div>
+          </div>
         ) : undefined
       }
     />

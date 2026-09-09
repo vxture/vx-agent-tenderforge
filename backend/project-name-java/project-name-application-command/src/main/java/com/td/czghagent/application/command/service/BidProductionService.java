@@ -4,6 +4,7 @@
 package com.td.czghagent.application.command.service;
 
 import com.td.czghagent.domain.exception.BusinessException;
+import com.td.czghagent.domain.model.AuditEvent;
 import com.td.czghagent.domain.model.BidDocument;
 import com.td.czghagent.domain.model.BidProductionRules;
 import com.td.czghagent.domain.model.BidWorkspace;
@@ -110,8 +111,9 @@ public class BidProductionService {
     }
 
     private void audit(OperationContext context, String bidId, String action, String summary) {
-        auditRepository.append(context.user().id(), action, "BID", bidId,
-                "SUCCESS", summary, context.traceId(), context.ipAddress());
+        auditRepository.append(AuditEvent.byUser(
+                context, action, "BID", bidId, AuditEvent.SUCCESS, summary
+        ));
     }
 
     private BusinessException conflict() {

@@ -11,6 +11,16 @@ requires-python = ">=3.11"
 testpaths = ["tests"]
 pythonpath = ["."]
 
+[tool.coverage.run]
+source = ["czghagent_ai"]
+# 分支覆盖单独统计：只看行覆盖会把「每个 if 都只走了一边」报成 100%，
+# 而错误处理路径恰恰全在没走的那一边。
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+
 [tool.ruff]
 line-length = 120
 target-version = "py311"

@@ -7,9 +7,11 @@ import com.td.czghagent.domain.model.BidDocument;
 import com.td.czghagent.domain.model.BidExport;
 import com.td.czghagent.domain.model.BidReferenceAsset;
 import com.td.czghagent.domain.model.BidWorkspace;
+import com.td.czghagent.domain.model.TenantScope;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import org.springframework.jdbc.core.RowMapper;
 
-import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -17,12 +19,14 @@ final class BidJdbcMappers {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     static final RowMapper<BidDocument> BID = (rs, row) -> new BidDocument(
-            rs.getString("id"), rs.getString("owner_id"), rs.getString("code"),
+            rs.getString("id"), rs.getString("owner_id"),
+            new TenantScope(rs.getString("org_id"), rs.getString("workspace_id")),
+            rs.getString("code"),
             rs.getString("writing_method"), rs.getString("title"), rs.getInt("target_pages"),
             rs.getString("bidding_mode"), rs.getString("workflow_step"), rs.getString("status"),
             rs.getBoolean("content_stale"), rs.getString("error_message"),
-            rs.getTimestamp("created_at").toLocalDateTime(),
-            rs.getTimestamp("updated_at").toLocalDateTime(), rs.getLong("revision"));
+            rs.getObject("created_at", LocalDateTime.class),
+            rs.getObject("updated_at", LocalDateTime.class), rs.getLong("revision"));
 
     static final RowMapper<BidWorkspace.Criterion> CRITERION = (rs, row) ->
             new BidWorkspace.Criterion(
@@ -45,21 +49,21 @@ final class BidJdbcMappers {
             new BidWorkspace.Chapter(
                     rs.getString("id"), rs.getString("outline_node_id"), rs.getString("title"),
                     rs.getString("content"), rs.getString("generation_status"),
-                    rs.getTimestamp("updated_at").toLocalDateTime(), rs.getLong("revision"));
+                    rs.getObject("updated_at", LocalDateTime.class), rs.getLong("revision"));
 
     static final RowMapper<BidReferenceAsset> ASSET = (rs, row) ->
             new BidReferenceAsset(
                     rs.getString("id"), rs.getString("owner_id"), rs.getString("category"),
                     rs.getString("display_name"), rs.getString("original_file_name"),
                     rs.getString("media_type"), rs.getLong("file_size"),
-                    rs.getTimestamp("created_at").toLocalDateTime(),
-                    rs.getTimestamp("updated_at").toLocalDateTime(), rs.getLong("revision"));
+                    rs.getObject("created_at", LocalDateTime.class),
+                    rs.getObject("updated_at", LocalDateTime.class), rs.getLong("revision"));
 
     static final RowMapper<BidExport> EXPORT = (rs, row) -> new BidExport(
             rs.getString("id"), rs.getString("bid_id"), rs.getInt("version_no"),
             rs.getString("file_name"), rs.getLong("file_size"),
             rs.getString("layout_job_id"), rs.getString("qa_status"),
-            rs.getTimestamp("created_at").toLocalDateTime());
+            rs.getObject("created_at", LocalDateTime.class));
 
     private BidJdbcMappers() {
     }
@@ -99,8 +103,20 @@ final class BidJdbcMappers {
         return safe(value).trim();
     }
 
-    static LocalDateTime nullableTime(Timestamp value) {
-        return value == null ? null : value.toLocalDateTime();
+    /**
+     * 读一个可空的 DATETIME 列。
+     *
+     * <p>走 {@code getObject(..., LocalDateTime.class)} 而不是
+     * {@code getTimestamp(...).toLocalDateTime()}：后者会把库里的墙钟时间按
+     * <strong>服务端时区解释、再转成 JVM 默认时区</strong>，而 JVM 在容器里是 UTC、
+     * MySQL 是 Asia/Shanghai——于是每一个时间戳读回来都少 8 小时。
+     *
+     * <p>更要命的是这个偏移<strong>不对称</strong>：写参数时绑定的 LocalDateTime 不做转换，
+     * 原样落库。所以「读出来再拿去比较」这件事必然错位，键集游标翻页就是撞在这上面
+     * ——第二页永远为空，而且不报任何错。
+     */
+    static LocalDateTime nullableTime(ResultSet resultSet, String column) throws SQLException {
+        return resultSet.getObject(column, LocalDateTime.class);
     }
 
     static Integer nullableInteger(Object value) {

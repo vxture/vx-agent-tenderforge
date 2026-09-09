@@ -9,20 +9,27 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Annotated, TypeVar
 
-from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Header, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
 
 from czghagent_ai.config import settings
 from czghagent_ai.document_models import DocumentRenderRequest
+from czghagent_ai.errors import ServiceError
 from czghagent_ai.models import ParsedDocument
 from czghagent_ai.services.ai_provider import (
     AiProviderAuthenticationError,
     AiProviderError,
     AiProviderNotConfiguredError,
-    AiProviderOutputError,
     AiProviderTimeoutError,
     OpenAiCompatibleProvider,
+    TenderAiProvider,
+)
+from czghagent_ai.services.atlas_provider import (
+    AtlasNotEntitledError,
+    AtlasProvider,
+    AtlasTaskIdMissingError,
+    AtlasTokenRejectedError,
 )
 from czghagent_ai.services.document_parser import DocumentParserService
 from czghagent_ai.services.document_qa import DocumentQaError
@@ -62,7 +69,55 @@ document_renderer = DocumentRenderer()
 AiResponseData = TypeVar("AiResponseData", bound=BaseModel)
 
 
-def create_ai_provider() -> OpenAiCompatibleProvider:
+#: 部署态的判据。与 Java 侧的 DeployStage 保持同一套词。
+_DEPLOYED_STAGES = frozenset({"dev", "beta", "production"})
+
+
+def describe_model_exit() -> str:
+    """本进程正在用哪个模型出口，一句话。
+
+    刻意做成<b>返回字符串</b>而不是在装配时直接 log：装配发生在模块导入期，
+    那时 uvicorn 还没配好日志，写出去的行谁也看不见。而这一行恰恰是这次
+    改动最该被看见的事实——「产品跑得好好的，只是推理没进平台的账」
+    是一种没有任何症状的偏差，日志是唯一的症状。
+    """
+    if settings.atlas_api_url:
+        return (
+            f"模型出口：Atlas {settings.atlas_api_url}"
+            f"（专属 endpoint={'开' if settings.atlas_use_dedicated_endpoints else '关，全部走 chat/default'}）"
+        )
+    if settings.deploy_stage in _DEPLOYED_STAGES:
+        return (
+            f"!!! 部署阶段 {settings.deploy_stage} 正在直连模型供应商："
+            f"所有推理消耗都不入平台的账。这是显式开启的降级。"
+        )
+    return f"模型出口：直连 {settings.ai_model_base_url}（本地；推理消耗不入平台的账）"
+
+
+def create_ai_provider() -> TenderAiProvider:
+    """选出本次进程使用的模型出口。
+
+    配了 ``ATLAS_API_URL`` 就走 Atlas——它是通则规定的<b>唯一</b>模型出口。
+    没配则退回直连模型供应商，而这条路在部署态被<b>拒绝启动</b>。
+
+    直连能跑通，而且跑得很好，这正是它危险的地方：整个产品一切正常，
+    只是每一次推理都没有进平台的账。这种偏差不会有任何症状，
+    只会在月底对量时表现为一个没人解释得了的缺口。所以它和身份、权益、
+    用量上报的替身走同一条纪律：本地可用，部署态必须显式承认才允许。
+    """
+    if settings.atlas_api_url:
+        return AtlasProvider(
+            settings.atlas_api_url,
+            timeout_seconds=settings.atlas_timeout_seconds,
+            max_retries=settings.ai_model_max_retries,
+            use_dedicated_endpoints=settings.atlas_use_dedicated_endpoints,
+        )
+    if settings.deploy_stage in _DEPLOYED_STAGES and not settings.allow_mock_on_deploy:
+        raise RuntimeError(
+            f"部署阶段 {settings.deploy_stage} 缺少 ATLAS_API_URL，"
+            "拒绝以直连模型供应商的方式启动——那条路会让所有推理消耗都不入平台的账。"
+            "补齐配置或显式设置 ALLOW_MOCK_ON_DEPLOY=true（会自报降级）"
+        )
     return OpenAiCompatibleProvider(
         settings.ai_model_api_key,
         settings.ai_model_base_url,
@@ -81,8 +136,15 @@ tender_ai_service = TenderAiService(create_ai_provider())
 
 
 def require_internal_token(x_internal_token: str = Header(default="")) -> None:
+    """内部服务令牌校验。
+
+    常量时间比较，且不区分「没带」与「带错」——两者返回同一个码，
+    因为把它们分开只对攻击者有用。
+    """
     if not secrets.compare_digest(x_internal_token, settings.internal_token):
-        raise HTTPException(status_code=401, detail="内部服务令牌无效")
+        raise ServiceError(
+            "AUTH_INTERNAL_TOKEN_INVALID", "内部服务令牌无效", 401, retryable=False
+        )
 
 
 @router.post("/parse", response_model=ParsedDocument, dependencies=[Depends(require_internal_token)])
@@ -93,19 +155,37 @@ async def parse_document(file: Annotated[UploadFile, File()]) -> ParsedDocument:
             parser_service.parse, file.filename or "document", content
         )
     except UnsupportedDocumentError as exception:
-        raise HTTPException(status_code=422, detail=str(exception)) from exception
+        raise ServiceError(
+            "PARSER_DOCUMENT_UNSUPPORTED", str(exception), 422, retryable=False
+        ) from exception
 
 
-def map_ai_error(exception: AiProviderError) -> HTTPException:
-    if isinstance(exception, AiProviderNotConfiguredError | AiProviderAuthenticationError):
+def map_ai_error(exception: AiProviderError) -> ServiceError:
+    """把模型侧失败翻成平台封套。
+
+    ``exception.code`` 原样带出，不在这里重命名——被调方自己的码是调用方
+    分支的依据，中途改名等于让上游那条分支永远不进。
+    ``retryable`` 由错误码派生（见 :mod:`czghagent_ai.errors`）：
+    配置缺失和结构化输出不合法都不会因为等一会儿而变好。
+    """
+    if isinstance(exception, AtlasNotEntitledError):
+        # 503 而不是 403，码也刻意<b>不是</b>通则那个 NOT_ENTITLED。
+        # 那个码的含义是「这个用户/工作空间没买」，会被上游渲染成一句
+        # 「请先订阅」——而这里的真相是运营侧漏了一条 Atlas endpoint 授权，
+        # 跟用户买没买毫无关系。把两者混成一个码，会让所有人朝错误的方向查。
+        status = 503
+    elif isinstance(exception, AtlasTaskIdMissingError):
+        # 链路自身的缺陷，不是模型侧的问题，也不会因为重试变好。
+        status = 500
+    elif isinstance(exception, AiProviderNotConfiguredError | AiProviderAuthenticationError):
         status = 503
     elif isinstance(exception, AiProviderTimeoutError):
         status = 504
-    elif isinstance(exception, AiProviderOutputError):
-        status = 502
     else:
         status = 502
-    return HTTPException(status_code=status, detail=exception.details())
+    return ServiceError(
+        exception.code, str(exception), status, details=exception.details()
+    )
 
 
 AiStageResult = TypeVar("AiStageResult")
@@ -380,9 +460,13 @@ async def render_tender_document(body: DocumentRenderRequest) -> Response:
     try:
         content, qa = await asyncio.to_thread(document_renderer.render, body)
     except ValueError as exception:
-        raise HTTPException(status_code=409, detail=str(exception)) from exception
+        raise ServiceError(
+            "DOCUMENT_RENDER_CONFLICT", str(exception), 409, retryable=False
+        ) from exception
     except DocumentQaError as exception:
-        raise HTTPException(status_code=502, detail=str(exception)) from exception
+        raise ServiceError(
+            "DOCUMENT_RENDER_FAILED", str(exception), 502, retryable=True
+        ) from exception
     encoded_summary = base64.urlsafe_b64encode(qa.summary.encode("utf-8")).decode("ascii")
     return Response(
         content=content,

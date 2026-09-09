@@ -46,8 +46,8 @@ class BidOutlineContextFactory {
      * Error Semantics: BusinessException identifies ownership, state, or stale-input failures.
      */
     Context load(String taskId, String bidId, String ownerId, String traceId, String ipAddress) {
-        OperationContext operation = operation(ownerId, traceId, ipAddress);
-        BidDocument bid = support.requireBid(bidId, operation);
+        BidDocument bid = support.requireBid(bidId, ownerId);
+        OperationContext operation = operation(bid, traceId, ipAddress);
         BidWorkspace workspace = bidRepository.loadWorkspace(bid);
         validateTask(taskId, workspace);
         validateInterpretation(workspace);
@@ -139,9 +139,20 @@ class BidOutlineContextFactory {
         }
     }
 
-    private OperationContext operation(String ownerId, String traceId, String ipAddress) {
+    /**
+     * 为后台执行铸一个操作上下文。
+     *
+     * <p>租户轴取自<strong>标书本身</strong>而不是由 ownerId 现推：ownerId 只说明归属人，
+     * 而一个人可以属于多个工作空间。从人推空间，在多空间场景下会把审计记到错误的空间上，
+     * 且不报任何错。
+     *
+     * <p>显示名与用户名留空：后台路径拿不到，也不该拿——它们只用于界面呈现，
+     * 编一个假的会让审计里出现一个查无此人的名字。
+     */
+    private OperationContext operation(BidDocument bid, String traceId, String ipAddress) {
         return new OperationContext(
-                new CurrentUser(ownerId, "", "", "PLANNER", null), traceId, ipAddress);
+                new CurrentUser(bid.ownerId(), "", "", "PLANNER", null, bid.tenant()),
+                traceId, ipAddress);
     }
 
     record Context(TenderAiGateway.OutlineRequest request, OperationContext operation) {

@@ -1,6 +1,7 @@
 package com.td.czghagent.application.command.service;
 
 import com.td.czghagent.domain.exception.BusinessException;
+import com.td.czghagent.domain.model.AuditEvent;
 import com.td.czghagent.domain.model.BidDocument;
 import com.td.czghagent.domain.model.BidWorkspace;
 import com.td.czghagent.domain.model.OperationContext;
@@ -25,7 +26,21 @@ final class BidCommandSupport {
     }
 
     BidDocument requireBid(String bidId, OperationContext context) {
-        return bidRepository.findBid(bidId, context.user().id()).orElseThrow(() ->
+        return requireBid(bidId, context.user().id());
+    }
+
+    /**
+     * 按归属人取标书。
+     *
+     * <p>后台路径（Temporal 活动）需要这个重载：它必须<strong>先拿到标书才知道租户轴</strong>，
+     * 而合成一个身份去取标书就得先有租户轴——鸡生蛋。解法是承认这条链的顺序：
+     * 归属校验用 ownerId 就够，租户轴由取回来的标书提供，它才是权威。
+     *
+     * <p>「不存在」与「无权访问」<strong>刻意分开报</strong>：这一面的调用方是自家 worker，
+     * 两者的处置完全不同（前者是数据被删了，后者是归属算错了）。
+     */
+    BidDocument requireBid(String bidId, String ownerId) {
+        return bidRepository.findBid(bidId, ownerId).orElseThrow(() ->
                 bidRepository.existsBid(bidId)
                         ? new BusinessException("BID_ACCESS_DENIED", "无权访问该标书", 403)
                         : new BusinessException("BID_NOT_FOUND", "标书不存在", 404));
@@ -36,8 +51,9 @@ final class BidCommandSupport {
     }
 
     void audit(OperationContext context, String bidId, String action, String detail) {
-        auditRepository.append(context.user().id(), action, "BID", bidId,
-                "SUCCESS", detail, context.traceId(), context.ipAddress());
+        auditRepository.append(AuditEvent.byUser(
+                context, action, "BID", bidId, AuditEvent.SUCCESS, detail
+        ));
     }
 
     BusinessException conflict() {

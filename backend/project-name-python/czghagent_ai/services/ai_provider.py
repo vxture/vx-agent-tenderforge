@@ -586,7 +586,7 @@ def _operation_prompt(operation: str) -> str:
             "投标响应方案，不得输出评分办法、商务评分、资格条件、废标条款、格式装订要求或其他字段。"
         ),
         "technical_scoring_extraction": (
-            "通读输入的完整招标文件文字和表格，并核对 input.clauseCatalog。clauseCatalog 是系统从技术"
+            "核对 input.clauseCatalog。clauseCatalog 是系统从技术"
             "评分窗口确定性建立的源条款目录，每条包含唯一 id、原始顺序、评分标题、分值和原文。只返回"
             "orderedClauseIds 一个字段：必须包含 clauseCatalog 中每个 id 恰好一次，并严格保持 order 顺序。"
             "不得返回、概括、改写或补充任何评分正文、标题、分值、解释或其他字段。该 ID 契约用于让系统"

@@ -46,12 +46,57 @@ springdoc:
     tags-sorter: alpha
 
 app:
+  # 构建溯源：由镜像构建时从 git ref 注入，而不是在这里写死。
+  # /api/health 报的必须是「实际构建出来的那个」，不是谁手打进配置的那个。
+  version: ${APP_VERSION:dev}
+  # 部署阶段。production 时任何 mock 实现必须拒绝启动——
+  # 让降级由守卫拦住，而不是靠部署的人记得改配置。
+  deploy-stage: ${DEPLOY_STAGE:local}
   bootstrap:
     enabled: ${BOOTSTRAP_ENABLED:true}
     planner-password: ${BOOTSTRAP_PLANNER_PASSWORD:Planner@123}
     admin-password: ${BOOTSTRAP_ADMIN_PASSWORD:Admin@123}
   auth:
     session-hours: ${AUTH_SESSION_HOURS:12}
+  # C1 身份：OIDC 依赖方。
+  # 这一对 client 凭据同时是 S2S 换票凭据，没有另一份要申请。
+  # 未配置时走 mock，而 mock 在部署态会被守卫拒绝启动（app.allow-mock-on-deploy 是
+  # 显式且自报的逃生口，不是兜底）。
+  oidc:
+    enabled: ${OIDC_RP_ENABLED:false}
+    issuer: ${OIDC_ISSUER:}
+    client-id: ${OIDC_CLIENT_ID:}
+    client-secret: ${OIDC_CLIENT_SECRET:}
+    redirect-uri: ${OIDC_REDIRECT_URI:}
+    post-logout-redirect-uri: ${OIDC_POST_LOGOUT_REDIRECT_URI:}
+    scopes: ${OIDC_SCOPES:openid profile email phone}
+    session-seconds: ${RP_SESSION_TTL:43200}
+    # 生产必须为 true：__Host- 前缀的 cookie 在 http 上会被浏览器直接拒收，
+    # 表现为「登录成功但仍然未登录」。
+    secure-cookie: ${RP_SESSION_SECURE_COOKIE:false}
+  allow-mock-on-deploy: ${ALLOW_MOCK_ON_DEPLOY:false}
+  # C2 权益 / C3 用量与开通。尚未实现调用侧，这些值当前只被 /api/status 读取，
+  # 用来如实回答「这条通道配没配」——先声明再实现，是为了让自证端点从第一天起
+  # 就说得出真话，而不是等实现落地后再补一个「其实一直没配」的发现。
+  platform:
+    api-url: ${PLATFORM_API_URL:}
+    internal-auth-token: ${PLATFORM_INTERNAL_AUTH_TOKEN:}
+    provision-webhook-secret: ${TENDERFORGE_PROVISION_WEBHOOK_SECRET:}
+    provision-webhook-secret-next: ${TENDERFORGE_PROVISION_WEBHOOK_SECRET_NEXT:}
+    console-url: ${CONSOLE_BASE_URL:https://console.vxture.com}
+    # 仅本地：驱动权益替身走遍各档位分支。
+    # tier=none 走「未订阅」那一屏——它在真实环境里最难复现，
+    # 却是每个新用户看到的第一屏。部署态这三项无效（替身根本起不来）。
+    mock-tier: ${MOCK_TIER:}
+    mock-status: ${MOCK_STATUS:}
+    mock-bundled: ${MOCK_BUNDLED:false}
+    # 仅本地：让 consume 替身答 gated，好在本地走一遍「配额没覆盖住」
+    # 那条分支——它牵着权益缓存的失效，不给开关就只会在线上第一次执行。
+    mock-usage-gated: ${MOCK_USAGE_GATED:false}
+    usage-flush-interval-ms: ${USAGE_FLUSH_INTERVAL_MS:15000}
+    usage-flush-batch-size: ${USAGE_FLUSH_BATCH_SIZE:100}
+  atlas:
+    api-url: ${ATLAS_API_URL:}
   storage:
     root: ${PRIVATE_STORAGE_ROOT:./data/private}
   ai:

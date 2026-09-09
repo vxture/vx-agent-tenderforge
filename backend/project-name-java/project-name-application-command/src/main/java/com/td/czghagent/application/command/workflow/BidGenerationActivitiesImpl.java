@@ -19,29 +19,34 @@ public class BidGenerationActivitiesImpl implements BidGenerationActivities {
     );
 
     private final BidGenerationService generationService;
+    private final PlatformActivityContext platformContext;
 
-    public BidGenerationActivitiesImpl(BidGenerationService generationService) {
+    public BidGenerationActivitiesImpl(BidGenerationService generationService,
+                                       PlatformActivityContext platformContext) {
         this.generationService = generationService;
+        this.platformContext = platformContext;
     }
 
     @Override
     public List<String> prepare(String taskId, String bidId, String ownerId,
                                 String snapshotId, String snapshotHash) {
-        return generationService.prepare(taskId, bidId, ownerId, snapshotId, snapshotHash);
+        return platformContext.run(taskId, bidId, ownerId, () ->
+                generationService.prepare(taskId, bidId, ownerId, snapshotId, snapshotHash));
     }
 
     @Override
     public BidGenerationPlan preparePlan(String taskId, String bidId, String ownerId,
                                          String snapshotId, String snapshotHash) {
-        return generationService.preparePlan(taskId, bidId, ownerId, snapshotId, snapshotHash);
+        return platformContext.run(taskId, bidId, ownerId, () ->
+                generationService.preparePlan(taskId, bidId, ownerId, snapshotId, snapshotHash));
     }
 
     @Override
     public void generateUnit(String taskId, String bidId, String ownerId,
                              String snapshotId, String snapshotHash, String unitId) {
         try {
-            generationService.generateUnit(
-                    taskId, bidId, ownerId, snapshotId, snapshotHash, unitId);
+            platformContext.run(taskId, bidId, ownerId, () -> generationService.generateUnit(
+                    taskId, bidId, ownerId, snapshotId, snapshotHash, unitId));
         } catch (BusinessException exception) {
             if (isNonRetryable(exception)) {
                 throw ApplicationFailure.newNonRetryableFailure(
@@ -56,7 +61,8 @@ public class BidGenerationActivitiesImpl implements BidGenerationActivities {
     public void complete(String taskId, String bidId, String ownerId,
                          String snapshotId, String snapshotHash) {
         try {
-            generationService.complete(taskId, bidId, ownerId, snapshotId, snapshotHash);
+            platformContext.run(taskId, bidId, ownerId, () ->
+                    generationService.complete(taskId, bidId, ownerId, snapshotId, snapshotHash));
         } catch (BusinessException exception) {
             if (isNonRetryable(exception)) {
                 throw ApplicationFailure.newNonRetryableFailure(

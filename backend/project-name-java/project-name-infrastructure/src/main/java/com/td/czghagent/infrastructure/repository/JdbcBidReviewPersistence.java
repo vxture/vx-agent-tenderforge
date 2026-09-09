@@ -2,6 +2,7 @@ package com.td.czghagent.infrastructure.repository;
 
 import com.td.czghagent.domain.model.BidProductionState;
 import com.td.czghagent.domain.model.BidWorkspace;
+import java.time.LocalDateTime;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.ArrayList;
@@ -145,7 +146,7 @@ final class JdbcBidReviewPersistence {
                 rs.getString("id"), rs.getString("task_id"), rs.getString("chapter_id"),
                 rs.getInt("unit_index"), rs.getString("status"), rs.getInt("attempt_count"),
                 rs.getInt("word_budget"), rs.getString("summary"), rs.getString("error_message"),
-                rs.getTimestamp("updated_at").toLocalDateTime()), taskId);
+                rs.getObject("updated_at", LocalDateTime.class)), taskId);
     }
 
     private List<BidProductionState.GenerationEvent> loadEvents(String bidId) {
@@ -155,7 +156,7 @@ final class JdbcBidReviewPersistence {
                 """, (rs, row) -> new BidProductionState.GenerationEvent(
                 rs.getString("id"), rs.getString("task_id"), rs.getString("chapter_id"),
                 rs.getString("event_type"), rs.getString("message"),
-                rs.getTimestamp("occurred_at").toLocalDateTime()), bidId);
+                rs.getObject("occurred_at", LocalDateTime.class)), bidId);
     }
 
     private List<BidProductionState.ReviewIssue> loadReviewIssues(String bidId) {
@@ -177,8 +178,8 @@ final class JdbcBidReviewPersistence {
                 rs.getInt("target_pages"),
                 BidJdbcMappers.nullableInteger(rs.getObject("actual_pages")),
                 rs.getString("qa_status"), rs.getString("qa_summary"),
-                rs.getString("error_message"), rs.getTimestamp("created_at").toLocalDateTime(),
-                BidJdbcMappers.nullableTime(rs.getTimestamp("finished_at"))), bidId)
+                rs.getString("error_message"), rs.getObject("created_at", LocalDateTime.class),
+                BidJdbcMappers.nullableTime(rs, "finished_at")), bidId)
                 .stream().findFirst().orElse(null);
     }
 

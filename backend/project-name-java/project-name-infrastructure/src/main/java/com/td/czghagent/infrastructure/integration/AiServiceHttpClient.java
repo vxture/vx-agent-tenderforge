@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.td.czghagent.domain.exception.AiGatewayException;
 import com.td.czghagent.domain.exception.BusinessException;
 import com.td.czghagent.domain.model.ParsedDocument;
+import com.td.czghagent.domain.model.S2SToken;
 import com.td.czghagent.domain.model.StoredFile;
 import com.td.czghagent.domain.port.DocumentParser;
 import com.td.czghagent.domain.port.TenderAiGateway;
@@ -23,7 +24,6 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
-import org.springframework.web.client.ResourceAccessException;
 
 import java.net.SocketTimeoutException;
 import java.net.http.HttpTimeoutException;
@@ -33,15 +33,26 @@ import java.time.Duration;
 public class AiServiceHttpClient implements DocumentParser, TenderAiGateway {
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    /**
+     * Atlas 拒票的错误码，与 Python 侧同名。
+     *
+     * <p>按<strong>码</strong>分支而不是按状态码：一张过期的票和一次模型故障
+     * 都可能以 502 到达，而只有前者该重铸。
+     */
+    private static final String ATLAS_TOKEN_REJECTED = "AI_ATLAS_TOKEN_REJECTED";
+
     private final RestClient client;
     private final String internalToken;
+    private final AtlasCallCredentials atlasCredentials;
 
     public AiServiceHttpClient(
             RestClient.Builder builder,
+            AtlasCallCredentials atlasCredentials,
             @Value("${app.ai.base-url}") String baseUrl,
             @Value("${app.ai.internal-token}") String internalToken,
             @Value("${app.ai.timeout-seconds:120}") long timeoutSeconds
     ) {
+        this.atlasCredentials = atlasCredentials;
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(Duration.ofSeconds(Math.min(timeoutSeconds, 30)));
         requestFactory.setReadTimeout(Duration.ofSeconds(timeoutSeconds));
@@ -58,6 +69,7 @@ public class AiServiceHttpClient implements DocumentParser, TenderAiGateway {
             ParsedDocument result = client.post()
                     .uri("/internal/parse")
                     .header("X-Internal-Token", internalToken)
+                    .headers(TaskHeaders::apply)
                     .contentType(MediaType.MULTIPART_FORM_DATA)
                     .body(body)
                     .retrieve()
@@ -143,12 +155,41 @@ public class AiServiceHttpClient implements DocumentParser, TenderAiGateway {
         return postAi("/internal/tender/review", request, Review.class);
     }
 
+    /**
+     * 发一次 AI 调用，必要时重铸一次票再来。
+     *
+     * <p>只重试<strong>拒票</strong>这一种失败，且只重一次。其余失败一概不重试：
+     * 每一次调用都会被计量和审计，而最值得重试的那些操作恰好都不是幂等的——
+     * 一次自动重试的正文生成会产出第二份不同的正文，并且收两笔钱。
+     */
     private <T> AiResponse<T> postAi(String path, Object body, Class<T> responseType) {
+        S2SToken token = atlasCredentials.mint();
+        try {
+            return postAiOnce(path, body, responseType, token);
+        } catch (AiGatewayException failure) {
+            if (!ATLAS_TOKEN_REJECTED.equals(failure.getErrorCode()) || token == null) {
+                throw failure;
+            }
+            // 被调方说这张票不认。作废缓存里的那张再铸一张——不作废的话，
+            // 接下来整个缓存有效期内每一次调用都会 401。
+            atlasCredentials.invalidate(token);
+            S2SToken reminted = atlasCredentials.mint();
+            if (reminted == null) {
+                throw failure;
+            }
+            return postAiOnce(path, body, responseType, reminted);
+        }
+    }
+
+    private <T> AiResponse<T> postAiOnce(String path, Object body, Class<T> responseType,
+                                         S2SToken token) {
         long started = System.nanoTime();
         try {
             JsonNode result = client.post()
                     .uri(path)
                     .header("X-Internal-Token", internalToken)
+                    .headers(TaskHeaders::apply)
+                    .headers(headers -> AtlasCallCredentials.apply(headers, token))
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(body)
                     .retrieve()
@@ -162,10 +203,16 @@ public class AiServiceHttpClient implements DocumentParser, TenderAiGateway {
             return new AiResponse<>(data, diagnostics);
         } catch (RestClientResponseException exception) {
             throw responseFailure(exception, path, started);
-        } catch (ResourceAccessException exception) {
-            throw transportFailure(exception, path, started);
         } catch (RestClientException exception) {
-            throw new BusinessException("AI_GATEWAY_UNAVAILABLE", "AI 网关暂不可用", 502);
+            // 一并接住 ResourceAccessException（它是子类）。
+            //
+            // 曾经这里先接 ResourceAccessException 再兜 RestClientException，
+            // 而 Spring 的 RestClient <b>把读超时包成普通的 RestClientException</b>
+            // ——不是老 RestTemplate 那个 ResourceAccessException。于是超时分支
+            // 从来没命中过：整个 AI_GATEWAY_TIMEOUT / 504 / 「已等待约 N 秒」
+            // 对最常见的超时情形是死代码，用户收到的是「AI 网关暂不可用」。
+            // 模型调用是本产品最慢的一环，超时正是它的常规失败形态。
+            throw transportFailure(exception, path, started);
         } catch (Exception exception) {
             throw new BusinessException("AI_OUTPUT_INVALID", "AI 服务响应无法解析", 502);
         }
@@ -176,6 +223,7 @@ public class AiServiceHttpClient implements DocumentParser, TenderAiGateway {
         try {
             T result = client.post().uri(path)
                     .header("X-Internal-Token", internalToken)
+                    .headers(TaskHeaders::apply)
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(body).retrieve().body(responseType);
             if (result == null) {
@@ -184,10 +232,16 @@ public class AiServiceHttpClient implements DocumentParser, TenderAiGateway {
             return result;
         } catch (RestClientResponseException exception) {
             throw responseFailure(exception, path, started);
-        } catch (ResourceAccessException exception) {
-            throw transportFailure(exception, path, started);
         } catch (RestClientException exception) {
-            throw new BusinessException("AI_GATEWAY_UNAVAILABLE", "AI 网关暂不可用", 502);
+            // 一并接住 ResourceAccessException（它是子类）。
+            //
+            // 曾经这里先接 ResourceAccessException 再兜 RestClientException，
+            // 而 Spring 的 RestClient <b>把读超时包成普通的 RestClientException</b>
+            // ——不是老 RestTemplate 那个 ResourceAccessException。于是超时分支
+            // 从来没命中过：整个 AI_GATEWAY_TIMEOUT / 504 / 「已等待约 N 秒」
+            // 对最常见的超时情形是死代码，用户收到的是「AI 网关暂不可用」。
+            // 模型调用是本产品最慢的一环，超时正是它的常规失败形态。
+            throw transportFailure(exception, path, started);
         }
     }
 
@@ -207,7 +261,7 @@ public class AiServiceHttpClient implements DocumentParser, TenderAiGateway {
     }
 
     private BusinessException transportFailure(
-            ResourceAccessException exception, String path, long started
+            RestClientException exception, String path, long started
     ) {
         if (isTimeout(exception)) {
             String stage = stage(path);

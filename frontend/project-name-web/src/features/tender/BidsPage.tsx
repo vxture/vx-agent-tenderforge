@@ -20,9 +20,10 @@ import {
   ViewHeader,
 } from '@vxture/design-system'
 
+import { ApiError } from '@/api/client'
 import { tenderApi } from '@/api/modules/tender'
 import { QueryError } from '@/components/QueryState'
-import type { BidStatus, BidStep, BidSummary } from '@/types/tender'
+import type { BidExport, BidStatus, BidStep, BidSummary } from '@/types/tender'
 
 import { ErrorState } from './components/Feedback'
 import { useBidsQuery } from './queries'
@@ -139,11 +140,26 @@ export default function BidsPage() {
     navigate(`/planner/bids/${bid.id}/${destination}`)
   }
 
+  /**
+   * 下载最近一次成果。
+   *
+   * 先列后取是有意的：服务端不再提供 /exports/latest/download——「最新」是一个视角，
+   * 把它固化成路径段就再也无法参数化（通则 A-2）。挑哪一个由这里决定，
+   * 于是「按版本号最大」这条规则留在了它属于的地方，而不是被焊进一条路由。
+   */
   const download = async (bid: BidSummary) => {
     setDownloading(bid.id)
     setDownloadError(null)
     try {
-      await tenderApi.downloadLatest(bid.id, bid.title)
+      const exports = await tenderApi.listExports(bid.id)
+      const latest = exports.reduce<BidExport | null>(
+        (best, item) => (best === null || item.version > best.version ? item : best),
+        null
+      )
+      if (latest === null) {
+        throw new ApiError('该标书尚无可下载成果', 404, 'BID_EXPORT_NOT_FOUND', false)
+      }
+      await tenderApi.downloadExport(bid.id, latest.id, bid.title)
     } catch (error) {
       setDownloadError(error)
     } finally {

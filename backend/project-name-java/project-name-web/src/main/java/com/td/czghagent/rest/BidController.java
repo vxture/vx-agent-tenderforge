@@ -15,10 +15,10 @@ import com.td.czghagent.domain.model.BidWorkspaceViews;
 import com.td.czghagent.domain.model.StoredFile;
 import com.td.czghagent.rest.dto.BidRequests;
 import com.td.czghagent.rest.security.RequestIdentity;
-import com.td.czghagent.rest.support.ApiResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -29,6 +29,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
@@ -57,92 +58,74 @@ public class BidController {
     }
 
     @GetMapping
-    public ApiResponse<List<BidSummary>> list(HttpServletRequest request) {
-        return ApiResponse.success(
-                queryService.list(RequestIdentity.user(request)), RequestIdentity.traceId(request)
-        );
+    public List<BidSummary> list(HttpServletRequest request) {
+        return queryService.list(RequestIdentity.user(request));
     }
 
     @PostMapping
-    public ApiResponse<BidWorkspace> create(@Valid @RequestBody BidRequests.Create body,
+    public BidWorkspace create(@Valid @RequestBody BidRequests.Create body,
                                             HttpServletRequest request) {
-        return ApiResponse.success(
-                commandService.create(
+        return commandService.create(
                         body.writingMethod(), body.title(), body.targetPages(), body.biddingMode(),
                         RequestIdentity.operation(request)
-                ),
-                RequestIdentity.traceId(request)
-        );
+                );
     }
 
     @GetMapping("/{bidId}")
-    public ApiResponse<BidWorkspace> get(@PathVariable String bidId, HttpServletRequest request) {
-        return ApiResponse.success(
-                queryService.workspace(bidId, RequestIdentity.user(request)),
-                RequestIdentity.traceId(request)
-        );
+    public BidWorkspace get(@PathVariable String bidId, HttpServletRequest request) {
+        return queryService.workspace(bidId, RequestIdentity.user(request));
     }
 
     @GetMapping("/{bidId}/metadata")
-    public ApiResponse<BidWorkspaceViews.Metadata> metadata(
+    public BidWorkspaceViews.Metadata metadata(
             @PathVariable String bidId, HttpServletRequest request
     ) {
-        return ApiResponse.success(
-                queryService.metadata(bidId, RequestIdentity.user(request)),
-                RequestIdentity.traceId(request));
+        return queryService.metadata(bidId, RequestIdentity.user(request));
     }
 
     @GetMapping("/{bidId}/outline")
-    public ApiResponse<BidWorkspaceViews.OutlineView> outline(
+    public BidWorkspaceViews.OutlineView outline(
             @PathVariable String bidId, HttpServletRequest request
     ) {
-        return ApiResponse.success(
-                queryService.outline(bidId, RequestIdentity.user(request)),
-                RequestIdentity.traceId(request));
+        return queryService.outline(bidId, RequestIdentity.user(request));
     }
 
     @GetMapping("/{bidId}/generation-progress")
-    public ApiResponse<BidWorkspaceViews.GenerationProgress> generationProgress(
+    public BidWorkspaceViews.GenerationProgress generationProgress(
             @PathVariable String bidId, HttpServletRequest request
     ) {
-        return ApiResponse.success(
-                queryService.generationProgress(bidId, RequestIdentity.user(request)),
-                RequestIdentity.traceId(request));
+        return queryService.generationProgress(bidId, RequestIdentity.user(request));
     }
 
     @PatchMapping("/{bidId}/setup")
-    public ApiResponse<BidWorkspace> setup(@PathVariable String bidId,
+    public BidWorkspace setup(@PathVariable String bidId,
                                            @Valid @RequestBody BidRequests.Setup body,
                                            HttpServletRequest request) {
-        return ApiResponse.success(commandService.saveSetup(
+        return commandService.saveSetup(
                         bidId, body.title(), body.targetPages(), body.biddingMode(), body.revision(),
-                        RequestIdentity.operation(request)),
-                RequestIdentity.traceId(request));
+                        RequestIdentity.operation(request));
     }
 
     @PostMapping(value = "/{bidId}/source-file", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ApiResponse<BidWorkspace> uploadSource(@PathVariable String bidId,
+    public BidWorkspace uploadSource(@PathVariable String bidId,
                                                   @RequestParam MultipartFile file,
                                                   HttpServletRequest request) throws IOException {
         String mediaType = file.getContentType() == null
                 ? MediaType.APPLICATION_OCTET_STREAM_VALUE : file.getContentType();
-        return ApiResponse.success(commandService.uploadSource(
+        return commandService.uploadSource(
                         bidId, file.getOriginalFilename(), mediaType, file.getBytes(),
-                        RequestIdentity.operation(request)),
-                RequestIdentity.traceId(request));
+                        RequestIdentity.operation(request));
     }
 
     @PostMapping("/{bidId}/interpretation/parse")
-    public ResponseEntity<ApiResponse<BidWorkspace>> parseSource(
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public BidWorkspace parseSource(
             @PathVariable String bidId, HttpServletRequest request) {
-        ApiResponse<BidWorkspace> response = ApiResponse.success(
-                commandService.parseSource(bidId, RequestIdentity.operation(request)),
-                RequestIdentity.traceId(request));
-        return ResponseEntity.accepted().body(response);
+        return commandService.parseSource(bidId, RequestIdentity.operation(request));
     }
 
     @PutMapping("/{bidId}/criteria")
-    public ApiResponse<BidWorkspace> saveCriteria(@PathVariable String bidId,
+    public BidWorkspace saveCriteria(@PathVariable String bidId,
                                                   @Valid @RequestBody BidRequests.Criteria body,
                                                   HttpServletRequest request) {
         List<BidCommandService.CriterionInput> items = body.items().stream().map(item ->
@@ -151,42 +134,37 @@ public class BidController {
                         item.score(), item.sourceExcerpt(), item.sourceLocator(),
                         item.scope(), item.confidence()
                 )).toList();
-        return ApiResponse.success(commandService.saveCriteria(
-                        bidId, items, body.revision(), RequestIdentity.operation(request)),
-                RequestIdentity.traceId(request));
+        return commandService.saveCriteria(
+                        bidId, items, body.revision(), RequestIdentity.operation(request));
     }
 
     @PostMapping("/{bidId}/interpretation/freeze")
-    public ApiResponse<BidWorkspace> freezeInterpretation(
+    public BidWorkspace freezeInterpretation(
             @PathVariable String bidId,
             @Valid @RequestBody BidRequests.Revision body,
             HttpServletRequest request
     ) {
-        return ApiResponse.success(productionService.freezeInterpretation(
-                        bidId, body.revision(), RequestIdentity.operation(request)),
-                RequestIdentity.traceId(request));
+        return productionService.freezeInterpretation(
+                        bidId, body.revision(), RequestIdentity.operation(request));
     }
 
     @PutMapping("/{bidId}/asset-selections")
-    public ApiResponse<BidWorkspace> selectAssets(@PathVariable String bidId,
+    public BidWorkspace selectAssets(@PathVariable String bidId,
                                                   @Valid @RequestBody BidRequests.AssetSelections body,
                                                   HttpServletRequest request) {
-        return ApiResponse.success(commandService.selectAssets(
-                        bidId, body.assetIds(), RequestIdentity.operation(request)),
-                RequestIdentity.traceId(request));
+        return commandService.selectAssets(
+                        bidId, body.assetIds(), RequestIdentity.operation(request));
     }
 
     @PostMapping("/{bidId}/outline/generate")
-    public ResponseEntity<ApiResponse<BidWorkspace>> generateOutline(
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public BidWorkspace generateOutline(
             @PathVariable String bidId, HttpServletRequest request) {
-        ApiResponse<BidWorkspace> response = ApiResponse.success(
-                commandService.generateOutline(bidId, RequestIdentity.operation(request)),
-                RequestIdentity.traceId(request));
-        return ResponseEntity.accepted().body(response);
+        return commandService.generateOutline(bidId, RequestIdentity.operation(request));
     }
 
     @PutMapping("/{bidId}/outline")
-    public ApiResponse<BidWorkspace> saveOutline(@PathVariable String bidId,
+    public BidWorkspace saveOutline(@PathVariable String bidId,
                                                  @Valid @RequestBody BidRequests.Outline body,
                                                  HttpServletRequest request) {
         List<BidCommandService.OutlineInput> nodes = body.nodes().stream().map(node ->
@@ -195,145 +173,127 @@ public class BidController {
                         node.title(), node.plannedPages(), node.taskBrief(),
                         node.mustKeywords(), node.scoringPointIds()
                 )).toList();
-        return ApiResponse.success(commandService.saveOutline(
-                        bidId, nodes, body.confirm(), body.revision(), RequestIdentity.operation(request)),
-                RequestIdentity.traceId(request));
+        return commandService.saveOutline(
+                        bidId, nodes, body.confirm(), body.revision(), RequestIdentity.operation(request));
     }
 
     @PostMapping("/{bidId}/outline/freeze")
-    public ApiResponse<BidWorkspace> freezeOutline(
+    public BidWorkspace freezeOutline(
             @PathVariable String bidId,
             @Valid @RequestBody BidRequests.Revision body,
             HttpServletRequest request
     ) {
-        return ApiResponse.success(productionService.freezeOutline(
-                        bidId, body.revision(), RequestIdentity.operation(request)),
-                RequestIdentity.traceId(request));
+        return productionService.freezeOutline(
+                        bidId, body.revision(), RequestIdentity.operation(request));
     }
 
     @PostMapping("/{bidId}/content/generate")
-    public ResponseEntity<ApiResponse<BidWorkspace>> generateContent(
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public BidWorkspace generateContent(
             @PathVariable String bidId, HttpServletRequest request) {
-        ApiResponse<BidWorkspace> response = ApiResponse.success(
-                commandService.startGeneration(bidId, RequestIdentity.operation(request)),
-                RequestIdentity.traceId(request));
-        return ResponseEntity.accepted().body(response);
+        return commandService.startGeneration(bidId, RequestIdentity.operation(request));
     }
 
     @PostMapping("/{bidId}/content/generation/pause")
-    public ApiResponse<BidWorkspace> pauseContentGeneration(
+    public BidWorkspace pauseContentGeneration(
             @PathVariable String bidId, HttpServletRequest request) {
-        return ApiResponse.success(
-                commandService.pauseGeneration(bidId, RequestIdentity.operation(request)),
-                RequestIdentity.traceId(request));
+        return commandService.pauseGeneration(bidId, RequestIdentity.operation(request));
     }
 
     @PostMapping("/{bidId}/content/generation/resume")
-    public ResponseEntity<ApiResponse<BidWorkspace>> resumeContentGeneration(
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public BidWorkspace resumeContentGeneration(
             @PathVariable String bidId, HttpServletRequest request) {
-        ApiResponse<BidWorkspace> response = ApiResponse.success(
-                commandService.resumeGeneration(bidId, RequestIdentity.operation(request)),
-                RequestIdentity.traceId(request));
-        return ResponseEntity.accepted().body(response);
+        return commandService.resumeGeneration(bidId, RequestIdentity.operation(request));
     }
 
     @GetMapping("/{bidId}/generation-events")
-    public ApiResponse<List<BidProductionState.GenerationEvent>> generationEvents(
+    public List<BidProductionState.GenerationEvent> generationEvents(
             @PathVariable String bidId, HttpServletRequest request
     ) {
-        return ApiResponse.success(
-                queryService.generationProgress(bidId, RequestIdentity.user(request)).recentEvents(),
-                RequestIdentity.traceId(request));
+        return queryService.generationProgress(bidId, RequestIdentity.user(request)).recentEvents();
     }
 
     @GetMapping("/{bidId}/chapters/{chapterId}")
-    public ApiResponse<BidWorkspaceViews.ChapterDetail> chapter(
+    public BidWorkspaceViews.ChapterDetail chapter(
             @PathVariable String bidId,
             @PathVariable String chapterId,
             HttpServletRequest request
     ) {
-        return ApiResponse.success(
-                queryService.chapter(bidId, chapterId, RequestIdentity.user(request)),
-                RequestIdentity.traceId(request));
+        return queryService.chapter(bidId, chapterId, RequestIdentity.user(request));
     }
 
     @PatchMapping("/{bidId}/chapters/{chapterId}")
-    public ApiResponse<BidWorkspaceViews.ChapterDetail> saveChapter(
+    public BidWorkspaceViews.ChapterDetail saveChapter(
             @PathVariable String bidId,
             @PathVariable String chapterId,
             @Valid @RequestBody BidRequests.Chapter body,
             HttpServletRequest request
     ) {
-        return ApiResponse.success(commandService.saveChapter(
+        return commandService.saveChapter(
                         bidId, chapterId, body.content(), body.revision(),
-                        RequestIdentity.operation(request)),
-                RequestIdentity.traceId(request));
+                        RequestIdentity.operation(request));
     }
 
     @PostMapping("/{bidId}/chapters/{chapterId}/ai-revisions")
-    public ApiResponse<BidCommandService.SectionRevisionCandidate> reviseChapter(
+    public BidCommandService.SectionRevisionCandidate reviseChapter(
             @PathVariable String bidId,
             @PathVariable String chapterId,
             @Valid @RequestBody BidRequests.SectionRevision body,
             HttpServletRequest request
     ) {
-        return ApiResponse.success(commandService.reviseChapter(
+        return commandService.reviseChapter(
                         bidId, chapterId, body.mode(), body.selectedHtml(), body.beforeContext(),
                         body.afterContext(), body.instruction(), body.revision(),
-                        RequestIdentity.operation(request)),
-                RequestIdentity.traceId(request));
+                        RequestIdentity.operation(request));
     }
 
     @PostMapping("/{bidId}/content/review")
-    public ApiResponse<BidWorkspace> reviewContent(
+    public BidWorkspace reviewContent(
             @PathVariable String bidId, HttpServletRequest request
     ) {
-        return ApiResponse.success(
-                commandService.reviewContent(bidId, RequestIdentity.operation(request)),
-                RequestIdentity.traceId(request));
+        return commandService.reviewContent(bidId, RequestIdentity.operation(request));
     }
 
     @PostMapping("/{bidId}/content/freeze")
-    public ApiResponse<BidWorkspace> freezeContent(
+    public BidWorkspace freezeContent(
             @PathVariable String bidId,
             @Valid @RequestBody BidRequests.Revision body,
             HttpServletRequest request
     ) {
-        return ApiResponse.success(productionService.freezeContent(
-                        bidId, body.revision(), RequestIdentity.operation(request)),
-                RequestIdentity.traceId(request));
+        return productionService.freezeContent(
+                        bidId, body.revision(), RequestIdentity.operation(request));
     }
 
     @PostMapping("/{bidId}/layout-jobs")
-    public ApiResponse<BidWorkspace> startLayout(
+    public BidWorkspace startLayout(
             @PathVariable String bidId, HttpServletRequest request
     ) {
-        return ApiResponse.success(
-                layoutService.start(bidId, RequestIdentity.operation(request)),
-                RequestIdentity.traceId(request));
+        return layoutService.start(bidId, RequestIdentity.operation(request));
     }
 
     @GetMapping("/{bidId}/exports")
-    public ApiResponse<List<BidExport>> exports(@PathVariable String bidId,
+    public List<BidExport> exports(@PathVariable String bidId,
                                                 HttpServletRequest request) {
-        return ApiResponse.success(
-                queryService.exports(bidId, RequestIdentity.user(request)),
-                RequestIdentity.traceId(request)
-        );
+        return queryService.exports(bidId, RequestIdentity.user(request));
     }
 
     @PostMapping("/{bidId}/exports")
-    public ApiResponse<BidExport> export(@PathVariable String bidId, HttpServletRequest request) {
-        return ApiResponse.success(
-                commandService.createExport(bidId, RequestIdentity.operation(request)),
-                RequestIdentity.traceId(request)
-        );
+    public BidExport export(@PathVariable String bidId, HttpServletRequest request) {
+        return commandService.createExport(bidId, RequestIdentity.operation(request));
     }
 
-    @GetMapping("/{bidId}/exports/latest/download")
-    public ResponseEntity<byte[]> downloadLatest(@PathVariable String bidId,
+    /**
+     * 下载一次成果。
+     *
+     * <p>路径按标识寻址而不是 {@code /exports/latest/download}——「最新」是筛选，
+     * 不是资源标识，写进路径段会让资源与视角在 URL 上无法区分（A-2）。
+     */
+    @GetMapping("/{bidId}/exports/{exportId}/download")
+    public ResponseEntity<byte[]> downloadExport(@PathVariable String bidId,
+                                                 @PathVariable String exportId,
                                                  HttpServletRequest request) {
-        StoredFile file = queryService.latestExport(bidId, RequestIdentity.user(request));
+        StoredFile file = queryService.exportFile(bidId, exportId, RequestIdentity.user(request));
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.parseMediaType(file.mediaType()));
         headers.setContentLength(file.size());

@@ -336,9 +336,12 @@ def correction_payload(
     object_name: str,
 ) -> dict[str, Any]:
     truncated = any("truncated" in error.lower() for error in errors)
-    # Keep a bounded prefix so the correction model can recover useful structure
-    # without replaying an unbounded or sensitive response.
-    invalid_output_limit = 8_000 if truncated else 24_000
+    # 校验失败时回灌无效输出是有用的——模型要看见自己写错了什么。
+    #
+    # 但<b>截断</b>是另一回事：上一次失败的原因就是「太长」，而修复指令是「压缩表述」。
+    # 把那份过长输出再喂回去，既占掉这次修复本就紧张的预算，又把模型锚定在
+    # 当初撑爆预算的那套啰嗦措辞上——重试更可能再截断一次。所以一个字都不回灌。
+    invalid_output_limit = 0 if truncated else 24_000
     instruction = (
         f"只纠正并返回{object_name}对象。不得解释、不得添加代码围栏，"
         "必须严格满足本次 outputJsonSchema。"

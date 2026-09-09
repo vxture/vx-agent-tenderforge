@@ -25,14 +25,22 @@ from czghagent_ai.services.technical_scoring import (
     selection_errors,
 )
 from czghagent_ai.tender_models import (
+    BidStrategyResponse,
+    BranchBlueprint,
+    BranchBlueprintRequest,
     ChapterContentResponse,
     ChapterDraftRequest,
     ChapterDraftResponse,
     ContentBlock,
     InterpretationRequest,
     InterpretationResponse,
+    OutlineAssemblyRequest,
+    OutlineExpansionResponse,
+    OutlineExpansionStageRequest,
     OutlineRequest,
     OutlineResponse,
+    OutlineSkeletonPlan,
+    OutlineSkeletonStageRequest,
     ProjectOverviewResponse,
     ReviewRequest,
     ReviewResponse,
@@ -45,6 +53,16 @@ from czghagent_ai.tender_models import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+#: 装配阶段的占位诊断。
+#:
+#: 装配不调模型，所以没有 token、没有 finish_reason 可报。给一个显式的空值
+#: 而不是复用某一批展开的诊断——后者会让「装配花了多少」看起来是个真实数字。
+_ASSEMBLY_DIAGNOSTICS = AiProviderDiagnostics(
+    finish_reason=None, response_length=0, response_hash="", 
+    input_tokens=None, output_tokens=None,
+)
 
 
 class TenderAiService:
@@ -100,13 +118,18 @@ class TenderAiService:
                 response_length=0,
                 response_hash=None,
             )
+        # 只送条款目录，<b>不送整份招标文件</b>。
+        #
+        # 详细设计 §5.2：技术评分由确定性规则建立带稳定 ID 的原文条款目录，
+        # 模型「只确认原文顺序」。目录里已经带着每条的原文，排序不需要别的东西。
+        #
+        # 两个都送有两处代价，而且都不报错：一是把整份招标文件重复塞进一次
+        # 只需要排序的调用，白付一份输入 token；二是给了模型在目录之外「找」
+        # 条款的材料，而这条路径的全部意义就是不让模型碰分值和证明材料。
         scoring_payload = {
             "documentId": request.document_id,
             "title": request.title,
             "biddingMode": request.bidding_mode,
-            "segments": [
-                segment.model_dump(by_alias=True) for segment in request.segments
-            ],
             "clauseCatalog": catalog.to_prompt(),
         }
         try:
@@ -319,6 +342,96 @@ class TenderAiService:
     ) -> AiStructuredResult[OutlineResponse]:
         return await self._outline_planner.plan_result(request)
 
+    # ── 分阶段目录：与一次性路径共用同一批实现 ──────────────────────────────
+    #
+    # 存在的理由是可恢复：一次 500 页标书的三级展开有十几批，单批失败只该
+    # 重跑那一批。这几个方法是 /internal/tender/outline/* 各路由的落点——
+    # 它们曾经全部缺失，于是那些路由每次调用都是 AttributeError 变成的 500。
+
+    async def outline_strategy_result(
+        self, request: OutlineRequest
+    ) -> AiStructuredResult[BidStrategyResponse]:
+        return await self._outline_planner.plan_strategy_result(request)
+
+    async def outline_skeleton_result(
+        self, request: OutlineSkeletonStageRequest
+    ) -> AiStructuredResult[OutlineSkeletonPlan]:
+        return await self._outline_planner.plan_skeleton_result(
+            request.outline, request.strategy
+        )
+
+    async def outline_expansion_result(
+        self, request: OutlineExpansionStageRequest
+    ) -> AiStructuredResult[OutlineExpansionResponse]:
+        return await self._outline_planner.plan_expansion_result(
+            request.outline, request.strategy, request.batch_index, request.branches
+        )
+
+    def assemble_outline(self, request: OutlineAssemblyRequest) -> OutlineResponse:
+        """装配不调模型，所以<b>不是</b>协程，也不产生诊断。
+
+        调用方可能是在重试之后才凑齐各批结果的，这一步必须是纯函数：
+        同样的骨架和同样的批次结果，任何时候装出来的树都一样。
+        """
+        skeleton = AiStructuredResult(request.skeleton, _ASSEMBLY_DIAGNOSTICS, 0)
+        expansions = [
+            AiStructuredResult(item, _ASSEMBLY_DIAGNOSTICS, 0)
+            for item in request.expansions
+        ]
+        return self._outline_planner.assemble(
+            request.outline, skeleton, expansions
+        ).data
+
+    async def plan_branch_blueprint_result(
+        self, request: BranchBlueprintRequest
+    ) -> AiStructuredResult[BranchBlueprint]:
+        """为一个二级分支规划技术域蓝图。
+
+        它决定同一分支下各三级章节<strong>各写什么、不写什么</strong>。
+        没有它，每一章都独立地把整个技术域讲一遍，相邻章节大面积重复，
+        而每一章单独看都合理——这是最难在评审前发现的一类质量问题。
+        """
+        return await self._executor.execute_result(
+            "branch_blueprint_planning",
+            {
+                "bidTitle": request.bid_title,
+                "biddingMode": request.bidding_mode,
+                "solutionContract": request.solution_contract,
+                "branch": {
+                    "title": request.branch.title,
+                    "taskBrief": request.branch.task_brief,
+                    "mustKeywords": request.branch.must_keywords,
+                },
+                # 章节 id 必须带上：蓝图要按 chapterId 回指到具体章节，
+                # 而正文阶段再按它取出本章那一片（并在那里剥掉 id）。
+                "chapters": [
+                    {
+                        "chapterId": chapter.id,
+                        "title": chapter.title,
+                        "taskBrief": chapter.task_brief,
+                        "mustKeywords": chapter.must_keywords,
+                    }
+                    for chapter in request.chapters
+                ],
+                "criteria": [
+                    {
+                        "type": item.type,
+                        "title": item.title,
+                        "description": item.description,
+                    }
+                    for item in request.criteria
+                ],
+                "dictionary": request.dictionary.model_dump(by_alias=True),
+                "writingBible": request.writing_bible,
+                "termRegistry": request.term_registry,
+                "commitmentRegistry": request.commitment_registry,
+            },
+            f"{request.request_id}-branch-blueprint",
+            BranchBlueprint,
+            object_name="二级技术域蓝图",
+            schema_version="branch-blueprint-v1",
+        )
+
     async def draft(self, request: ChapterDraftRequest) -> ChapterDraftResponse:
         return (await self.draft_result(request)).data
 
@@ -333,6 +446,9 @@ class TenderAiService:
             object_name="章节正文",
             schema_version="chapter-content-v3",
             normalizer=normalize_chapter_content_contract,
+            semantic_validator=lambda response: chapter_completeness_errors(
+                response.content, request.word_budget
+            ),
         )
         content = result.data
         warnings = list(content.warnings)
@@ -441,6 +557,12 @@ class TenderAiService:
             payload["commitmentRegistry"] = request.commitment_registry
         if request.term_registry:
             payload["termRegistry"] = request.term_registry
+        blueprint = _branch_blueprint_prompt(request)
+        if blueprint:
+            # 分支蓝图是本章所在技术域的规划卡片。请求模型上一直有这个字段，
+            # 调用方也一直在填，但它到这里就断了——填了等于没填，
+            # 而没有任何迹象说明它被忽略了。
+            payload["branchBlueprint"] = blueprint
         return payload
 
     async def revise(self, request: RevisionRequest) -> RevisionResponse:
@@ -521,8 +643,19 @@ def blocks_to_html(blocks: list[ContentBlock]) -> str:
     return "".join(output)
 
 
+#: 首尾的空白，含<b>编码形式</b>的空白。
+#:
+#: ``strip()`` 只认字面空白，看不见 ``&#x20;`` 和 ``&nbsp;``。模型在结尾多吐一个
+#: 编码空格，它会落在最后一个块元素<em>外面</em>——编辑器里是一个孤立的空段，
+#: 导出的 DOCX 里是一个空行。不报错，只是每一份成果都比预期多一行。
+_ENCLOSING_BLANKS = re.compile(
+    r"^(?:\s|&nbsp;|&#(?:32|160|x20|xa0);)+|(?:\s|&nbsp;|&#(?:32|160|x20|xa0);)+$",
+    flags=re.IGNORECASE,
+)
+
+
 def normalize_editor_content(value: str, fallback_table_context: str = "") -> str:
-    content = value.strip()
+    content = _ENCLOSING_BLANKS.sub("", value)
     content = re.sub(r"```(?:html)?\s*|```", "", content, flags=re.IGNORECASE)
     content = re.sub(r"<(script|style)\b[^>]*>[\s\S]*?</\1>", "", content, flags=re.IGNORECASE)
     content = re.sub(r"\s+on[a-z]+\s*=\s*(['\"]).*?\1", "", content, flags=re.IGNORECASE)
@@ -552,6 +685,39 @@ def normalize_chapter_content_contract(raw: dict[str, Any]) -> None:
 def _visible_character_count(content: str) -> int:
     visible = html.unescape(re.sub(r"<[^>]+>", "", content))
     return len(re.sub(r"\s+", "", visible))
+
+
+#: 「最小有效内容」下限：低于单元预算的这个比例即判为响应不足，触发一次局部修复。
+#:
+#: 详细设计写着「单元预算是质量提示和监控指标，不是硬失败条件……<b>低于最小有效
+#: 内容</b>或违反表格/内部字段/事实边界时，才触发一次局部修复」——下限是有的，
+#: 只是两侧代码里都没实现过，于是一个只写了四分之一篇幅的章节会一路进到成果里。
+#:
+#: <b>0.5 这个数字是产品决定，不是推导结果。</b>取值理由：提示词的目标区间是
+#: 预算的 80%-115%，下限压到一半远离那个区间，正常波动不会误伤；而拿到不足一半
+#: 篇幅的章节确实是废的。取高了会制造重试风暴（Java 侧把 AI_OUTPUT_INVALID 列为
+#: 可重试），取低了这道闸门等于不存在。
+_MIN_CONTENT_RATIO = 0.5
+
+
+def chapter_completeness_errors(content: str, word_budget: int) -> list[str]:
+    """正文是否短到不成立。
+
+    只查<b>下限</b>。超出预算不在这里判——那是软目标，超了保留全文、不截断、
+    不因篇幅重写，只记 OVER_BUDGET。两个方向用同一个判据会让「写多了」
+    和「没写完」得到同样的处置，而它们一个是风格问题、一个是缺陷。
+    """
+    if word_budget <= 0:
+        return []
+    minimum = round(word_budget * _MIN_CONTENT_RATIO)
+    actual = _visible_character_count(content)
+    if actual >= minimum:
+        return []
+    return [
+        f"正文可见字符仅{actual}，低于单元最小有效内容{minimum}"
+        f"（预算{word_budget}的{int(_MIN_CONTENT_RATIO * 100)}%）；"
+        "请按写作任务补足技术内容，不要以套话或同义重复填充"
+    ]
 
 
 def _chapter_budget_warning(content: str, word_budget: int) -> str | None:
@@ -630,7 +796,6 @@ def normalize_outline_tree(raw: dict[str, Any]) -> None:
             continue
         leaf_brief = node.get("taskBrief", node.get("task_brief", ""))
         leaf_keywords = node.get("mustKeywords", node.get("must_keywords", []))
-        leaf_scoring = node.get("scoringPointIds", node.get("scoring_point_ids", []))
         _set_outline_value(node, "mustKeywords", "must_keywords", [])
         _set_outline_value(node, "scoringPointIds", "scoring_point_ids", [])
         parent_key = node_key
@@ -650,7 +815,11 @@ def normalize_outline_tree(raw: dict[str, Any]) -> None:
                 "plannedPages": 0,
                 "taskBrief": leaf_brief if is_leaf else "",
                 "mustKeywords": leaf_keywords if is_leaf else [],
-                "scoringPointIds": leaf_scoring if is_leaf else [],
+                # 任务简述和关键词随着叶子下移——它们描述「要写什么」，
+                # 换个层级仍然成立。评分点<b>不下移</b>：覆盖关系是
+                # 「哪一节响应哪条评分」的事实声明，而这个节点是系统补出来的，
+                # 模型从没为它做过那个声明。一并作废的还有指向原节点的 coverage。
+                "scoringPointIds": [],
             }
             generated.append(child)
             parent_key = child_key
@@ -695,7 +864,14 @@ def normalize_outline_tree(raw: dict[str, Any]) -> None:
             normalized = True
 
     for node in valid_nodes:
-        _set_outline_value(node, "scoringPointIds", "scoring_point_ids", [])
+        # 评分点只挂在叶子上（详细设计 §5.3：「每个叶子维护 taskBrief、
+        # 必含关键词和评分点 ID」）。非叶子清空，叶子<b>原样保留</b>。
+        #
+        # 这一行原来写在 level 过滤之前，于是把每一个叶子的评分点也清掉了
+        # ——正文阶段据评分点召回冻结的评分原文，清空的表现是每一章都
+        # 召不回自己该响应的评分要求，而目录看起来完全正常。
+        if node.get("level") != 3:
+            _set_outline_value(node, "scoringPointIds", "scoring_point_ids", [])
         if node.get("level") != 1:
             continue
         node_key = str(node.get("nodeKey", node.get("node_key", "")))
@@ -717,12 +893,83 @@ def normalize_outline_tree(raw: dict[str, Any]) -> None:
         nodes[:] = ordered_nodes
         normalized = True
 
-    raw["coverage"] = []
+    # 覆盖关系由叶子<b>推导</b>，不采用模型给的那一份。
+    #
+    # 模型给的映射可以指向不存在的、或者已经不是叶子的节点，而它一旦被
+    # 采信，界面会显示某条评分「已覆盖」而实际上没有任何章节在响应它。
+    # 从叶子推导得到的映射与树永远一致——因为它就是树的一个投影。
+    raw["coverage"] = _coverage_from_leaves(valid_nodes)
     if not normalized:
         return
     warnings = raw.setdefault("warnings", [])
     if isinstance(warnings, list):
         warnings.append("AI outline tree and page budgets were normalized.")
+
+
+def _branch_blueprint_prompt(request: ChapterDraftRequest) -> dict[str, Any] | None:
+    """把分支蓝图裁成这一章能用的样子。
+
+    两件事必须做，而且都不是格式问题：
+
+    <b>去掉 chapterId。</b>它是内部标识，正文提示词里出现内部 id，模型就有机会
+    把它写进正文——那会直接出现在交给评审的标书里。这个载荷里所有其它标识
+    （requestId、评分点 id、章节 id）都已经被剥掉了，蓝图不能是唯一的漏洞。
+
+    <b>只留本章那一片。</b>蓝图覆盖整个二级分支的全部章节；把兄弟章节的
+    技术决策和交付物一并送进来，模型会把它们也写进本章——表现是相邻章节
+    互相重复，而每一章单独看都是合理的。
+    """
+    blueprint = request.branch_blueprint
+    if blueprint is None:
+        return None
+    prompt: dict[str, Any] = {
+        "solutionPositioning": blueprint.solution_positioning,
+        "sharedDecisions": blueprint.shared_decisions,
+        "sharedConstraints": blueprint.shared_constraints,
+    }
+    if blueprint.assumptions:
+        prompt["assumptions"] = blueprint.assumptions
+    if blueprint.prohibited_claims:
+        prompt["prohibitedClaims"] = blueprint.prohibited_claims
+    leaf = next(
+        (item for item in blueprint.chapters if item.chapter_id == request.chapter.id),
+        None,
+    )
+    if leaf is not None:
+        prompt["chapter"] = {
+            "objective": leaf.objective,
+            "technicalDecisions": leaf.technical_decisions,
+            "implementationActions": leaf.implementation_actions,
+            "deliverables": leaf.deliverables,
+            "validationMethods": leaf.validation_methods,
+            "presentation": leaf.presentation,
+        }
+    return prompt
+
+
+def _coverage_from_leaves(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """按叶子上的评分点归集出「哪条评分由哪些章节响应」。
+
+    保持首次出现顺序而不是排序：目录的阅读顺序就是评审的阅读顺序，
+    按字典序重排会让这张表和目录对不上。
+    """
+    grouped: dict[str, list[str]] = {}
+    for node in nodes:
+        if node.get("level") != 3:
+            continue
+        node_key = str(node.get("nodeKey", node.get("node_key", "")))
+        if not node_key:
+            continue
+        for point in node.get("scoringPointIds", node.get("scoring_point_ids", [])) or []:
+            key = str(point).strip()
+            if not key:
+                continue
+            keys = grouped.setdefault(key, [])
+            if node_key not in keys:
+                keys.append(node_key)
+    return [
+        {"scoringPointId": point, "nodeKeys": keys} for point, keys in grouped.items()
+    ]
 
 
 def _order_outline_dicts(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:

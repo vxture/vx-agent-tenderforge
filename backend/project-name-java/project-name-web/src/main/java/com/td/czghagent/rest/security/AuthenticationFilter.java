@@ -6,7 +6,8 @@ package com.td.czghagent.rest.security;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.td.czghagent.application.query.service.AuthQueryService;
 import com.td.czghagent.domain.model.CurrentUser;
-import com.td.czghagent.rest.support.ApiResponse;
+import com.td.czghagent.domain.model.PlatformCallerContext;
+import com.td.czghagent.rest.support.ErrorEnvelope;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -24,10 +25,14 @@ import java.io.IOException;
 public class AuthenticationFilter extends OncePerRequestFilter {
 
     private final AuthQueryService authQueryService;
+    private final PlatformSessionResolver platformSessions;
     private final ObjectMapper objectMapper;
 
-    public AuthenticationFilter(AuthQueryService authQueryService, ObjectMapper objectMapper) {
+    public AuthenticationFilter(AuthQueryService authQueryService,
+                                PlatformSessionResolver platformSessions,
+                                ObjectMapper objectMapper) {
         this.authQueryService = authQueryService;
+        this.platformSessions = platformSessions;
         this.objectMapper = objectMapper;
     }
 
@@ -36,6 +41,17 @@ public class AuthenticationFilter extends OncePerRequestFilter {
         String path = request.getRequestURI();
         return "OPTIONS".equals(request.getMethod())
                 || "/api/auth/login".equals(path)
+                // 登录回路本身不能要求先登录。这三条是 C1 的入口、回调与
+                // 平台反向登出通知，调用它们的时候按定义还没有会话。
+                || "/api/auth/oidc/login".equals(path)
+                || "/api/auth/oidc/callback".equals(path)
+                || "/api/auth/oidc/backchannel-logout".equals(path)
+                // 平台下发的开通/停用事件。调用方是平台，按定义没有会话；
+                // 它的鉴权全部来自 HMAC 验签，而验签在控制器里是第一件事。
+                || "/api/platform/provisioning/webhook".equals(path)
+                // 运行时探针必须公开：探测方是编排器和平台健康页，它们没有会话。
+                || "/api/health".equals(path)
+                || "/api/ready".equals(path)
                 || path.startsWith("/actuator/health")
                 || path.startsWith("/v3/api-docs")
                 || path.startsWith("/swagger-ui")
@@ -45,8 +61,25 @@ public class AuthenticationFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
-        String token = bearerToken(request);
-        CurrentUser user = token == null ? null : authQueryService.resolve(token).orElse(null);
+        // 两条身份通道并存：平台 RP 会话（cookie）优先，本地口令会话（Bearer）其次。
+        // 顺序不是偏好——RP 会话是目标形态，本地那条是待退役的过渡通道，
+        // 反过来会让一个残留的旧 Bearer 盖掉刚建立的平台身份。
+        String cookieValue = RpSessionCookie.read(request);
+        CurrentUser user = null;
+        String token = null;
+        String platformAccessToken = null;
+        if (cookieValue != null) {
+            com.td.czghagent.domain.model.RpSession session =
+                    platformSessions.resolveSession(cookieValue).orElse(null);
+            if (session != null) {
+                user = session.toCurrentUser();
+                platformAccessToken = session.accessToken();
+            }
+        }
+        if (user == null) {
+            token = bearerToken(request);
+            user = token == null ? null : authQueryService.resolve(token).orElse(null);
+        }
         if (user == null) {
             writeUnauthorized(request, response);
             return;
@@ -57,7 +90,37 @@ public class AuthenticationFilter extends OncePerRequestFilter {
         }
         request.setAttribute(RequestIdentity.USER, user);
         request.setAttribute(RequestIdentity.TOKEN, token);
-        filterChain.doFilter(request, response);
+        // 出站调用点埋在十几层业务函数底下，而只有这里知道这次请求替谁在跑。
+        // 本地口令登录的用户没有平台票，platformAccessToken 为空——
+        // 那时铸币退回 service 模式，而过渡租户会让它铸不出来。这是实情，不是缺陷。
+        try {
+            PlatformCallerContext.run(user.tenant(), platformAccessToken, () -> {
+                try {
+                    filterChain.doFilter(request, response);
+                } catch (IOException | ServletException exception) {
+                    // 受检异常穿不过 Runnable，包一层交给外面原样重抛——
+                    // 在这里吞掉会把业务失败变成一个没有堆栈的 500。
+                    throw new FilterFailure(exception);
+                }
+            });
+        } catch (FilterFailure wrapper) {
+            wrapper.rethrow();
+        }
+    }
+
+    /** 只为把受检异常抬过 {@link PlatformCallerContext#run} 而存在，不逃出本类。 */
+    private static final class FilterFailure extends RuntimeException {
+        private FilterFailure(Exception cause) {
+            super(cause);
+        }
+
+        private void rethrow() throws IOException, ServletException {
+            Throwable cause = getCause();
+            if (cause instanceof IOException ioException) {
+                throw ioException;
+            }
+            throw (ServletException) cause;
+        }
     }
 
     private String bearerToken(HttpServletRequest request) {
@@ -80,8 +143,8 @@ public class AuthenticationFilter extends OncePerRequestFilter {
         response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.setCharacterEncoding(java.nio.charset.StandardCharsets.UTF_8.name());
-        objectMapper.writeValue(response.getWriter(), ApiResponse.failure(
-                "AUTH_REQUIRED", "登录状态已失效，请重新登录", RequestIdentity.traceId(request)
+        objectMapper.writeValue(response.getWriter(), ErrorEnvelope.of(
+                "AUTH_SESSION_INVALID", "登录状态已失效，请重新登录", false
         ));
     }
 
@@ -89,8 +152,8 @@ public class AuthenticationFilter extends OncePerRequestFilter {
         response.setStatus(HttpServletResponse.SC_FORBIDDEN);
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.setCharacterEncoding(java.nio.charset.StandardCharsets.UTF_8.name());
-        objectMapper.writeValue(response.getWriter(), ApiResponse.failure(
-                "ROLE_ACCESS_DENIED", "当前账号无权访问该业务入口", RequestIdentity.traceId(request)
+        objectMapper.writeValue(response.getWriter(), ErrorEnvelope.of(
+                "AUTH_ROLE_DENIED", "当前账号无权访问该业务入口", false
         ));
     }
 }

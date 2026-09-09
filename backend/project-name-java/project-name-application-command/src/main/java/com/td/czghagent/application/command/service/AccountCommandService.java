@@ -4,6 +4,7 @@
 package com.td.czghagent.application.command.service;
 
 import com.td.czghagent.domain.exception.BusinessException;
+import com.td.czghagent.domain.model.AuditEvent;
 import com.td.czghagent.domain.model.CurrentUser;
 import com.td.czghagent.domain.model.OperationContext;
 import com.td.czghagent.domain.model.ProcessedImage;
@@ -63,8 +64,8 @@ public class AccountCommandService {
         String avatarRevision = UUID.randomUUID().toString();
         try {
             authRepository.updateAvatar(account.id(), stored.objectKey(), avatarRevision);
-            auditRepository.append(account.id(), "ACCOUNT_AVATAR_UPDATE", "USER", account.id(),
-                    "SUCCESS", "更新个人头像", context.traceId(), context.ipAddress());
+            auditRepository.append(AuditEvent.byUser(context, "ACCOUNT_AVATAR_UPDATE",
+                    "USER", account.id(), AuditEvent.SUCCESS, "更新个人头像"));
         } catch (RuntimeException exception) {
             fileStorage.delete(stored.objectKey());
             throw exception;
@@ -90,9 +91,8 @@ public class AccountCommandService {
         }
         authRepository.updatePassword(account.id(), passwordHasher.hash(newPassword));
         authRepository.deleteSessionsByUserId(account.id());
-        auditRepository.append(account.id(), "ACCOUNT_PASSWORD_CHANGE", "USER", account.id(),
-                "SUCCESS", "用户修改个人密码并撤销全部会话",
-                context.traceId(), context.ipAddress());
+        auditRepository.append(AuditEvent.byUser(context, "ACCOUNT_PASSWORD_CHANGE",
+                "USER", account.id(), AuditEvent.SUCCESS, "用户修改个人密码并撤销全部会话"));
     }
 
     @Transactional
@@ -103,8 +103,8 @@ public class AccountCommandService {
         }
         UserAccount account = requireAccount(context.user().id());
         authRepository.updateProfile(account.id(), normalized);
-        auditRepository.append(account.id(), "ACCOUNT_PROFILE_UPDATE", "USER", account.id(),
-                "SUCCESS", "更新个人显示名称", context.traceId(), context.ipAddress());
+        auditRepository.append(AuditEvent.byUser(context, "ACCOUNT_PROFILE_UPDATE",
+                "USER", account.id(), AuditEvent.SUCCESS, "更新个人显示名称"));
         return requireAccount(account.id()).toCurrentUser();
     }
 

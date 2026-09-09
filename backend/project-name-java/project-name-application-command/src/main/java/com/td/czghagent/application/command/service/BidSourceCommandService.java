@@ -49,7 +49,8 @@ class BidSourceCommandService {
         BidDocument.validateSetup(title, targetPages, biddingMode);
         String id = UUID.randomUUID().toString();
         BidDocument bid = new BidDocument(
-                id, context.user().id(), "TA-" + Year.now().getValue() + "-"
+                id, context.user().id(), context.user().tenant(),
+                "TA-" + Year.now().getValue() + "-"
                 + id.substring(0, 8).toUpperCase(Locale.ROOT), writingMethod,
                 title.trim(), targetPages, biddingMode, "INTERPRETATION", "DRAFT", false,
                 null, LocalDateTime.now(), LocalDateTime.now(), 0);

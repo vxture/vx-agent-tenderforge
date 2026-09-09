@@ -30,6 +30,7 @@ public class BidGenerationService {
     private final BidGenerationPlanningService planningService;
     private final BidGenerationExecutionPlanner executionPlanner;
     private final BidUnitDraftFactory draftFactory;
+    private final BidBranchBlueprintService blueprintService;
     private final BidAiExecutionService aiExecutionService;
     private final BidContentReviewService reviewService;
     private final BidContentFinalizationService finalizationService;
@@ -43,6 +44,7 @@ public class BidGenerationService {
             BidGenerationPlanningService planningService,
             BidGenerationExecutionPlanner executionPlanner,
             BidUnitDraftFactory draftFactory,
+            BidBranchBlueprintService blueprintService,
             BidAiExecutionService aiExecutionService,
             BidContentReviewService reviewService,
             BidContentFinalizationService finalizationService
@@ -53,6 +55,7 @@ public class BidGenerationService {
         this.planningService = planningService;
         this.executionPlanner = executionPlanner;
         this.draftFactory = draftFactory;
+        this.blueprintService = blueprintService;
         this.aiExecutionService = aiExecutionService;
         this.reviewService = reviewService;
         this.finalizationService = finalizationService;
@@ -153,7 +156,17 @@ public class BidGenerationService {
         TenderAiGateway.AiDiagnostics draftDiagnostics = null;
         long started = System.nanoTime();
         try {
-            TenderAiGateway.ChapterDraftRequest request = draftFactory.create(snapshot, unit, units);
+            // 先拿本章所在二级分支的技术域蓝图，再写正文。
+            //
+            // 蓝图决定同一分支下各章<strong>各写什么、不写什么</strong>。没有它，
+            // 每一章都独立地把整个技术域讲一遍，相邻章节大面积重复——
+            // 而每一章单独看都合理，这是评审前最难发现的一类质量问题。
+            //
+            // resolve 按 inputHash 落库，一个分支只生成一次，并行单元和重试都复用；
+            // 生成失败就让这个单元失败重试，而不是退回「没有蓝图也写」——
+            // 后者会产出正是这套机制要防的那种正文，且没有任何迹象说明它降级了。
+            TenderAiGateway.ChapterDraftRequest request = draftFactory.create(
+                    snapshot, unit, units, blueprintService.resolve(snapshot, unit));
             String inputHash = BidProductionRules.generationSnapshotHash(
                     snapshot.snapshotHash(), unit.idempotencyKey());
             run = productionRepository.beginAiRun(new BidProductionRepository.AiRunStart(

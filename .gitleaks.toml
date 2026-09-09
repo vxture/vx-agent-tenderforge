@@ -1,0 +1,37 @@
+# gitleaks 配置：CI 的 secret-scan 闸门与本地 pre-commit 钩子共用。
+# 继承内置规则集，只把本仓已知安全、确非密钥的形态加进白名单：
+# 环境变量引用与明显的占位符。
+#
+# 真正的密钥从不进入被跟踪的文件（见 .gitignore：deploy/.env、*.pem、*.key）。
+# 出现新的命中时加规则或加一条<b>窄</b>白名单，永远不要放宽闸门。
+# 白名单保持最小，不要照抄别的仓库的样例。
+title = "vxture-tenderforge secret-scan"
+
+[extend]
+# 继承全部内置规则（AWS/GCP/Anthropic/OpenAI/私钥/通用 api key 等）。
+useDefault = true
+
+[allowlist]
+description = "被跟踪文件里已知安全的占位符与环境变量引用"
+regexTarget = "match"
+regexes = [
+  # deploy/.env.example 里的空值与「填我」标记。注意：.env.example 并没有被
+  # 整体豁免扫描——只有下面这几种确切形态被放行。
+  '''^\s*$''',
+  '''(?i)^(replace-with|change-?me|fill-?me|your-|example-|placeholder)''',
+  '''(?i)^ChangeMe-[A-Za-z0-9-]+$''',
+  # compose 与 application.yml 里的 ${VAR} / ${VAR:-default} 引用。
+  '''\$\{[A-Z_][A-Z0-9_]*(:-[^}]*)?\}''',
+  # 测试夹具里的固定假值。它们必须一眼看得出是假的。
+  '''(?i)^(whsec_(local_probe|current|next|integration)|minted-token|internal-token|hash:.*)$''',
+]
+# 测试代码里的假密钥、假 JWT、假 UUID。生产代码不在此列。
+# 注意这里是 [allowlist] 表里的一个<b>字符串数组字段</b>——写成
+# [[allowlist.paths]] 那种表数组会让 gitleaks 直接加载失败：
+# 「expected type 'string', got unconvertible type 'map[string]interface {}'」，
+# 而 FTL 退出码非零，闸门表现为「一直红」而不是「放行」。
+paths = [
+  '''.*[Tt]est\.java$''',
+  '''.*test_.*\.py$''',
+  '''.*\.test\.(ts|tsx|mjs)$''',
+]
