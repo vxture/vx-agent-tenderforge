@@ -53,9 +53,14 @@ published_port() {
     | tail -1 | grep -oE '[0-9]+' | tail -1 || true
 }
 
-# 持久数据放在部署目录**之外**：部署目录每次都会被 rsync --delete 覆盖，
-# 而容器写出来的数据是 root 所有，留在里面会让下一次 rsync 直接失败。
-DATA_ROOT="${DATA_ROOT:-$(dirname "$REPO_DIR")/data}"
+# 持久数据。它在 REPO_DIR **里面**，但 rsync 那一步用 --exclude='data'
+# 把它排除在 --delete 之外——容器写出来的数据是 root 所有，让 rsync 碰它
+# 会在下一次部署时以权限错误失败，而那个错误信息离原因很远。
+#
+# 这个值显式给，不从 REPO_DIR 推导。推导版本（dirname $REPO_DIR）在
+# REPO_DIR 是 /srv/md0/tenderforge 时会指向 /srv/md0/data——那是所有产品
+# 共用的一层，两个产品的数据会落进同一个目录，而且不会有任何报错。
+DATA_ROOT="${DATA_ROOT:-$REPO_DIR/data}"
 
 log() { echo "[deploy] $*"; }
 

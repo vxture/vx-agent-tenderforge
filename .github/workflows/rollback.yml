@@ -156,15 +156,24 @@ jobs:
         run: |
           set -euo pipefail
           port="${DEPLOY_PORT:-22}"
-          deploy_dir="${DEPLOY_DIR:-/srv/md0/${PRODUCT_CODE}/deploy}"
+          # DEPLOY_DIR 必须精确到**含 compose + .env 的那一层**（治理规范 §6）。
+          # 差一级的表现是镜像能拉、compose 找不到 env_file 而失败（varda 教训）。
+          deploy_dir="${DEPLOY_DIR:-/srv/md0/${PRODUCT_CODE}}"
           image_tag="$(cat /tmp/image_tag)"
           ssh_opts=(-i ~/.ssh/deploy_key -p "$port" -o ServerAliveInterval=30 \
                     -o ServerAliveCountMax=20 -o ConnectTimeout=30)
 
+          # 投递保持**仓内的相对结构**：compose 在顶层、deploy/ 是它的子目录。
+          # 压平成一层会让 compose 里的 ./deploy/mysql/init-temporal.sh 失效，
+          # 而失效的表现是 temporal-db-init 挂到一个空路径、静默什么都不做。
           stage="$(mktemp -d)"
-          cp -a deploy/. "$stage/"
+          cp -a deploy "$stage/deploy"
           cp -a docker-compose.yml "$stage/docker-compose.yml"
-          rsync -az --delete --exclude='.env' --exclude='VERSION' \
+          # --delete 会清掉目标目录里不在源里的东西，所以三样必须排除：
+          # 运维的 .env（删了会被下次 bootstrap 用 CI 版本覆盖，运维改过的
+          # 值无声消失）、VERSION（溯源）、data（容器写的 root 所有的持久
+          # 数据，碰它下次 rsync 会以权限错误失败）。
+          rsync -az --delete --exclude='.env' --exclude='VERSION' --exclude='data' \
             -e "ssh -i ~/.ssh/deploy_key -p $port -o ConnectTimeout=30" \
             "$stage/" "$DEPLOY_USER@$DEPLOY_HOST:$deploy_dir/"
           rm -rf "$stage"
