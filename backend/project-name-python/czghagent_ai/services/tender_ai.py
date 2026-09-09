@@ -25,14 +25,22 @@ from czghagent_ai.services.technical_scoring import (
     selection_errors,
 )
 from czghagent_ai.tender_models import (
+    BidStrategyResponse,
+    BranchBlueprint,
+    BranchBlueprintRequest,
     ChapterContentResponse,
     ChapterDraftRequest,
     ChapterDraftResponse,
     ContentBlock,
     InterpretationRequest,
     InterpretationResponse,
+    OutlineAssemblyRequest,
+    OutlineExpansionResponse,
+    OutlineExpansionStageRequest,
     OutlineRequest,
     OutlineResponse,
+    OutlineSkeletonPlan,
+    OutlineSkeletonStageRequest,
     ProjectOverviewResponse,
     ReviewRequest,
     ReviewResponse,
@@ -45,6 +53,16 @@ from czghagent_ai.tender_models import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+#: 装配阶段的占位诊断。
+#:
+#: 装配不调模型，所以没有 token、没有 finish_reason 可报。给一个显式的空值
+#: 而不是复用某一批展开的诊断——后者会让「装配花了多少」看起来是个真实数字。
+_ASSEMBLY_DIAGNOSTICS = AiProviderDiagnostics(
+    finish_reason=None, response_length=0, response_hash="", 
+    input_tokens=None, output_tokens=None,
+)
 
 
 class TenderAiService:
@@ -323,6 +341,96 @@ class TenderAiService:
         self, request: OutlineRequest
     ) -> AiStructuredResult[OutlineResponse]:
         return await self._outline_planner.plan_result(request)
+
+    # ── 分阶段目录：与一次性路径共用同一批实现 ──────────────────────────────
+    #
+    # 存在的理由是可恢复：一次 500 页标书的三级展开有十几批，单批失败只该
+    # 重跑那一批。这几个方法是 /internal/tender/outline/* 各路由的落点——
+    # 它们曾经全部缺失，于是那些路由每次调用都是 AttributeError 变成的 500。
+
+    async def outline_strategy_result(
+        self, request: OutlineRequest
+    ) -> AiStructuredResult[BidStrategyResponse]:
+        return await self._outline_planner.plan_strategy_result(request)
+
+    async def outline_skeleton_result(
+        self, request: OutlineSkeletonStageRequest
+    ) -> AiStructuredResult[OutlineSkeletonPlan]:
+        return await self._outline_planner.plan_skeleton_result(
+            request.outline, request.strategy
+        )
+
+    async def outline_expansion_result(
+        self, request: OutlineExpansionStageRequest
+    ) -> AiStructuredResult[OutlineExpansionResponse]:
+        return await self._outline_planner.plan_expansion_result(
+            request.outline, request.strategy, request.batch_index, request.branches
+        )
+
+    def assemble_outline(self, request: OutlineAssemblyRequest) -> OutlineResponse:
+        """装配不调模型，所以<b>不是</b>协程，也不产生诊断。
+
+        调用方可能是在重试之后才凑齐各批结果的，这一步必须是纯函数：
+        同样的骨架和同样的批次结果，任何时候装出来的树都一样。
+        """
+        skeleton = AiStructuredResult(request.skeleton, _ASSEMBLY_DIAGNOSTICS, 0)
+        expansions = [
+            AiStructuredResult(item, _ASSEMBLY_DIAGNOSTICS, 0)
+            for item in request.expansions
+        ]
+        return self._outline_planner.assemble(
+            request.outline, skeleton, expansions
+        ).data
+
+    async def plan_branch_blueprint_result(
+        self, request: BranchBlueprintRequest
+    ) -> AiStructuredResult[BranchBlueprint]:
+        """为一个二级分支规划技术域蓝图。
+
+        它决定同一分支下各三级章节<strong>各写什么、不写什么</strong>。
+        没有它，每一章都独立地把整个技术域讲一遍，相邻章节大面积重复，
+        而每一章单独看都合理——这是最难在评审前发现的一类质量问题。
+        """
+        return await self._executor.execute_result(
+            "branch_blueprint_planning",
+            {
+                "bidTitle": request.bid_title,
+                "biddingMode": request.bidding_mode,
+                "solutionContract": request.solution_contract,
+                "branch": {
+                    "title": request.branch.title,
+                    "taskBrief": request.branch.task_brief,
+                    "mustKeywords": request.branch.must_keywords,
+                },
+                # 章节 id 必须带上：蓝图要按 chapterId 回指到具体章节，
+                # 而正文阶段再按它取出本章那一片（并在那里剥掉 id）。
+                "chapters": [
+                    {
+                        "chapterId": chapter.id,
+                        "title": chapter.title,
+                        "taskBrief": chapter.task_brief,
+                        "mustKeywords": chapter.must_keywords,
+                    }
+                    for chapter in request.chapters
+                ],
+                "criteria": [
+                    {
+                        "type": item.type,
+                        "title": item.title,
+                        "description": item.description,
+                    }
+                    for item in request.criteria
+                ],
+                "dictionary": request.dictionary.model_dump(by_alias=True),
+                "writingBible": request.writing_bible,
+                "termRegistry": request.term_registry,
+                "commitmentRegistry": request.commitment_registry,
+            },
+            f"{request.request_id}-branch-blueprint",
+            BranchBlueprint,
+            object_name="二级技术域蓝图",
+            schema_version="branch-blueprint-v1",
+        )
 
     async def draft(self, request: ChapterDraftRequest) -> ChapterDraftResponse:
         return (await self.draft_result(request)).data
