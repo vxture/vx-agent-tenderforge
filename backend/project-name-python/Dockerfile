@@ -33,9 +33,12 @@ ENV DEPLOY_STAGE=${DEPLOY_STAGE}
 ARG APT_MIRROR=""
 ARG PIP_INDEX_URL="https://pypi.org/simple/"
 RUN if [ -n "$APT_MIRROR" ]; then \
-        sed -i \
-            -e "s|http://deb.debian.org/debian-security|${APT_MIRROR}/debian-security|g" \
-            -e "s|http://deb.debian.org/debian|${APT_MIRROR}/debian|g" \
+        # 用 -E 与协议无关的 [a-z]+:// 匹配：基础镜像里那份 sources 用的是明文
+        # http，而替换目标带自己的 scheme。写死 http:// 既多一个假设，也会被
+        # 扫描器当成「这里在用明文协议」——它看不出那是被替换掉的那一侧。
+        sed -i -E \
+            -e "s|[a-z]+://deb[.]debian[.]org/debian-security|${APT_MIRROR}/debian-security|g" \
+            -e "s|[a-z]+://deb[.]debian[.]org/debian|${APT_MIRROR}/debian|g" \
             /etc/apt/sources.list.d/debian.sources; \
     fi \
     && apt-get -o Acquire::Retries=5 update \

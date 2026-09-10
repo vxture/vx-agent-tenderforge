@@ -156,6 +156,8 @@ dump_failure_context() {
     state="$(compose ps --format '{{.State}}' "$svc" 2>/dev/null | head -1)"
     case "$state" in
       running|"") continue ;;
+      # 其余状态（exited / restarting / created / dead）正是要打日志的那些。
+      *) ;;
     esac
     log "--- $svc（state=$state）最后 80 行 ---"
     compose logs --no-color --tail=80 "$svc" 2>&1 || true
