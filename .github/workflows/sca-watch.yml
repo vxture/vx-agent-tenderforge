@@ -1,0 +1,188 @@
+name: sca-watch
+
+# 对**空闲主干**跑的 SCA 扫描——`ci.yml` 的 `audit` 结构上做不到的那一半。
+#
+# `audit` 是硬闸门，触发于 pull_request 与 push:main。那是对的，但它回答的是
+# 「这次改动有没有引入新洞」。它不回答、也无法被改造成回答「已经躺在那儿的
+# 东西里有没有洞」——针对一份没动过的锁文件新发布的公告，在有人恰好推一次
+# 之前对它是不可见的。
+#
+# 本仓尤其需要这条：依赖面刚做过一次 142 → 0 的整顿，而那个 0 只代表整顿那天。
+#
+# **三个生态都要扫，不能只扫 npm 锁文件。** Java 与 Python 的依赖树不落在
+# 任何一份能被直接读取的锁文件里，必须先解析出来（cyclonedx 聚合 SBOM 与
+# uv pip compile），这与 `audit` 的做法一致。一个只扫 npm 的巡检器会对三分之二
+# 的依赖面失明，而它恰恰是为了消除盲区才存在的——那样的绿色比没有更坏。
+#
+# **为什么开 issue 而不只是让运行变红。** Actions 页上的红叉在平静的日子里
+# 没人看，而这里要修的缺陷恰恰是「没人在看的信号」。发现必须落在主干问题被
+# 跟踪的地方，否则它不是报告，只是一行日志。
+#
+# **它也会在主干重新干净时关掉 issue。** 只会拉警报不会撤警报的巡检器，产出的
+# 是一张带假条目的列表，而带假条目的列表会教人不再读这张列表。
+#
+# **本工作流不得产生那五个必需检查上下文中的任何一个。**
+# `quality-gate` / `build` / `test-coverage` / `audit` / `gitleaks` 是分支保护
+# 契约；第二个叫 `audit` 的作业会造出同名的第二个上下文。
+# `scripts/guardrails/check_sca_lockstep.py` 断言这一点，并断言这里钉的扫描器
+# 没有与 ci.yml 钉的那个漂开。
+
+on:
+  schedule:
+    # 每天，避开整点：GitHub 的 cron 高峰在 :00，落在那里的作业会被排队或丢弃。
+    # 用每天而不是每小时——公告在工作时间发布，而要修的失效是「十天没被发现」，
+    # 1 小时与 24 小时的差别不是出问题的地方。
+    - cron: "17 6 * * *"
+  # 定时工作流在仓库 60 天无活动后会被自动停用，手动触发是确认它还活着的方式。
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: sca-watch
+  cancel-in-progress: false
+
+jobs:
+  # 刻意不叫 `audit`——见文件头。
+  sca-watch:
+    name: sca-watch
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # 与 ci.yml 的 audit 作业保持锁步，由 check_sca_lockstep.py 断言。
+      # 巡检器用比闸门更旧的扫描器，会在闸门要拦的发现上报「干净」——
+      # 那是三种可能状态里最坏的一种。
+      OSV_SCANNER_VERSION: "2.4.0"
+      CYCLONEDX_PLUGIN_VERSION: "2.9.1"
+      # uv 解析出来的那份 requirements.txt 就是扫描器要扫的东西。不钉版本意味着
+      # 「今天扫的依赖树」与「昨天扫的依赖树」可能由两个不同的解析器算出来，
+      # 而这个差异不会体现在任何一份报告里。
+      UV_VERSION: "0.12.12"
+      ISSUE_TITLE: "sca-watch: main 上带着一个已知漏洞"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Resolve the Java dependency tree (CycloneDX aggregate SBOM)
+        working-directory: backend/project-name-java
+        shell: bash
+        run: |
+          set -euo pipefail
+          mvn -B -ntp \
+            "org.cyclonedx:cyclonedx-maven-plugin:${CYCLONEDX_PLUGIN_VERSION}:makeAggregateBom" \
+            -DoutputFormat=json \
+            -DoutputName=bom \
+            -Dmaven.test.skip=true
+          test -f target/bom.json
+
+      - name: Resolve the Python dependency tree (uv pip compile)
+        working-directory: backend/project-name-python
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet --disable-pip-version-check "uv==${UV_VERSION}"
+          mkdir -p target
+          python -m uv pip compile requirements.txt \
+            --python-version 3.12 \
+            --output-file target/requirements.txt \
+            --quiet
+
+      - name: Download osv-scanner
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256=15314940c10d26af9c6649f150b8a47c1262e8fc7e17b1d1029b0e479e8ed8a0
+          url="https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_linux_amd64"
+          mkdir -p /tmp/osv-bin
+          # --proto/--proto-redir：-L 会跟随重定向，没有这两个参数时一次跳到
+          # http:// 的重定向会被静默跟随。下面的 sha256 能抓住被掉包的产物，
+          # 这两个参数拦的是明文那一跳。
+          curl -fsSL --proto "=https" --proto-redir "=https" --tlsv1.2 "$url" -o /tmp/osv-bin/osv-scanner
+          echo "${sha256}  /tmp/osv-bin/osv-scanner" | sha256sum -c -
+          chmod +x /tmp/osv-bin/osv-scanner
+
+      - name: Scan every ecosystem (npm + Maven + PyPI)
+        id: scan
+        shell: bash
+        env:
+          OSV_SCANNER: /tmp/osv-bin/osv-scanner
+        run: |
+          # 刻意**不**对扫描器用 set -e：非零退出是发现本身，不是基础设施故障，
+          # 它必须抵达下面的上报步骤，而不是在这里结束作业。
+          set -uo pipefail
+          rc=0
+          bash scripts/ci/sca-scan.sh > /tmp/sca-report.txt 2>&1 || rc=$?
+          cat /tmp/sca-report.txt
+          echo "rc=${rc}" >> "$GITHUB_OUTPUT"
+
+      - name: File, update or close the trunk's SCA issue
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RC: ${{ steps.scan.outputs.rc }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          existing="$(gh issue list --state open --limit 100 --json number,title \
+            --jq "[.[] | select(.title == env.ISSUE_TITLE)][0].number // empty")"
+
+          if [ "${RC}" = "0" ]; then
+            if [ -n "${existing}" ]; then
+              gh issue comment "${existing}" --body "$(printf '%s\n' \
+                "主干在[这次运行](${RUN_URL})中扫描干净，关闭。" \
+                "" \
+                "只会拉警报不会撤警报的巡检器，产出的是一张带假条目的列表，" \
+                "所以它自己关掉，而不是等人注意到修复已经落地。")"
+              gh issue close "${existing}"
+              echo "closed #${existing} - trunk is clean"
+            else
+              echo "trunk is clean, no open issue"
+            fi
+            exit 0
+          fi
+
+          # 截断：issue 是指向运行的指针，不是运行的副本。
+          report="$(head -c 4000 /tmp/sca-report.txt)"
+          body="$(printf '%s\n' \
+            "\`osv-scanner\` 在 \`main\` 的依赖里发现了已知漏洞（npm / Maven / PyPI 三生态全扫）。" \
+            "" \
+            "这**不是**一个失败的 PR 检查。这是对主干当前状态的定时扫描，也是 \`ci.yml\` 的" \
+            "\`audit\` 看不见的那一类：\`audit\` 触发于改动，而针对一份没动过的依赖清单新" \
+            "发布的公告，在有人恰好推一次之前对它不可见。" \
+            "" \
+            "运行：${RUN_URL}" \
+            "" \
+            '```' \
+            "${report}" \
+            '```' \
+            "" \
+            "修法是升级、加约束、或在 \`.osv-scanner.toml\` 里记一条带理由的具名例外。" \
+            "**不要靠放宽闸门来修**——那会让下一个真发现也一起消失。" \
+            "" \
+            "下一次主干扫描干净时，本 issue 会自行关闭。")"
+
+          if [ -n "${existing}" ]; then
+            gh issue comment "${existing}" --body "${body}"
+            echo "updated #${existing}"
+          else
+            gh issue create --title "${ISSUE_TITLE}" --body "${body}"
+          fi
+
+          # 也让本次运行失败，使 Actions 页与 issue 口径一致。
+          exit 1

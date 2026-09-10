@@ -46,6 +46,10 @@ jobs:
       OSV_SCANNER_VERSION: "2.4.0"
       # 生成 CycloneDX 聚合 SBOM 的插件。钉死版本：构建期插件同样是供应链。
       CYCLONEDX_PLUGIN_VERSION: "2.9.1"
+      # uv 解析出来的那份 requirements.txt 就是扫描器要扫的东西。不钉版本意味着
+      # 「今天扫的依赖树」与「昨天扫的依赖树」可能由两个不同的解析器算出来，
+      # 而这个差异不会体现在任何一份报告里。
+      UV_VERSION: "0.12.12"
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -98,7 +102,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -m pip install --quiet --disable-pip-version-check uv
+          python -m pip install --quiet --disable-pip-version-check "uv==${UV_VERSION}"
           mkdir -p target
           # --python-version 固定住 marker 求值，让扫描结果与镜像里装的那套一致
           # （Dockerfile 是 python:3.12-slim）。
@@ -187,6 +191,12 @@ jobs:
       # 多给 → 没有任何报错，只是一次注入的爆炸半径从几列变回整表。
       - name: Column lock guardrail (whitelist <-> real UPDATE statements)
         run: python scripts/guardrails/check_column_locks.py
+
+      # 闸门（ci 的 audit）与巡检器（sca-watch）必须扫同一个东西。巡检器用更旧的
+      # 扫描器会在闸门要拦的发现上报「干净」——假绿色比没有巡检更坏，因为它让人
+      # 停止怀疑。同时断言两者都不产生那五个必需检查上下文。
+      - name: SCA lockstep guardrail (gate <-> idle-trunk watcher)
+        run: python scripts/guardrails/check_sca_lockstep.py
 
       - name: Python lint (ruff)
         working-directory: backend/project-name-python
