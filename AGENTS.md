@@ -81,6 +81,53 @@ docker compose up -d --build
 它们是绑定挂载而非命名卷，`docker compose down -v` 删不掉，也因此更容易被误删——
 删除是文件系统操作，没有 Docker 那一层拦着。
 
+### 在 Windows 上写 GitHub secret / variable：绝对路径会被悄悄改掉
+
+**症状是部署"全程成功"，只是全都发生在错误的地方。** 这条踩过一次，代价是一次
+生产部署 + 两次重跑 + 一份带真实口令的 `.env` 落在了目标主机的家目录里。
+
+Git Bash（MSYS）会把**看起来像 POSIX 路径的实参**转换成 Windows 原生路径，再交给
+原生 exe。`gh.exe` 是原生程序，于是：
+
+```bash
+gh secret set DEPLOY_DIR --env production --body "/srv/md0/tenderforge"
+# 实际存进去的是： D:/Program Files/Git/srv/md0/tenderforge
+```
+
+到了 Linux 主机上，那个值是个**相对路径**。于是 `mkdir -p` 在家目录下建出一整棵
+`D:/Program Files/Git/srv/md0/...`，rsync、文件断言、第一次 `cd` 全部"成功"——
+直到某个脚本从**已经切进去的目录**再按同一个相对路径找一次，才报
+`No such file or directory`。错误出现的位置离病因很远，而前面每一步都是绿的。
+
+**写法：值一律走 stdin，实参转换绕不到它。**
+
+```bash
+printf '%s' '/srv/md0/tenderforge' | gh secret set DEPLOY_DIR --env production
+printf '%s' '/srv/md1/tenderforge' | gh secret set DEPLOY_DIR --env beta
+gh secret set DEPLOY_SSH_KEY --env production < ~/.ssh/somekey     # 文件同理
+```
+
+**核对方法**：secret 读不回来，但 variable 可以。用同一条命令写一个探针变量，
+读回来比对，再删掉：
+
+```bash
+printf '%s' '/srv/md0/tenderforge' | gh variable set TMP_PATH_PROBE
+gh variable list --json name,value --jq '.[]|select(.name=="TMP_PATH_PROBE")|.value'
+gh variable delete TMP_PATH_PROBE
+```
+
+不受影响的：不以 `/` 开头的值（主机名、用户名、端口），以及所有从文件或管道喂进去
+的值——SSH 私钥、known_hosts、`ENV_FILE_BASE64` 本来就走 stdin，所以它们一直是对的。
+
+顺带两条同源的教训：
+
+- **路径不该做成 secret。** 它不是凭据，而把它做成 secret 的代价是出事时日志里
+  全是 `***`，所有诊断信息一起被抹掉。上面那次就是靠**删掉 secret、让工作流回落到
+  未打码的字面量**才看见真正的错误。
+- **stack root 由运维预建，不由 CI 创建。** `stone` 对 `/srv/md0` 没有写权限，
+  `mkdir -p` 会是 `Permission denied`。部署前先
+  `sudo mkdir -p /srv/md0/tenderforge && sudo chown stone:stone ...`。
+
 ## 编码约束
 
 - TypeScript 使用 2 空格、单引号、严格类型；Java/Python 使用 4 空格，行宽不超过 120。
