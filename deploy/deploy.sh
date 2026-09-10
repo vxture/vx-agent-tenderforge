@@ -117,9 +117,25 @@ cmd_start() {
 
   # 三个镜像**同一个 tag**。这不是约定，是断言：CI 侧同批构建，这里再确认
   # 一次，因为一旦拉到两新一旧，故障表现会离原因很远。
+  # **三个并行拉**。串行时总时长是三者之和，而三个镜像大小差一个数量级
+  # （ai 约 1.5GB，web 约 50MB），串行等于让最小的那个排在最大的后面干等。
+  # 各自的输出收进独立文件再顺序打印——并行的日志交织在一起，出问题时分不清
+  # 哪一行属于哪个镜像。
+  local pids=() logs=() rc=0 i=0
   for image in "${IMAGES[@]}"; do
-    pull_one "$image" "$tag"
+    logs[$i]="$(mktemp)"
+    pull_one "$image" "$tag" > "${logs[$i]}" 2>&1 &
+    pids[$i]=$!
+    i=$((i + 1))
   done
+  i=0
+  for image in "${IMAGES[@]}"; do
+    wait "${pids[$i]}" || rc=1
+    cat "${logs[$i]}"
+    rm -f "${logs[$i]}"
+    i=$((i + 1))
+  done
+  [ "$rc" -eq 0 ] || { log "FATAL: 有镜像拉取失败，见上面各自的日志"; exit 1; }
 
   # 第三方镜像（Postgres / Temporal / temporal-ui）单独拉，失败不致命：
   # 它们的 tag 是钉死的，本地多半已经有，而拉不到时 `up -d` 会用本地那份。
@@ -149,11 +165,14 @@ cmd_start() {
 # 这中间隔着一次 SSH，也就隔着一次「先去申请权限」。
 dump_failure_context() {
   log "!! 启动失败，下面是现场"
-  compose ps || true
+  # **必须带 -a**：compose ps 默认只列运行中的容器，而一次性初始化容器
+  # （temporal-db-init）跑完就退出，恰恰是最需要看日志的那个。少了这个 -a，
+  # 上一次排查白跑了一轮——现场转储把唯一有用的那份日志漏掉了。
+  compose ps -a || true
   # 只打印没在正常运行的那些：全打会把真正相关的几十行埋进几千行里。
   local svc state
   for svc in $(compose config --services 2>/dev/null); do
-    state="$(compose ps --format '{{.State}}' "$svc" 2>/dev/null | head -1)"
+    state="$(compose ps -a --format '{{.State}}' "$svc" 2>/dev/null | head -1)"
     case "$state" in
       running|"") continue ;;
       # 其余状态（exited / restarting / created / dead）正是要打日志的那些。
@@ -164,7 +183,7 @@ dump_failure_context() {
   done
   # 健康检查失败但仍在 running 的容器也要看——unhealthy 的状态是 running。
   for svc in $(compose config --services 2>/dev/null); do
-    if compose ps --format '{{.Status}}' "$svc" 2>/dev/null | grep -q 'unhealthy'; then
+    if compose ps -a --format '{{.Status}}' "$svc" 2>/dev/null | grep -q 'unhealthy'; then
       log "--- $svc（unhealthy）最后 80 行 ---"
       compose logs --no-color --tail=80 "$svc" 2>&1 || true
     fi

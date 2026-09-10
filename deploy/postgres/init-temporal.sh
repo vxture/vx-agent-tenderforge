@@ -35,6 +35,12 @@ BEGIN
 END \$\$;
 SQL
 
+# **兜底：无条件再授一次 CREATEDB。**上面的 DO 块理论上已经覆盖两个分支，但
+# v0.1.1 那次部署里角色仍然没有这个权限，而当时看不到本脚本的输出（现场转储
+# 漏了已退出的一次性容器）。与其在下一轮再猜一次，不如在这里留一条无条件语句：
+# 它是幂等的，代价是一次 ALTER，收益是这条链路不再依赖上面那个分支判断是否走对。
+$PSQL -c "ALTER ROLE temporal CREATEDB"
+
 for dbname in temporal temporal_visibility; do
   exists=$($PSQL -tAc "SELECT 1 FROM pg_database WHERE datname = '${dbname}'")
   if [ -z "$exists" ]; then
