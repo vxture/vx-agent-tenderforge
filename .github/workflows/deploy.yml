@@ -234,11 +234,23 @@ jobs:
           cat > /tmp/remote-deploy.sh <<'REMOTE_SCRIPT'
           set -euo pipefail
           cd "$REPO_DIR"
-          export IMAGE_REGISTRY="ghcr.io"
-          export IMAGE_NAMESPACE="vxture"
+          # **主源是 ACR，不是 GHCR。** 部署机在国内，而 v0.1.1 那次从 GHCR 拉三个
+          # 镜像用掉 44 分钟（api 12m53s / ai 30m52s，约 800KB/s），compose 起栈和
+          # 健康检查加起来才几十秒——整次部署的时间几乎全在这里。ACR 在 cn-beijing，
+          # 是同一批镜像的另一个副本，构建那一步已经同时推了两处。
+          #
+          # GHCR 退为备源：ACR 出问题时仍然能发车，只是慢。顺序反过来的代价不是
+          # 「慢一点」，是让每次发布都要占住一个部署窗口。
+          #
+          # 组织里还有一个 ALIYUN_ACR_INTERNAL_HOST（VPC 内网端点），只有部署机在
+          # 同一个 VPC 里才通，且要对它单独 docker login。worker02 是否在那个 VPC
+          # 里没有核实过，所以这里**不用**它——猜错的表现是登录超时后退回 GHCR，
+          # 又变回 44 分钟。核实之后再启用，那是另一次改动。
+          export IMAGE_REGISTRY="$ALIYUN_ACR_REGISTRY"
+          export IMAGE_NAMESPACE="$ALIYUN_ACR_NAMESPACE"
           export IMAGE_TAG="$IMAGE_TAG"
-          export FALLBACK_IMAGE_REGISTRY="$ALIYUN_ACR_REGISTRY"
-          export FALLBACK_IMAGE_NAMESPACE="$ALIYUN_ACR_NAMESPACE"
+          export FALLBACK_IMAGE_REGISTRY="ghcr.io"
+          export FALLBACK_IMAGE_NAMESPACE="vxture"
           if [ -n "${GHCR_TOKEN:-}" ]; then
             printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
           fi
