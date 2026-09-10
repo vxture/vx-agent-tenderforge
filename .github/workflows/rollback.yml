@@ -164,7 +164,7 @@ jobs:
                     -o ServerAliveCountMax=20 -o ConnectTimeout=30)
 
           # 投递保持**仓内的相对结构**：compose 在顶层、deploy/ 是它的子目录。
-          # 压平成一层会让 compose 里的 ./deploy/mysql/init-temporal.sh 失效，
+          # 压平成一层会让 compose 里的 ./deploy/postgres/init-temporal.sh 失效，
           # 而失效的表现是 temporal-db-init 挂到一个空路径、静默什么都不做。
           stage="$(mktemp -d)"
           cp -a deploy "$stage/deploy"
