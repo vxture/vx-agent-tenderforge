@@ -1,0 +1,75 @@
+name: codeql
+
+# 代码扫描。与 `audit` / `sca-watch` 分工不同，别把三者混为一谈：
+#
+# * `audit`（ci.yml）与 `sca-watch` 查的是**依赖**——别人写的代码里的已知漏洞；
+# * `codeql` 查的是**本仓自己写的代码**里的可疑模式。
+#
+# 依赖干净不等于代码干净，反过来也一样。两条线互不覆盖。
+#
+# **三个语言都要分析。** vxtpl 只有 javascript-typescript，因为它只有前端；
+# 本仓是 Java + Python + TypeScript 三段，只分析其中一段的绿色具有误导性——
+# 它看起来和"全都扫过了"一模一样。
+#
+# **本工作流不产生那五个必需检查上下文中的任何一个**，作业名是
+# `analyze (<language>)`，与 `quality-gate` / `build` / `test-coverage` /
+# `audit` / `gitleaks` 不撞。要把它加进必需检查，得先在规则集里显式加上下文——
+# 那是一个独立决定，不该由这个文件顺带产生。
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  schedule:
+    # 每周一 03:12。定时扫描的意义与 sca-watch 相同：查询库自己会更新，
+    # 昨天扫干净的代码今天可能命中一条新查询，而代码一行没改。
+    - cron: '12 3 * * 1'
+
+permissions:
+  contents: read
+  security-events: write
+
+concurrency:
+  group: codeql-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: analyze
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    strategy:
+      # 不用 fail-fast：一个语言的分析失败不该掩盖另外两个的结果。
+      # 三份结果各自独立上传，缺哪一份都看得出来。
+      fail-fast: false
+      matrix:
+        include:
+          - language: javascript-typescript
+            build-mode: none
+          - language: python
+            build-mode: none
+          - language: java-kotlin
+            # Java 用 none 模式：不跑构建，直接从源码建库。
+            # 走 autobuild 意味着 CodeQL 要自己猜怎么构建一个七模块的 Maven
+            # 反应堆，猜错的表现是分析被跳过而作业仍然绿——那正是这里要避免的
+            # 那种绿。
+            build-mode: none
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}
