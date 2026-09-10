@@ -62,10 +62,14 @@ Compose 项目名是 `tenderforge`（`docker-compose.yml` 顶层 `name:`），�
 | SSH | `0.0.0.0:22` | 保留现状，只允许受控来源访问 |
 | 统一公网入口 | `0.0.0.0:80/443` | 由宿主机反向代理按域名转发 `tenderforge.vxture.com` |
 | 产品 Web | `${APP_PUBLISH_PORT}`，本仓为 `4050` | 取号唯一源是组织端口登记表（L3 行业智能体 #5，子块 4050–4059，prod 4050 / beta 4051）。**仓内只允许出现回退默认值**，加新服务要先去登记表在 4052–4059 占号 |
-| Temporal UI | `127.0.0.1:8233` | 仅供运维 SSH 隧道访问，不直接开放公网 |
+| Temporal UI | `127.0.0.1:8233`（beta `8234`） | 仅供运维 SSH 隧道访问，不直接开放公网。两个栈同机跑，端口必须错开，否则第二个栈起不来 |
 | API / AI / DB / Temporal | 不发布 | 分别使用容器内部 `8081/8000/5432/7233` |
 
-生产栈跑在 `vx-worker-02`，`stack_root` 为 `/srv/md0/tenderforge`。
+生产栈跑在 `vx-worker-02`，`stack_root` 为 `/srv/md0/tenderforge`；
+**beta 同机但落在另一块阵列**，`/srv/md1/tenderforge`，发布端口 `4051`。
+两者的 `DEPLOY_DIR` 都由环境级 secret 显式给出，不依赖工作流里的回退值——
+「部署到哪」属于配置，不属于代码。tag 形态区分环境：`vX.Y.Z` 去生产，
+`vX.Y.Z-beta.N` 去 beta（`deploy.yml` 的路由，由 `check_deploy_routing.py` 守着）。
 持久化一律走**绑定挂载到阵列**，不用命名卷：`${DATA_DIR}/postgres` -> `/var/lib/postgresql`、
 `${DATA_DIR}/private` -> `/app/data/private`，`DATA_DIR` 默认 `/srv/md0/tenderforge/data`。
 命名卷会把数据放到系统盘上，而这件事在容器里完全看不出来。
