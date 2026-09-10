@@ -76,12 +76,21 @@ class MockEntitlementResolverTest {
         assertThat(lapsed.dataRetentionUntil()).isNotNull();
     }
 
+    /**
+     * 替身把配置里的档位<strong>原样</strong>交出去，不替平台做任何解释。
+     *
+     * <p>这里刻意不再断言「免费档少一个能力」——五档当前能力相同，
+     * 差异落在平台侧的配额与 credits 上。替身该验的是它有没有如实转述 tier，
+     * 而不是它对 tier 的理解；后者归 {@code BidCapability} 的对应表，
+     * 在 {@code EntitlementContractTest} 里逐档验过。
+     */
     @Test
     void drivesTheTierAndBundlingFromConfiguration() {
         Entitlement free = new MockEntitlementResolver("free", "active", false).resolve("ws-1");
         assertThat(free.tier()).isEqualTo("free");
         assertThat(BidCapability.of(free))
-                .doesNotContain(BidCapability.CONSISTENCY_REVIEW);
+                .as("五档能力当前相同，免费档也拿全量")
+                .containsExactlyInAnyOrder(BidCapability.values());
 
         Entitlement bundled = new MockEntitlementResolver("", "", true).resolve("ws-1");
         assertThat(bundled.tier()).as("空值落在 pro 上，好让空 .env 能看到完整界面")
