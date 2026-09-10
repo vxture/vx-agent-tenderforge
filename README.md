@@ -1,6 +1,6 @@
-# TenderAgent
+# 标书编写智能体（TenderForge）
 
-TenderAgent 是面向投标文件编制人员的本地智能工作台。系统覆盖招标文件解析、解读冻结、
+标书编写智能体是面向投标文件编制人员的智能工作台。系统覆盖招标文件解析、解读冻结、
 三级目录规划、长篇正文生成与编辑、成稿审查、DOCX 排版交付、个人素材和账户管理。
 
 ## 快速启动
@@ -21,7 +21,7 @@ docker compose ps
 `.env` 已被 Git 忽略，禁止将其内容提交、粘贴到工单或写入日志。环境变量会进入容器
 配置，可被具备 Docker 管理权限的人员通过容器检查命令读取。
 
-- Web：<http://124.222.17.146:5274>
+- Web：<https://tenderforge.vxture.com>（本机 compose 为 `http://127.0.0.1:4050`）
 - Temporal UI：<http://127.0.0.1:8233>
 - Java 健康检查：容器内 `http://api:8081/actuator/health`
 - Python 健康检查：容器内 `http://ai:8000/health`
@@ -30,7 +30,10 @@ docker compose ps
 `BOOTSTRAP_ADMIN_PASSWORD` 创建或更新本地 `planner`、`admin` 账号。正式环境必须替换
 示例密码和 `AI_SERVICE_INTERNAL_TOKEN`。
 
-停止服务时不要删除 `mysql-data` 和 `private-files` 卷，它们分别保存业务数据和私有文件：
+业务数据与私有文件不在命名卷里，而是**绑定挂载**到 `${DATA_DIR}`（默认
+`/srv/md0/tenderforge/data`）下的 `postgres/` 与 `private/`。因此 `docker compose down -v`
+不会碰它们——要清数据得直接删那两个目录。这是有意的：命名卷会把数据放到系统盘上，
+而这件事在容器里完全看不出来。
 
 ```powershell
 docker compose down

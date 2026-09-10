@@ -1,6 +1,6 @@
 # Agent 开发指南
 
-本文件定义 TenderAgent 仓库的维护规则。现行产品与技术事实以
+本文件定义标书编写智能体（TenderForge）仓库的维护规则。现行产品与技术事实以
 `docs/30-design/10-detailed-design.md` 为唯一来源。
 
 ## 项目结构
@@ -9,7 +9,8 @@
 backend/project-name-java/       Java 25，DDD + CQRS，6 个 Maven 模块
 backend/project-name-python/     Python，FastAPI 文档/AI/排版服务
 frontend/project-name-web/       React 19 + Vite + TypeScript
-deploy/                          MySQL、Temporal、Java、Python、Nginx Compose 部署
+docker-compose.yml               编排：db / ai / temporal / api / worker / web
+deploy/                          部署脚本、数据库 DDL 与基线
 scripts/qa/                      真实 AI 和浏览器端到端验收
 docs/30-design/10-detailed-design.md           唯一现行详细设计
 .claude/skills/                  当前工程与 Java 编码规范
@@ -75,8 +76,10 @@ docker compose config
 docker compose up -d --build
 ```
 
-不得删除 `mysql-data`、`private-files` 或本地 `deploy/dify/volumes` 遗留数据，除非用户明确
-授权数据清理。
+不得删除 `${DATA_DIR}/postgres`、`${DATA_DIR}/private`（默认在
+`/srv/md0/tenderforge/data` 下）或任何遗留数据目录，除非用户明确授权数据清理。
+它们是绑定挂载而非命名卷，`docker compose down -v` 删不掉，也因此更容易被误删——
+删除是文件系统操作，没有 Docker 那一层拦着。
 
 ## 编码约束
 
