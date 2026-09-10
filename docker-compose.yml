@@ -20,7 +20,12 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_ROOT_PASSWORD:?生产必须显式设置——默认口令的数据库等于没有口令}
       TZ: Asia/Shanghai
     volumes:
-      - db-data:/var/lib/postgresql/data
+      # postgres:18+ 的挂载点是 /var/lib/postgresql，**不是** .../data。
+      # 18 起镜像按 pg_ctlcluster 的约定把数据放进带大版本号的子目录，
+      # 挂在 .../data 上会直接拒绝启动并报「unused mount/volume」——
+      # 这条是本地起一个带持久卷的探针栈时撞出来的，Testcontainers 与
+      # 不带卷的容器都不会显形。
+      - db-data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d vx_tenderforge_db"]
       interval: 10s

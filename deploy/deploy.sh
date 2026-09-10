@@ -171,6 +171,12 @@ cmd_verify() {
   exit 1
 }
 
+# 本栈**自己的**两个具名卷。写死在这里而不是从 compose 解析：
+# 这个清单是「绝对不能删的东西」，它必须是一个读代码就能确认的常量，
+# 而不是一个依赖解析是否成功的推导结果——解析失败时推导出空清单，
+# 而空清单的意思恰好是「什么都可以删」。
+PROTECTED_VOLUMES=("${PRODUCT_CODE}_db-data" "${PRODUCT_CODE}_private-files")
+
 cmd_prune() {
   # 只保留正在跑的那几个镜像。三个镜像每个 tag 一份，累积得比 vxtpl 快三倍。
   # 放在 verify 之后跑（见 cmd_all），所以验证失败的那次不会清任何东西——
@@ -199,7 +205,57 @@ cmd_prune() {
     fi
   done < <(docker images --format '{{.Repository}}:{{.Tag}}' \
            | grep -E "/(${PRODUCT_CODE}-(api|ai|web)):" || true)
-  log "prune 完成（清掉 ${pruned} 个，保留在跑的三个）"
+  log "镜像 prune 完成（清掉 ${pruned} 个，保留在跑的三个）"
+  prune_volumes
+}
+
+# 清掉本栈自己产生的、没有任何容器引用的卷。
+#
+# **这是这个脚本里唯一会不可逆地毁掉数据的动作。** 危险窗口的形状是实测出来的，
+# 不是想当然的：
+#
+#   * `docker compose stop` —— 容器还在，**停止的容器仍然持有卷引用**，
+#     prune 碰不到 db-data。实测确认。
+#   * `docker compose down` —— 容器被移除，卷失去全部引用。此刻跑 prune，
+#     db-data 连同里面的数据一起消失。**实测确认：40.89MB 一次没了。**
+#
+# 所以守卫防的是「在 down 与下一次 up 之间跑到了这一步」——部署脚本里
+# 完全可能出现（up 失败、或有人手工按顺序跑 down / prune）。三道：
+#
+#   1. 必须能看到数据库容器**在跑**。它不在跑，就说不清现在处在哪个窗口里。
+#   2. 必须逐个确认两个受保护的卷仍被运行中的容器引用。
+#   3. 只删带本栈 compose 标签的卷，不碰同机其它产品的。
+#
+# 三条都过了才动手，任何一条不成立就跳过并说清楚为什么——
+# 跳过一次清理的代价是磁盘多占一点，判断错一次的代价是生产数据没了。
+prune_volumes() {
+  local db_container="vx-${PRODUCT_CODE}-postgres-db-${DEPLOY_STAGE:-}"
+  if ! docker inspect --format '{{.State.Running}}' "$db_container" 2>/dev/null | grep -q true; then
+    log "卷 prune 跳过：看不到运行中的 $db_container。"
+    log "  容器被移除（compose down）之后数据卷失去全部引用，此刻清卷会连数据一起删。"
+    return 0
+  fi
+
+  local volume in_use
+  for volume in "${PROTECTED_VOLUMES[@]}"; do
+    in_use="$(docker ps -q --filter "volume=${volume}" | head -1)"
+    if [ -z "$in_use" ]; then
+      log "卷 prune 跳过：受保护的卷 ${volume} 没有被任何运行中的容器引用。"
+      log "  这与「栈在跑」矛盾，说明状态不是预期的那样——不在不确定的状态下删东西。"
+      return 0
+    fi
+  done
+
+  # 三个参数各有各的作用，少一个就变成另一件事：
+  #   --all    Docker 23+ 起 `volume prune` **默认只删匿名卷**，具名的孤儿卷
+  #            要它才删。不加的表现是永远「reclaimed 0B」——看起来在跑，
+  #            实际什么都没做。这是实测出来的，不是读文档读来的。
+  #   --filter 把范围限死在本栈自己的卷上，不碰同机其它产品的。
+  #   -f       非交互。
+  # prune 本身只删没有容器引用的卷，与上面三条守卫叠起来。
+  local reclaimed
+  reclaimed="$(docker volume prune -f --all     --filter "label=com.docker.compose.project=${PRODUCT_CODE}" 2>&1     | grep -i "reclaimed" || true)"
+  log "卷 prune 完成（${reclaimed:-无可回收}）"
 }
 
 cmd_all() {
