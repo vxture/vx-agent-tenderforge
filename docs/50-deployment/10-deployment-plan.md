@@ -37,9 +37,11 @@
 `TENDERFORGE_PROVISION_WEBHOOK_SECRET_NEXT` `UPLOAD_MAX_FILE_SIZE`
 `UPLOAD_MAX_REQUEST_SIZE` `USAGE_FLUSH_BATCH_SIZE` `USAGE_FLUSH_INTERVAL_MS`
 
-`.env.example` 里还有一个**必须删掉**的东西：`WEB_PORT=5274` 与
-`CORS_ALLOWED_ORIGINS=http://124.222.17.146:5274`。端口由组织端口登记表分配，
-仓内restate 一个端口就成了第二个来源，而第二个来源就是会过期的那个。
+~~`.env.example` 里的 `WEB_PORT=5274` 与 `CORS_ALLOWED_ORIGINS=http://124.222.17.146:5274`
+必须删掉~~ —— 2026-09-10 已删，现为 `APP_PUBLISH_PORT=4050` 与
+`CORS_ALLOWED_ORIGINS=https://tenderforge.vxture.com`。端口由组织端口登记表分配，
+仓内 restate 一个端口就成了第二个来源，而第二个来源就是会过期的那个——所以留在
+`.env.example` 里的那个值只能是登记表里的号本身。
 
 ---
 
@@ -297,7 +299,8 @@ SDK 与 server 是**两条独立的版本线**——1.38 和 1.27 不是同一�
 「差了 11 个版本」这回事。server 1.27.2 距当时最新的 1.29.x 只差两个小版本。
 
 单元测试覆盖不到这一层（集成测试被 `-DskipITs` 跳过），所以在本地整栈上
-实跑了一遍：换掉 api 与 worker 的镜像，**Temporal / MySQL / AI 都不动**，
+实跑了一遍：换掉 api 与 worker 的镜像，**Temporal / 数据库 / AI 都不动**（当时库层
+还是 MySQL，迁 PostgreSQL 在其后），
 仍然是原来那个 1.27.2 的服务端。
 
 先确认镜像里装的确实是新版（防构建缓存骗人）：`temporal-sdk 1.38.0`、
@@ -339,6 +342,9 @@ WorkflowExecutionStarted → WorkflowTaskScheduled/Started/Completed
 
 ## 5. 待决策清单
 
+下面 1–5 是当初提出的原始清单，**结论在其后的删除线条目里**；
+除「是否要 beta 环境」外均已落定。
+
 1. **端口** — 必须向组织端口登记表申请。仓内现有的 `5274` 是遗留值，要删。
 2. **DB 结构变更路径** — §2.2 三选一，建议方案 3。
 3. **部署主机与栈根目录** — 基准产品在 `vx-worker-02` / `/srv/md0/vxtpl`；
@@ -351,8 +357,9 @@ WorkflowExecutionStarted → WorkflowTaskScheduled/Started/Completed
 ~~**Temporal SDK 1.38.0 与服务端 1.27.2 的配合**~~ —— 已在本地整栈实测，见 §4c。
 ~~**端口**~~ —— owner 2026-09-10 分配 4050/4051（L3 #5），两张登记册已改。
 ~~**部署主机与栈根目录**~~ —— worker-02 / `/srv/md0/tenderforge`。
-~~**DB 结构变更路径**~~ —— owner 决定本轮不动，已登记为 TD-001
-（详细设计 §13b），连同 TD-002/003 一起等库层整改排期。
+~~**DB 结构变更路径**~~ —— 2026-09-10 已做完：迁 PostgreSQL 18、DDL 单一权威
+（`deploy/database/ddl/`）、受限服务角色与列级写入白名单，结构变更走独立授权的
+`db-init` 通道。TD-001/002/003 三条偏离同日销号（详细设计 §13b）。
 ~~**三镜像的 tag 与推送策略**~~ —— 同 SHA 同批，`build.yml` 已实现并登记为 TD-004。
 
 **仍未决**：是否要 beta 环境。端口子块里 4051 已经为它预留，开不开是资源决定。

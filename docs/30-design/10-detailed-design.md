@@ -1,11 +1,11 @@
-# TenderAgent 详细设计
+# 标书编写智能体（TenderForge）详细设计
 
 > 本文是当前系统的唯一产品与技术事实源，内容对应仓库现行代码与
 > `deploy/database/ddl/` 定义的数据库结构。本文不记录开发历史、提案过程或未实现规划。
 
 ## 1. 产品范围
 
-TenderAgent 服务于投标文件编制场景，当前只支持“按招标评分点写标书”这一编写方法。
+标书编写智能体服务于投标文件编制场景，当前只支持“按招标评分点写标书”这一编写方法。
 用户上传招标文件后，系统抽取项目概述和技术评分要求，经人工确认冻结，再生成可编辑的
 三级目录和长篇正文，完成一致性审查、冻结、排版和 DOCX 下载。
 
@@ -28,48 +28,52 @@ TenderAgent 服务于投标文件编制场景，当前只支持“按招标评�
 Browser
   -> Nginx / React Web
       -> Java Business API
-          -> MySQL 8.4
-          -> private-files 私有文件卷
-          -> Temporal 1.27
+          -> PostgreSQL 18
+          -> ${DATA_DIR}/private 私有文件目录（绑定挂载到阵列）
+          -> Temporal 1.27.2
               -> Java Worker
                   -> Python AI Gateway
-                      -> OpenAI-compatible model API
-                          -> DashScope hosted DeepSeek or direct DeepSeek
+                      -> Atlas（唯一模型出口）
+                          -> OpenAI-compatible /chat/completions
                       -> LibreOffice / Tesseract / PyMuPDF / python-docx
 ```
 
-| 组件 | 运行单元 | 端口 | 职责 |
-| --- | --- | --- | --- |
-| Web | `web` | 主机 `0.0.0.0:5274` -> 容器 `80` | SPA、鉴权路由、工作台、同源代理 `/api` |
-| Business API | `api` | 容器 `8081` | REST、认证授权、事务、状态机、文件、审计、工作流提交 |
-| Workflow Worker | `worker` | 无 HTTP 端口 | 执行解读、目录、正文、排版四类 Temporal Activity |
-| AI Gateway | `ai` | 容器 `8000` | 文件解析/OCR、OpenAI-compatible 模型调用、结构化校验、DOCX 与 QA |
-| Database | `mysql` | Compose 内部 `3306` | 业务、会话、任务、审计和 Temporal 数据库 |
-| Temporal | `temporal` / `temporal-ui` | 内部 `7233` / 主机 `127.0.0.1:8233` | 长任务持久化、重试、恢复和运维查看 |
+| 组件 | 服务 | 容器名 | 端口 | 职责 |
+| --- | --- | --- | --- | --- |
+| Web | `web` | `tenderforge-web` | `${APP_PUBLISH_HOST}:${APP_PUBLISH_PORT}` -> 容器 `80` | SPA、鉴权路由、工作台、同源代理 `/api` |
+| Business API | `api` | `tenderforge-api` | 容器 `8081`，不发布 | REST、认证授权、事务、状态机、文件、审计、工作流提交 |
+| Workflow Worker | `worker` | `tenderforge-worker` | 无 HTTP 端口 | 执行解读、目录、正文、排版四类 Temporal Activity |
+| AI Gateway | `ai` | `tenderforge-ai` | 容器 `8000`，不发布 | 文件解析/OCR、模型调用、结构化校验、DOCX 与 QA |
+| Database | `db` | `vx-tenderforge-postgres-db-${DEPLOY_STAGE}` | 容器 `5432`，不发布 | 业务、会话、任务、审计；四个 schema 共 39 张表 |
+| Temporal | `temporal` / `temporal-ui` | 未固定 | 内部 `7233` / 主机 `127.0.0.1:8233` | 长任务持久化、重试、恢复和运维查看 |
 
-生产部署使用 Compose 项目名 `bidagent`，默认生成 `bidagent-web-1`、`bidagent-api-1`、
-`bidagent-ai-1`、`bidagent-worker-1`、`bidagent-mysql-1`、`bidagent-temporal-1` 和
-`bidagent-temporal-ui-1`；数据库初始化期间还会短暂运行
-`bidagent-temporal-db-init-1`。不设置固定 `container_name`，避免阻断 Compose 的扩容、
-替换和滚动重建能力。
+`api` 与 `worker` 共用同一个镜像、不同启动角色（`TEMPORAL_WORKER_ENABLED`），提交方与执行方
+分离但代码同源——两边各编译一份，迟早会对同一个 Activity 的签名产生分歧。
+
+Compose 项目名是 `tenderforge`（`docker-compose.yml` 顶层 `name:`），不再是 `bidagent`。
+数据库容器名带 `${DEPLOY_STAGE}` 后缀，是因为 `db-init` 通道要按名字精确找到它；
+其余四个容器名目前是不带 `vx-` 前缀、不带阶段后缀的形态，与数据库那条不一致，
+**待与组织命名约定一并收敛**。
 
 同机共存时，宿主机端口按以下规则规划：
 
 | 用途 | 宿主机监听 | 暴露策略 |
 | --- | --- | --- |
 | SSH | `0.0.0.0:22` | 保留现状，只允许受控来源访问 |
-| 统一公网入口 | `0.0.0.0:80/443` | 由宿主机 Nginx/Caddy 按域名反向代理 |
-| BidAgent Web | `0.0.0.0:5274` | 当前通过公网 IP 直接访问，避开现有 `5174` |
-| BidAgent Temporal UI | `127.0.0.1:8233` | 仅供运维 SSH 隧道访问，不直接开放公网 |
-| API / AI / MySQL / Temporal | 不发布 | 分别使用 Compose 内部 `8081/8000/3306/7233` |
+| 统一公网入口 | `0.0.0.0:80/443` | 由宿主机反向代理按域名转发 `tenderforge.vxture.com` |
+| 产品 Web | `${APP_PUBLISH_PORT}`，本仓为 `4050` | 取号唯一源是组织端口登记表（L3 行业智能体 #5，子块 4050–4059，prod 4050 / beta 4051）。**仓内只允许出现回退默认值**，加新服务要先去登记表在 4052–4059 占号 |
+| Temporal UI | `127.0.0.1:8233` | 仅供运维 SSH 隧道访问，不直接开放公网 |
+| API / AI / DB / Temporal | 不发布 | 分别使用容器内部 `8081/8000/5432/7233` |
 
-服务器当前的 `deploy` 和 `czghagent-dify` 项目保持独立；BidAgent 不复用它们的容器、
-网络、卷或主机端口。当前临时入口为 `http://124.222.17.146:5274`，对应云防火墙只放行
-TCP 5274。公网 HTTP 不提供传输加密；正式使用必须接入域名和 HTTPS，由反向代理转发至
-Web，并将 `WEB_HOST` 收回 `127.0.0.1`、在 `CORS_ALLOWED_ORIGINS` 中配置实际 HTTPS 域名。
+生产栈跑在 `vx-worker-02`，`stack_root` 为 `/srv/md0/tenderforge`。
+持久化一律走**绑定挂载到阵列**，不用命名卷：`${DATA_DIR}/postgres` -> `/var/lib/postgresql`、
+`${DATA_DIR}/private` -> `/app/data/private`，`DATA_DIR` 默认 `/srv/md0/tenderforge/data`。
+命名卷会把数据放到系统盘上，而这件事在容器里完全看不出来。
+另外 postgres:18 的挂载点是 `/var/lib/postgresql` 而不是旧的 `/var/lib/postgresql/data`——
+沿用旧路径会直接拒绝启动。
 
-浏览器不直接访问 Python、MySQL 或 Temporal。Java 调用 Python 时必须携带
-`X-Internal-Token`；模型密钥通过 Compose 从 `.env` 注入 `ai` 容器。
+浏览器不直接访问 Python、数据库或 Temporal。Java 调用 Python 时必须携带
+`X-Internal-Token`（常量时间比较）；模型密钥通过 Compose 从 `.env` 注入 `ai` 容器。
 
 ### 2.1 平台接入
 
@@ -688,7 +692,8 @@ Atlas 强制要求 `taskId`，缺失即 400，于是主流程全部失败而手�
 - DOC 通过 LibreOffice 转换；DOCX 读取段落和表格；Excel/CSV 保留表格定位。
 - PDF 优先读取文本层，低文本密度页转图片后用 Tesseract OCR，并给出置信度。
 - 解析结果按页、段落、表格等 locator 分段，AI 输出保留 locator 和 excerpt。
-- 业务文件只存于 `FileStorage` 对应的 `private-files` 卷；数据库对象键不返回浏览器。
+- 业务文件只存于 `FileStorage` 对应的私有目录（`${DATA_DIR}/private`，绑定挂载到容器
+  `/app/data/private`）；数据库对象键不返回浏览器。
 - 上传限制默认单文件 50 MB、请求 55 MB。
 - 头像和下载必须经过 Bearer 鉴权，Nginx 不直接暴露私有目录。
 
@@ -882,10 +887,10 @@ Java `BidDocumentExporter` 的本地实现用于文档服务关闭时的开发/�
 | --- | --- | --- |
 | `APP_VERSION` | `dev` | 构建溯源，由镜像构建时从 git ref 注入并由 `/api/health` 回显。**不在 `.env` 里手写**——健康检查要报的是实际构建出来的那个，不是谁打进配置的那个 |
 | `DEPLOY_STAGE` | `local` | 部署阶段。为 `production` 时任何 mock 实现必须拒绝启动，让降级由守卫拦住而不是靠人记得改配置 |
-| `WEB_HOST` / `WEB_PORT` | Compose 默认 `127.0.0.1` / `5274` | 本地 Docker 入口；服务器 `.env` 使用 `0.0.0.0` / `5274`，本地 Vite 开发使用 `5174` |
+| `APP_PUBLISH_HOST` / `APP_PUBLISH_PORT` | Compose 默认 `127.0.0.1` / `4050` | 产品对外入口。**端口取号唯一源是组织端口登记表**（L3 #5，子块 4050–4059，prod 4050 / beta 4051）；这里出现的只是回退默认值，必须与登记表逐字一致。本地 Vite 开发使用 `5174` |
 | `TEMPORAL_UI_HOST` / `TEMPORAL_UI_PORT` | `127.0.0.1` / `8233` | Temporal UI 运维入口，不开放公网 |
 | `AUTH_SESSION_HOURS` | `12` | 会话时长 |
-| `CORS_ALLOWED_ORIGINS` | 当前 `http://124.222.17.146:5274` | Java CORS 白名单；正式生产改为实际 HTTPS 域名 |
+| `CORS_ALLOWED_ORIGINS` | `https://tenderforge.vxture.com` | Java CORS 白名单，逗号分隔。必须与对外域名逐字一致，否则浏览器直接被 CORS 挡住 |
 | `AI_PROVIDER_NAME` | Compose 回退 `DIRECT_DEEPSEEK` | AI 审计标识；百炼托管 DeepSeek 使用 `DASHSCOPE_DEEPSEEK` |
 | `AI_MODEL_BASE_URL` | 提供方决定 | OpenAI-compatible 根地址，不包含 `/chat/completions` |
 | `AI_MODEL_REQUEST_DIALECT` | `deepseek` | `deepseek`、`dashscope` 或 `openai`，控制厂商专用思考参数 |
@@ -906,7 +911,7 @@ Java `BidDocumentExporter` 的本地实现用于文档服务关闭时的开发/�
 | `DOCUMENT_SERVICE_ENABLED` | Compose `true` | 是否使用 Python 排版服务 |
 
 模型参数和 API Key 均位于 `.env`，该文件被 Git 和 Docker build context 忽略。Compose
-仅把 `AI_MODEL_API_KEY` 注入 `ai` 服务，不注入 Java、Web、MySQL 或 Temporal。Key 不进入镜像
+仅把 `AI_MODEL_API_KEY` 注入 `ai` 服务，不注入 Java、Web、数据库或 Temporal。Key 不进入镜像
 层和应用日志，但会出现在容器运行环境中，具备 Docker 管理权限的人员可通过容器检查命令读取。
 环境变量为空时，Python 返回 `AI_PROVIDER_NOT_CONFIGURED`，Compose readiness 失败。
 
@@ -989,8 +994,8 @@ Spring 的 `RestClient` 把读超时包成普通的 `RestClientException`，
   输出、reasoning 和缓存命中 Token 仍写入失败尝试，避免成本审计只统计成功调用。
 - 单元超出字符预算只记录 `OVER_BUDGET` 和事件，不进入失败或重试；系统不执行独立的全文
   压缩调用。排版 QA 失败也不删除已生成正文和章节版本，用户可在正文页修订后重新排版。
-- MySQL 和私有文件是必须一起备份的一致性资产；仅恢复数据库而缺失 `private-files` 会造成
-  源文件和导出不可读。
+- 数据库和私有文件是必须一起备份的一致性资产；仅恢复数据库而缺失 `${DATA_DIR}/private`
+  会造成源文件和导出不可读。
 
 ## 13b. 已登记的标准偏离
 
