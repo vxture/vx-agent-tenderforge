@@ -104,12 +104,8 @@ def tag_ruleset_problems() -> list[str]:
     return problems
 
 
-def main() -> int:
-    if not RULESET.exists():
-        print(f"!! 找不到 {RULESET.relative_to(ROOT)}")
-        return 1
-    ruleset = json.loads(RULESET.read_text(encoding="utf-8"))
-
+def branch_ruleset_problems(ruleset: dict) -> list[str]:
+    """main 分支保护本身：强度、绕过口子、规则齐备、审批数。"""
     problems: list[str] = []
 
     if ruleset.get("enforcement") != "active":
@@ -125,41 +121,63 @@ def main() -> int:
             "保护就只对没有那个口子的人成立"
         )
 
-    rule_types = {rule.get("type") for rule in ruleset.get("rules", [])}
-    missing_rules = REQUIRED_RULE_TYPES - rule_types
+    missing_rules = REQUIRED_RULE_TYPES - {rule.get("type") for rule in ruleset.get("rules", [])}
     if missing_rules:
         problems.append(f"缺少规则：{', '.join(sorted(missing_rules))}")
 
-    declared_checks: set[str] = set()
+    for rule in ruleset.get("rules", []):
+        if rule.get("type") != "pull_request":
+            continue
+        approvals = rule.get("parameters", {}).get("required_approving_review_count", 0)
+        if approvals < MIN_APPROVALS:
+            problems.append(
+                f"required_approving_review_count 是 {approvals}——"
+                "强制走 PR 却零审批即可合并，作者自己就能合掉自己的改动"
+            )
+
+    return problems
+
+
+def declared_status_checks(ruleset: dict) -> set[str]:
     for rule in ruleset.get("rules", []):
         if rule.get("type") == "required_status_checks":
-            declared_checks = {
+            return {
                 check["context"]
                 for check in rule.get("parameters", {}).get("required_status_checks", [])
             }
+    return set()
 
-    missing_checks = REQUIRED_CHECKS - declared_checks
-    if missing_checks:
-        problems.append(f"必需检查被摘掉：{', '.join(sorted(missing_checks))}")
 
-    for rule in ruleset.get("rules", []):
-        if rule.get("type") == "pull_request":
-            approvals = rule.get("parameters", {}).get("required_approving_review_count", 0)
-            if approvals < MIN_APPROVALS:
-                problems.append(
-                    f"required_approving_review_count 是 {approvals}——"
-                    "强制走 PR 却零审批即可合并，作者自己就能合掉自己的改动"
-                )
+def status_check_problems(declared: set[str]) -> list[str]:
+    """必需检查既不能被摘掉，也不能要求一个不存在的作业。"""
+    problems: list[str] = []
 
-    problems.extend(tag_ruleset_problems())
+    missing = REQUIRED_CHECKS - declared
+    if missing:
+        problems.append(f"必需检查被摘掉：{', '.join(sorted(missing))}")
 
-    jobs = workflow_job_names()
-    phantom = declared_checks - jobs
+    phantom = declared - workflow_job_names()
     if phantom:
         problems.append(
             f"ruleset 要求了工作流里不存在的检查：{', '.join(sorted(phantom))}"
             "——PR 会永远等一个不会到来的绿灯"
         )
+
+    return problems
+
+
+def main() -> int:
+    if not RULESET.exists():
+        print(f"!! 找不到 {RULESET.relative_to(ROOT)}")
+        return 1
+    ruleset = json.loads(RULESET.read_text(encoding="utf-8"))
+    declared = declared_status_checks(ruleset)
+
+    problems = (
+        branch_ruleset_problems(ruleset)
+        + status_check_problems(declared)
+        + tag_ruleset_problems()
+    )
 
     if problems:
         print("!! 分支保护配置有问题：")
@@ -168,7 +186,7 @@ def main() -> int:
         return 1
 
     print(
-        f"分支保护完好：{len(declared_checks)} 个必需检查全部存在于工作流中，"
+        f"分支保护完好：{len(declared)} 个必需检查全部存在于工作流中，"
         f"无绕过项，enforcement=active，合并需 {MIN_APPROVALS} 个审批；"
         "tag 规则集覆盖 refs/tags/v*，仅组织管理员可建发布 tag。"
     )

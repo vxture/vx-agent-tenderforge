@@ -56,6 +56,10 @@ jobs:
       # 那是三种可能状态里最坏的一种。
       OSV_SCANNER_VERSION: "2.4.0"
       CYCLONEDX_PLUGIN_VERSION: "2.9.1"
+      # uv 解析出来的那份 requirements.txt 就是扫描器要扫的东西。不钉版本意味着
+      # 「今天扫的依赖树」与「昨天扫的依赖树」可能由两个不同的解析器算出来，
+      # 而这个差异不会体现在任何一份报告里。
+      UV_VERSION: "0.12.12"
       ISSUE_TITLE: "sca-watch: main 上带着一个已知漏洞"
 
     steps:
@@ -91,7 +95,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -m pip install --quiet --disable-pip-version-check uv
+          python -m pip install --quiet --disable-pip-version-check "uv==${UV_VERSION}"
           mkdir -p target
           python -m uv pip compile requirements.txt \
             --python-version 3.12 \
