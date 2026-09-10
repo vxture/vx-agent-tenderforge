@@ -9,6 +9,17 @@ ARG NPM_REGISTRY="https://registry.npmjs.org"
 WORKDIR /workspace
 RUN corepack enable
 COPY frontend/project-name-web/package.json frontend/project-name-web/pnpm-lock.yaml frontend/project-name-web/pnpm-workspace.yaml ./
+# 设计系统**在构建时取最新**（`pnpm update --latest`），其余依赖仍由 lockfile 钉死。
+#
+# 只放开这一个，而不是整体去掉 --frozen-lockfile：后者会让每个 npm 包都可能漂移，
+# 同一个提交两次构建产出不同镜像，排查时无从知道漂的是哪一个。这里的取舍是显式的——
+# DS 由本组织自己发布，坏版本能立刻撤；第三方包不是。
+#
+# 代价仍然存在且必须知道：DS 发一个坏版本会不经任何代码改动进入下一次构建。
+# 发车前看一眼 DS 的发布记录，比事后从前端白屏往回查便宜得多。
+#
+# 注释写在 RUN 之外而不是续行之间：夹在 `\` 中间的注释行能不能被正确剥掉，
+# 依赖解析器行为，而这一条错了的表现是构建命令被拦腰截断。
 RUN --mount=type=secret,id=github_packages_token,required=true \
     --mount=type=cache,target=/root/.local/share/pnpm/store \
     export NPM_CONFIG_USERCONFIG=/tmp/npmrc \
@@ -16,6 +27,7 @@ RUN --mount=type=secret,id=github_packages_token,required=true \
     && pnpm config set "@vxture:registry" https://npm.pkg.github.com \
     && pnpm config set "//npm.pkg.github.com/:_authToken" "$(cat /run/secrets/github_packages_token)" \
     && pnpm install --frozen-lockfile \
+    && pnpm update --latest @vxture/design-system \
     && rm -f /tmp/npmrc
 COPY frontend/project-name-web/ ./
 RUN pnpm build:prod
