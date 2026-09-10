@@ -58,9 +58,20 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
+          # **分支顺序是有载荷的，不是风格。** glob 里 `v*.*.*` 同样匹配
+          # `v0.1.0-beta.1`——把生产那条放在前面，一个 beta tag 会被静默路由到
+          # 生产环境，取到生产的 secret、部署到生产目录，而日志里一切正常。
+          # 所以预发布形态必须先被吃掉。
+          #
+          # 第二条 `v*.*.*-*` 是拒绝而不是兜底：`-rc.1` / `-alpha` 这类形态没有
+          # 对应环境，让它落到生产是同一个事故的另一种写法。宁可在这里红。
           case "$TAG" in
+            v*.*.*-beta.*) environment=beta ;;
+            v*.*.*-*)
+              echo "::error::未知的预发布形态：$TAG。beta 用 vX.Y.Z-beta.N，生产用 vX.Y.Z" >&2
+              exit 1 ;;
             v*.*.*) environment=production ;;
-            *) echo "deploy.yml 被一个不支持的 tag 触发：$TAG" >&2; exit 1 ;;
+            *) echo "::error::deploy.yml 被一个不支持的 tag 触发：$TAG" >&2; exit 1 ;;
           esac
           echo "environment=$environment" >> "$GITHUB_OUTPUT"
           echo "路由：tag=$TAG -> environment=$environment"

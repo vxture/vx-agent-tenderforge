@@ -198,6 +198,12 @@ jobs:
       - name: SCA lockstep guardrail (gate <-> idle-trunk watcher)
         run: python scripts/guardrails/check_sca_lockstep.py
 
+      # tag 路由决定这次部署取哪套 secret、落到哪台机器的哪个目录。glob 里
+      # `v*.*.*` 同样匹配 `v0.1.0-beta.1`，分支顺序排错会把 beta 静默发到生产。
+      # 这个护栏把 deploy.yml 里那段 case 原样抽出来真跑，不是另抄一份来测。
+      - name: Deploy routing guardrail (tag -> environment)
+        run: python scripts/guardrails/check_deploy_routing.py
+
       - name: Python lint (ruff)
         working-directory: backend/project-name-python
         run: |

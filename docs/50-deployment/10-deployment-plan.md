@@ -362,7 +362,23 @@ WorkflowExecutionStarted → WorkflowTaskScheduled/Started/Completed
 `db-init` 通道。TD-001/002/003 三条偏离同日销号（详细设计 §13b）。
 ~~**三镜像的 tag 与推送策略**~~ —— 同 SHA 同批，`build.yml` 已实现并登记为 TD-004。
 
-**仍未决**：是否要 beta 环境。端口子块里 4051 已经为它预留，开不开是资源决定。
+~~**仍未决**：是否要 beta 环境~~ —— 2026-09-10 已定：**开**。
+
+beta 与生产同机（vx-worker-02），但**落在另一块阵列**：`/srv/md1/tenderforge`，
+生产在 `/srv/md0/tenderforge`。两者的 `DEPLOY_DIR` 都是环境级 secret 显式给出，
+不再依赖工作流里的回退值——「部署到哪」写在配置里，不写在代码里。
+
+| | production | beta |
+| --- | --- | --- |
+| 目录 | `/srv/md0/tenderforge` | `/srv/md1/tenderforge` |
+| 发布端口 | 4050 | 4051 |
+| Temporal UI | 8233 | 8234 |
+| tag 形态 | `vX.Y.Z` | `vX.Y.Z-beta.N` |
+| 部署审批 | 必需审批人 | 无 |
+
+Temporal UI 端口必须错开：两个栈同机跑，8233 撞了第二个栈直接起不来。
+库口令、内部令牌与初始账号口令两边各自独立——共用的话，beta 泄一次等于生产也泄了。
+`DATA_DIR` 不单独设：`deploy.sh` 里它默认取 `$REPO_DIR/data`，因此自动跟着 `DEPLOY_DIR` 走。
 
 ---
 
