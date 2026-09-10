@@ -188,6 +188,12 @@ jobs:
       - name: Column lock guardrail (whitelist <-> real UPDATE statements)
         run: python scripts/guardrails/check_column_locks.py
 
+      # 闸门（ci 的 audit）与巡检器（sca-watch）必须扫同一个东西。巡检器用更旧的
+      # 扫描器会在闸门要拦的发现上报「干净」——假绿色比没有巡检更坏，因为它让人
+      # 停止怀疑。同时断言两者都不产生那五个必需检查上下文。
+      - name: SCA lockstep guardrail (gate <-> idle-trunk watcher)
+        run: python scripts/guardrails/check_sca_lockstep.py
+
       - name: Python lint (ruff)
         working-directory: backend/project-name-python
         run: |

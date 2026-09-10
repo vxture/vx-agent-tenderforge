@@ -28,10 +28,19 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 RULESET = ROOT / "docs" / "50-deployment" / "rebuild" / "main-ruleset.json"
+TAG_RULESET = ROOT / "docs" / "50-deployment" / "rebuild" / "tag-ruleset.json"
 WORKFLOWS = ROOT / ".github" / "workflows"
 
 REQUIRED_CHECKS = {"quality-gate", "build", "test-coverage", "audit", "gitleaks"}
 REQUIRED_RULE_TYPES = {"deletion", "non_fast_forward", "required_status_checks"}
+
+#: tag 规则集的必需规则。`creation` 是其中最要紧的一条：CD 由 `v*.*.*` 的推送触发，
+#: 所以「谁能建这个 tag」就是整条发布链的信任根。不限制它，分支保护做得再严也只是
+#: 拦住了一条路——另一条路直通生产。
+TAG_REQUIRED_RULE_TYPES = {"creation", "update", "deletion", "non_fast_forward"}
+
+#: 合并 main 需要的最少审批数。0 意味着「强制走 PR」只是形式：作者自己就能合。
+MIN_APPROVALS = 1
 
 
 def workflow_job_names() -> set[str]:
@@ -46,6 +55,53 @@ def workflow_job_names() -> set[str]:
         # 作业级的 `    name: x`（六格缩进以内、位于 jobs: 之下）。
         names.update(re.findall(r"^    name:\s*([A-Za-z0-9._-]+)\s*$", text, re.M))
     return names
+
+
+def tag_ruleset_problems() -> list[str]:
+    """tag 规则集：CD 的信任根。
+
+    分支保护管的是「代码怎么进 main」，tag 规则集管的是「谁能把 main 上的某个提交
+    变成一次生产发布」。只做前者不做后者，等于门锁了、窗开着——`deploy.yml` 触发于
+    `v*.*.*`，任何能推 tag 的人都能直接发车。
+    """
+    if not TAG_RULESET.exists():
+        return [
+            f"找不到 {TAG_RULESET.relative_to(ROOT)}——tag 推送没有任何限制，"
+            "而推 tag 就是触发生产部署"
+        ]
+
+    problems: list[str] = []
+    ruleset = json.loads(TAG_RULESET.read_text(encoding="utf-8"))
+
+    if ruleset.get("target") != "tag":
+        problems.append(f"tag-ruleset.json 的 target 是 {ruleset.get('target')!r}，不是 tag")
+    if ruleset.get("enforcement") != "active":
+        problems.append(f"tag 规则集的 enforcement 是 {ruleset.get('enforcement')!r}，不是 active")
+
+    includes = ruleset.get("conditions", {}).get("ref_name", {}).get("include", [])
+    if "refs/tags/v*" not in includes:
+        problems.append(
+            f"tag 规则集没有覆盖 refs/tags/v*（当前 {includes}）——"
+            "deploy.yml 正是由这个形状的 tag 触发的"
+        )
+
+    missing = TAG_REQUIRED_RULE_TYPES - {rule.get("type") for rule in ruleset.get("rules", [])}
+    if missing:
+        problems.append(f"tag 规则集缺少规则：{', '.join(sorted(missing))}")
+
+    actors = {actor.get("actor_type") for actor in ruleset.get("bypass_actors") or []}
+    if not actors:
+        problems.append(
+            "tag 规则集的 bypass_actors 为空——连组织管理员都建不了发布 tag，CD 无法发车。"
+            "这里与分支规则集不同：分支那边空名单是对的，tag 这边需要恰好一个能发布的角色"
+        )
+    elif actors - {"OrganizationAdmin"}:
+        problems.append(
+            f"tag 规则集的绕过角色超出组织管理员：{', '.join(sorted(actors))}——"
+            "能建发布 tag 的人就是能发生产的人"
+        )
+
+    return problems
 
 
 def main() -> int:
@@ -86,6 +142,17 @@ def main() -> int:
     if missing_checks:
         problems.append(f"必需检查被摘掉：{', '.join(sorted(missing_checks))}")
 
+    for rule in ruleset.get("rules", []):
+        if rule.get("type") == "pull_request":
+            approvals = rule.get("parameters", {}).get("required_approving_review_count", 0)
+            if approvals < MIN_APPROVALS:
+                problems.append(
+                    f"required_approving_review_count 是 {approvals}——"
+                    "强制走 PR 却零审批即可合并，作者自己就能合掉自己的改动"
+                )
+
+    problems.extend(tag_ruleset_problems())
+
     jobs = workflow_job_names()
     phantom = declared_checks - jobs
     if phantom:
@@ -102,7 +169,8 @@ def main() -> int:
 
     print(
         f"分支保护完好：{len(declared_checks)} 个必需检查全部存在于工作流中，"
-        "无绕过项，enforcement=active。"
+        f"无绕过项，enforcement=active，合并需 {MIN_APPROVALS} 个审批；"
+        "tag 规则集覆盖 refs/tags/v*，仅组织管理员可建发布 tag。"
     )
     return 0
 
