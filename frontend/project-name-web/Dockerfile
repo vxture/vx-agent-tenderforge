@@ -2,13 +2,17 @@
 # MODEL: gpt-5
 # DATE: 2026-07-29
 FROM node:22-alpine AS build
+# 同 ai 镜像：registry 可选，**默认走上游**。写死成 npmmirror 是「在中国构建」
+# 的优化，而构建实际发生在 GitHub 的 runner 上。中国本地构建传：
+#   --build-arg NPM_REGISTRY=https://registry.npmmirror.com
+ARG NPM_REGISTRY="https://registry.npmjs.org"
 WORKDIR /workspace
 RUN corepack enable
 COPY frontend/project-name-web/package.json frontend/project-name-web/pnpm-lock.yaml frontend/project-name-web/pnpm-workspace.yaml ./
 RUN --mount=type=secret,id=github_packages_token,required=true \
     --mount=type=cache,target=/root/.local/share/pnpm/store \
     export NPM_CONFIG_USERCONFIG=/tmp/npmrc \
-    && pnpm config set registry https://registry.npmmirror.com \
+    && pnpm config set registry "$NPM_REGISTRY" \
     && pnpm config set "@vxture:registry" https://npm.pkg.github.com \
     && pnpm config set "//npm.pkg.github.com/:_authToken" "$(cat /run/secrets/github_packages_token)" \
     && pnpm install --frozen-lockfile \

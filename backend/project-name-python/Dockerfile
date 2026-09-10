@@ -22,10 +22,25 @@ ENV APP_VERSION=${APP_VERSION}
 ENV GIT_SHA=${GIT_SHA}
 ENV BUILD_TIME=${BUILD_TIME}
 ENV DEPLOY_STAGE=${DEPLOY_STAGE}
-RUN sed -i \
-        -e 's|http://deb.debian.org/debian-security|https://mirrors.aliyun.com/debian-security|g' \
-        -e 's|http://deb.debian.org/debian|https://mirrors.aliyun.com/debian|g' \
-        /etc/apt/sources.list.d/debian.sources \
+# 镜像源可选，**默认走上游**。这两处一度写死成阿里云——那是「在中国构建」的
+# 优化，但镜像是在 GitHub 的 runner 上构建的（美/欧），从那儿拉阿里云恰好是
+# 最慢的方向。一次 CI 构建因此在 apt 上耗掉 23 分钟、被 30 分钟超时掐断，而
+# 失败显示成 cancelled，从结论上看不出是网络。
+#
+# 在中国本地构建时按需传入：
+#   --build-arg APT_MIRROR=https://mirrors.aliyun.com
+#   --build-arg PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+ARG APT_MIRROR=""
+ARG PIP_INDEX_URL="https://pypi.org/simple/"
+RUN if [ -n "$APT_MIRROR" ]; then \
+        # 用 -E 与协议无关的 [a-z]+:// 匹配：基础镜像里那份 sources 用的是明文
+        # http，而替换目标带自己的 scheme。写死 http:// 既多一个假设，也会被
+        # 扫描器当成「这里在用明文协议」——它看不出那是被替换掉的那一侧。
+        sed -i -E \
+            -e "s|[a-z]+://deb[.]debian[.]org/debian-security|${APT_MIRROR}/debian-security|g" \
+            -e "s|[a-z]+://deb[.]debian[.]org/debian|${APT_MIRROR}/debian|g" \
+            /etc/apt/sources.list.d/debian.sources; \
+    fi \
     && apt-get -o Acquire::Retries=5 update \
     && apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
         antiword fonts-noto-cjk libreoffice-writer poppler-utils \
@@ -38,7 +53,7 @@ RUN pip install \
         --no-cache-dir \
         --retries 5 \
         --timeout 120 \
-        --index-url https://mirrors.aliyun.com/pypi/simple/ \
+        --index-url "$PIP_INDEX_URL" \
         -r requirements.txt
 COPY backend/project-name-python/fontconfig/local.conf /etc/fonts/local.conf
 RUN fc-cache -f \
