@@ -39,8 +39,20 @@ REQUIRED_RULE_TYPES = {"deletion", "non_fast_forward", "required_status_checks"}
 #: 拦住了一条路——另一条路直通生产。
 TAG_REQUIRED_RULE_TYPES = {"creation", "update", "deletion", "non_fast_forward"}
 
-#: 合并 main 需要的最少审批数。0 意味着「强制走 PR」只是形式：作者自己就能合。
-MIN_APPROVALS = 1
+#: **审批数是 0，这是有意的，不是漏配。**
+#:
+#: 组织是单人所有，而 GitHub 不允许作者审批自己的 PR。把这个数提到 1，在没有第二个
+#: 账号的情况下不是「更严」，是 main 从此合不进任何东西——包括修这条配置的那个 PR。
+#:
+#: 人工闸门不在这一层，在 **production 环境的部署审批**（required_reviewers，
+#: prevent_self_review=false，owner 本人点）。那一层允许本人批，也确实在用。
+#: 已经有部署审批的前提下，再要求 PR 审批不增加任何保证，只增加一次自锁。
+#:
+#: 组织内六个有分支规则集的仓（含基准 vxtpl）审批数全是 0，本仓与之一致。
+#: 有了第二个审批账号之后再提到 1，那时它才开始表达一件真事。
+#:
+#: 这里守的因此不是审批数，而是**`pull_request` 规则本身必须在**——
+#: 它没了，直接推 main 就成立了，而那才是真正的回退。
 
 
 def workflow_job_names() -> set[str]:
@@ -125,15 +137,11 @@ def branch_ruleset_problems(ruleset: dict) -> list[str]:
     if missing_rules:
         problems.append(f"缺少规则：{', '.join(sorted(missing_rules))}")
 
-    for rule in ruleset.get("rules", []):
-        if rule.get("type") != "pull_request":
-            continue
-        approvals = rule.get("parameters", {}).get("required_approving_review_count", 0)
-        if approvals < MIN_APPROVALS:
-            problems.append(
-                f"required_approving_review_count 是 {approvals}——"
-                "强制走 PR 却零审批即可合并，作者自己就能合掉自己的改动"
-            )
+    if not any(rule.get("type") == "pull_request" for rule in ruleset.get("rules", [])):
+        problems.append(
+            "pull_request 规则不见了——直接推 main 就成立了。"
+            "审批数是 0 是有意的（见 MIN_APPROVALS 处的说明），但「必须走 PR」这件事不是"
+        )
 
     return problems
 
@@ -187,7 +195,7 @@ def main() -> int:
 
     print(
         f"分支保护完好：{len(declared)} 个必需检查全部存在于工作流中，"
-        f"无绕过项，enforcement=active，合并需 {MIN_APPROVALS} 个审批；"
+        "无绕过项，enforcement=active，强制走 PR（审批数 0 为单人组织下的显式选择）；"
         "tag 规则集覆盖 refs/tags/v*，仅组织管理员可建发布 tag。"
     )
     return 0
