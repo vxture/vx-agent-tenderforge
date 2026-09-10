@@ -97,32 +97,66 @@ class EntitlementContractTest {
                 .as("连信封都没有时更要 fail-closed").isEmpty();
     }
 
+    /**
+     * 平台五档<strong>逐个</strong>被认得，且当前五行内容相同。
+     *
+     * <p>「上架四个套餐」与「认全五个档位」是两件事。商务上卖四个，不等于平台
+     * 不会下发第五个；它一旦发来而表里没有，就会掉进未知档——一个付费最高的
+     * 客户拿到最低的能力，而且不报错。
+     *
+     * <p>这条断言逐档写死而不是遍历 {@code knownTiers()}：遍历会让「表里少了一档」
+     * 与「测试也少了一档」同时发生而依然全绿——测试跟着被测对象一起错，是这类
+     * 映射表最典型的失效方式。
+     */
     @Test
-    void givesTheFreeTierEverythingExceptReview() {
-        assertThat(BidCapability.of(entitlement("free", false)))
-                .containsExactlyInAnyOrder(
-                        BidCapability.BID_AUTHORING, BidCapability.AI_GENERATION,
-                        BidCapability.DOCUMENT_EXPORT, BidCapability.ASSET_LIBRARY)
-                .doesNotContain(BidCapability.CONSISTENCY_REVIEW);
+    void recognisesAllFivePlatformTiers() {
+        for (String tier : new String[] {"free", "starter", "pro", "business", "enterprise"}) {
+            assertThat(BidCapability.of(entitlement(tier, false)))
+                    .as("档位 %s 应当拿到全量能力", tier)
+                    .containsExactlyInAnyOrder(BidCapability.values());
+            assertThat(BidCapability.isKnownTier(tier))
+                    .as("档位 %s 必须被认得", tier).isTrue();
+        }
+        assertThat(BidCapability.knownTiers())
+                .as("平台值域是五个，少一个就有人会掉进未知档").hasSize(5);
     }
 
     /**
-     * 未知档位按<strong>已知的最保守方式</strong>处理，并且被标记出来。
+     * 未知档位 <strong>fail-closed 到空集</strong>，不是落到某一档上。
      *
-     * <p>通则说「未知即降级」。反过来（未知给全权限）意味着平台加一档、
-     * 或者有人手滑写错一个字母，就把完整能力发给了不该有的人——而那不会报错。
+     * <p>改之前这里是「未知落在付费集上」——注释写着「未知即降级」，实现却是
+     * 未知即全量。那条路径正是平台加一档、或云端配置写错一个字母会走到的。
      *
-     * <p>本产品当前只有免费档与付费档两种能力集，所以未知档位落在付费集上；
-     * 一旦五档的能力开始分化，这条断言会变成「未知落在最低的那一档」。
-     * 无论如何，{@code tierKnown} 必须为 false，让这件事可被看见。
+     * <p>不落到「最低档」是因为五档当前内容相同，落到最低档等于又给全量。
+     * 空集会让界面立刻显形：产品与平台的档位表已经不同步，此时继续放行任何能力
+     * 都是在猜。
      */
     @Test
-    void marksAnUnknownTierAsUnknownEvenWhileServingIt() {
-        assertThat(BidCapability.isKnownTier("free")).isTrue();
-        assertThat(BidCapability.isKnownTier("FREE"))
-                .as("档位比对不该被大小写绊倒").isTrue();
+    void failsClosedOnAnUnknownTier() {
+        assertThat(BidCapability.of(entitlement("platinum", false)))
+                .as("没见过的档位不该拿到任何能力").isEmpty();
+        assertThat(BidCapability.isKnownTier("platinum")).isFalse();
         assertThat(BidCapability.isKnownTier("enterprise-plus")).isFalse();
         assertThat(BidCapability.isKnownTier(null)).isFalse();
+    }
+
+    /**
+     * 大小写与首尾空白归一，<strong>但不做别名映射</strong>。
+     *
+     * <p>云端配置里多打一个空格、或写成 {@code Pro}，不该让一个付费客户掉进未知档。
+     * 而把 {@code professional} 当成 {@code pro} 是另一回事——那等于产品替平台
+     * 定义值域，而值域不归产品。写错的档位应当显形，不该被产品猜对。
+     */
+    @Test
+    void normalisesCaseAndBlanksButDoesNotInventAliases() {
+        assertThat(BidCapability.of(entitlement("  Pro ", false)))
+                .as("大小写与空白不该把付费客户挡在外面")
+                .containsExactlyInAnyOrder(BidCapability.values());
+        assertThat(BidCapability.isKnownTier("BUSINESS")).isTrue();
+
+        assertThat(BidCapability.of(entitlement("professional", false)))
+                .as("别名不猜：值域归平台").isEmpty();
+        assertThat(BidCapability.isKnownTier("professional")).isFalse();
     }
 
     // ── 转化深链 ────────────────────────────────────────────────────────────
