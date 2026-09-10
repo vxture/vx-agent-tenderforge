@@ -17,7 +17,7 @@
 #      三者必须同 tag——CI 侧已经保证同批构建，这里再断言一次，
 #      因为「拉到两新一旧」的表现是前端调一个后端还没有的接口拿 404，
 #      两侧都不会说版本不匹配。
-#   2. **两个有状态服务**（MySQL 与 Temporal），外加一次性的 temporal-db-init。
+#   2. **两个有状态服务**（PostgreSQL 与 Temporal），外加一次性的 temporal-db-init。
 #      `up -d` 必须让 compose 按 depends_on 的健康条件排序，不能并发糊上去。
 #   3. **验证要探三个**，不是一个。只探 api 的话，ai 挂了在界面上表现为
 #      「点了没反应」，而部署会报成功。
@@ -121,15 +121,52 @@ cmd_start() {
     pull_one "$image" "$tag"
   done
 
-  # 第三方镜像（MySQL / Temporal / temporal-ui）单独拉，失败不致命：
+  # 第三方镜像（Postgres / Temporal / temporal-ui）单独拉，失败不致命：
   # 它们的 tag 是钉死的，本地多半已经有，而拉不到时 `up -d` 会用本地那份。
-  compose pull mysql temporal temporal-ui || true
+  #
+  # **服务名必须存在。** 这里一度写着 `mysql`——库层迁到 Postgres 之后没跟着改。
+  # compose 遇到未知服务会让整条命令失败，而末尾的 `|| true` 把它咽掉，于是
+  # 三个第三方镜像一个都没被预拉；等到 `up -d` 阶段才去拉，任何一次镜像源抖动
+  # 都会直接拖垮整次部署，而日志里只看得到那一次拉取失败。
+  compose pull db temporal temporal-ui || true
 
   # depends_on 里带 condition: service_healthy，所以 compose 会自己排序：
-  # mysql → temporal-db-init（一次性）→ temporal → api → worker/web。
+  # db → temporal-db-init（一次性）→ temporal → api → worker/web。
   # 不要在这里手动分批起——那等于把顺序写第二遍，而两份顺序迟早会分叉。
-  compose up -d
+  if ! compose up -d; then
+    dump_failure_context
+    return 1
+  fi
   log "已启动（tag=${tag}）"
+}
+
+# `up -d` 失败时，把现场打进 CI 日志。
+#
+# 不这么做的代价已经付过一次：一次部署倒在 `dependency failed to start:
+# container ... is unhealthy`，CI 日志里就这一句。真正的原因（Temporal 的角色
+# 缺 CREATEDB，auto-setup 在建 visibility 库时被拒后退出）是在本地重搭一套
+# Postgres + auto-setup 才看见的。**容器日志留在主机上，而排查的人在 CI 里**，
+# 这中间隔着一次 SSH，也就隔着一次「先去申请权限」。
+dump_failure_context() {
+  log "!! 启动失败，下面是现场"
+  compose ps || true
+  # 只打印没在正常运行的那些：全打会把真正相关的几十行埋进几千行里。
+  local svc state
+  for svc in $(compose config --services 2>/dev/null); do
+    state="$(compose ps --format '{{.State}}' "$svc" 2>/dev/null | head -1)"
+    case "$state" in
+      running|"") continue ;;
+    esac
+    log "--- $svc（state=$state）最后 80 行 ---"
+    compose logs --no-color --tail=80 "$svc" 2>&1 || true
+  done
+  # 健康检查失败但仍在 running 的容器也要看——unhealthy 的状态是 running。
+  for svc in $(compose config --services 2>/dev/null); do
+    if compose ps --format '{{.Status}}' "$svc" 2>/dev/null | grep -q 'unhealthy'; then
+      log "--- $svc（unhealthy）最后 80 行 ---"
+      compose logs --no-color --tail=80 "$svc" 2>&1 || true
+    fi
+  done
 }
 
 # 探一个容器内的 liveness 端点。
