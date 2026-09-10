@@ -53,14 +53,20 @@ published_port() {
     | tail -1 | grep -oE '[0-9]+' | tail -1 || true
 }
 
-# 持久数据。它在 REPO_DIR **里面**，但 rsync 那一步用 --exclude='data'
-# 把它排除在 --delete 之外——容器写出来的数据是 root 所有，让 rsync 碰它
-# 会在下一次部署时以权限错误失败，而那个错误信息离原因很远。
+# 持久数据的位置。**compose 里的两个挂载点都 bind 到这里**，不是具名卷——
+# 具名卷落在 /var/lib/docker/volumes（系统盘），而这台机器的持久化位置是
+# md0 阵列上的 <stack_root>/data。用具名卷的表现不是报错，是数据默默写到了
+# 错误的盘上，直到系统盘满或换机时才发现。
 #
-# 这个值显式给，不从 REPO_DIR 推导。推导版本（dirname $REPO_DIR）在
-# REPO_DIR 是 /srv/md0/tenderforge 时会指向 /srv/md0/data——那是所有产品
-# 共用的一层，两个产品的数据会落进同一个目录，而且不会有任何报错。
-DATA_ROOT="${DATA_ROOT:-$REPO_DIR/data}"
+# 它在 REPO_DIR **里面**，rsync 那一步用 --exclude='data' 把它排除在
+# --delete 之外——容器写出来的数据是 root 所有，让 rsync 碰它会在下一次
+# 部署时以权限错误失败，而那个错误信息离原因很远。
+#
+# 显式给，不从 REPO_DIR 推导。推导版本（dirname $REPO_DIR）在 REPO_DIR 是
+# /srv/md0/tenderforge 时会指向 /srv/md0/data——那是所有产品共用的一层，
+# 两个产品的数据会落进同一个目录，而且不会有任何报错。
+DATA_DIR="${DATA_DIR:-$REPO_DIR/data}"
+export DATA_DIR
 
 log() { echo "[deploy] $*"; }
 
@@ -78,8 +84,11 @@ cmd_environment() {
 }
 
 cmd_directories() {
-  mkdir -p "$DATA_ROOT/private"
-  log "数据目录 $DATA_ROOT 就位"
+  # 两个子目录对应 compose 里的两个 bind mount。少建一个的表现是
+  # Docker 替你建一个 root 所有的空目录——容器起得来，但 postgres 会因为
+  # 目录属主不对而拒绝初始化。
+  mkdir -p "$DATA_DIR/postgres" "$DATA_DIR/private"
+  log "数据目录就位：$DATA_DIR（postgres / private）"
 }
 
 # 拉一个镜像：主源失败就走备源，并把备源打上主源的名字，
@@ -171,12 +180,6 @@ cmd_verify() {
   exit 1
 }
 
-# 本栈**自己的**两个具名卷。写死在这里而不是从 compose 解析：
-# 这个清单是「绝对不能删的东西」，它必须是一个读代码就能确认的常量，
-# 而不是一个依赖解析是否成功的推导结果——解析失败时推导出空清单，
-# 而空清单的意思恰好是「什么都可以删」。
-PROTECTED_VOLUMES=("${PRODUCT_CODE}_db-data" "${PRODUCT_CODE}_private-files")
-
 cmd_prune() {
   # 只保留正在跑的那几个镜像。三个镜像每个 tag 一份，累积得比 vxtpl 快三倍。
   # 放在 verify 之后跑（见 cmd_all），所以验证失败的那次不会清任何东西——
@@ -209,50 +212,34 @@ cmd_prune() {
   prune_volumes
 }
 
-# 清掉本栈自己产生的、没有任何容器引用的卷。
+# 清掉本栈自己产生的、没有任何容器引用的 Docker 卷。
 #
-# **这是这个脚本里唯一会不可逆地毁掉数据的动作。** 危险窗口的形状是实测出来的，
-# 不是想当然的：
+# **数据不在这些卷里。** 两个持久化位置都是 bind mount，指向 $DATA_DIR 下的
+# postgres/ 与 private/——bind mount 不是 Docker 卷，`volume prune` 从构造上
+# 就碰不到它们。这是一个结构性的安全性质，比"小心不要删错"强得多。
 #
-#   * `docker compose stop` —— 容器还在，**停止的容器仍然持有卷引用**，
-#     prune 碰不到 db-data。实测确认。
-#   * `docker compose down` —— 容器被移除，卷失去全部引用。此刻跑 prune，
-#     db-data 连同里面的数据一起消失。**实测确认：40.89MB 一次没了。**
+# 所以这里不设一串"动手前先检查"的守卫，而是**断言让这件事安全的那个不变量**：
+# 两个 bind 目录必须存在。它们不存在，说明数据要么还没建、要么已经被改回具名卷
+# ——两种情况下"prune 碰不到数据"这句话都不再成立，此时宁可跳过。
 #
-# 所以守卫防的是「在 down 与下一次 up 之间跑到了这一步」——部署脚本里
-# 完全可能出现（up 失败、或有人手工按顺序跑 down / prune）。三道：
-#
-#   1. 必须能看到数据库容器**在跑**。它不在跑，就说不清现在处在哪个窗口里。
-#   2. 必须逐个确认两个受保护的卷仍被运行中的容器引用。
-#   3. 只删带本栈 compose 标签的卷，不碰同机其它产品的。
-#
-# 三条都过了才动手，任何一条不成立就跳过并说清楚为什么——
-# 跳过一次清理的代价是磁盘多占一点，判断错一次的代价是生产数据没了。
+# 这段的第一版走的是另一条路：具名卷 + 三道运行时守卫。撞出的两件事留在这里，
+# 因为它们与"卷放哪"无关，换成 bind mount 之后仍然成立：
+#   * 停止的容器**仍然持有卷引用**，prune 碰不到它的卷；容器被移除（compose down）
+#     之后才失去引用。实测：down 之后对具名卷 prune，40.89MB 数据一次没了。
+#   * **Docker 23+ 起 `volume prune` 默认只删匿名卷**，具名的要 `--all`。
+#     不加的表现是永远「reclaimed 0B」——看起来在跑，实际什么都没做。
 prune_volumes() {
-  local db_container="vx-${PRODUCT_CODE}-postgres-db-${DEPLOY_STAGE:-}"
-  if ! docker inspect --format '{{.State.Running}}' "$db_container" 2>/dev/null | grep -q true; then
-    log "卷 prune 跳过：看不到运行中的 $db_container。"
-    log "  容器被移除（compose down）之后数据卷失去全部引用，此刻清卷会连数据一起删。"
-    return 0
-  fi
-
-  local volume in_use
-  for volume in "${PROTECTED_VOLUMES[@]}"; do
-    in_use="$(docker ps -q --filter "volume=${volume}" | head -1)"
-    if [ -z "$in_use" ]; then
-      log "卷 prune 跳过：受保护的卷 ${volume} 没有被任何运行中的容器引用。"
-      log "  这与「栈在跑」矛盾，说明状态不是预期的那样——不在不确定的状态下删东西。"
+  local dir
+  for dir in "$DATA_DIR/postgres" "$DATA_DIR/private"; do
+    if [ ! -d "$dir" ]; then
+      log "卷 prune 跳过：$dir 不存在。"
+      log "  持久数据应当在 bind mount 上（prune 碰不到）；它不在，说明前提变了。"
       return 0
     fi
   done
 
-  # 三个参数各有各的作用，少一个就变成另一件事：
-  #   --all    Docker 23+ 起 `volume prune` **默认只删匿名卷**，具名的孤儿卷
-  #            要它才删。不加的表现是永远「reclaimed 0B」——看起来在跑，
-  #            实际什么都没做。这是实测出来的，不是读文档读来的。
-  #   --filter 把范围限死在本栈自己的卷上，不碰同机其它产品的。
-  #   -f       非交互。
-  # prune 本身只删没有容器引用的卷，与上面三条守卫叠起来。
+  # --all：见上面第二条。--filter：把范围限死在本栈自己的卷上，
+  # 不碰同机其它产品的。prune 本身只删没有容器引用的卷。
   local reclaimed
   reclaimed="$(docker volume prune -f --all     --filter "label=com.docker.compose.project=${PRODUCT_CODE}" 2>&1     | grep -i "reclaimed" || true)"
   log "卷 prune 完成（${reclaimed:-无可回收}）"

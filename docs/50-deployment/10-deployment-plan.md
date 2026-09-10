@@ -53,7 +53,7 @@
 | 有状态服务 | Postgres + Redis | **PostgreSQL 18 + Temporal**（含 `auto-setup` 与一次性 `temporal-db-init`） |
 | DB 结构变更 | 独立 `db-init.yml`，**绝不走部署链** | **同左**（2026-09-10 整改完成，见详细设计 §13b） |
 | 构建期密钥 | `NODE_AUTH_TOKEN`（CI 环境变量） | 前端 Dockerfile 用 **BuildKit secret** `github_packages_token` |
-| 持久化卷 | Postgres 数据 | `mysql-data` + **`private-files`**（招标原件与导出的 DOCX） |
+| 持久化 | bind mount 到 `${DATA_DIR}`（= `<stack_root>/data`） | **同左**：`data/postgres` + `data/private`（招标原件与导出的 DOCX） |
 | 长任务 | 无 | Temporal 工作流，正文生成可跑数分钟 |
 
 ### 2.1 三镜像带来的改动

@@ -52,6 +52,11 @@ COMPOSE_ONLY: dict[str, str] = {
     "IMAGE_REGISTRY": _DEPLOY_INJECTED,
     "IMAGE_NAMESPACE": _DEPLOY_INJECTED,
     "IMAGE_TAG": _DEPLOY_INJECTED,
+    "DATA_DIR": (
+        "持久数据的宿主机位置，由 deploy.sh 导出（默认 <stack_root>/data，"
+        "也就是 md0 阵列上）。不写进 .env.example：它不是一个可调的旋钮，"
+        "写进去会引人把数据指到系统盘上，而那件事不会有任何报错。"
+    ),
 }
 
 #: application.yml 引用但<b>刻意</b>不放进 compose 白名单的键。

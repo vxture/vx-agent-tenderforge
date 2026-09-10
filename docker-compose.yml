@@ -20,12 +20,16 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_ROOT_PASSWORD:?生产必须显式设置——默认口令的数据库等于没有口令}
       TZ: Asia/Shanghai
     volumes:
-      # postgres:18+ 的挂载点是 /var/lib/postgresql，**不是** .../data。
-      # 18 起镜像按 pg_ctlcluster 的约定把数据放进带大版本号的子目录，
-      # 挂在 .../data 上会直接拒绝启动并报「unused mount/volume」——
-      # 这条是本地起一个带持久卷的探针栈时撞出来的，Testcontainers 与
-      # 不带卷的容器都不会显形。
-      - db-data:/var/lib/postgresql
+      # **bind mount，不是具名卷**。具名卷落在 /var/lib/docker/volumes，
+      # 也就是系统盘；而这台机器的持久化位置是 md0 阵列上的
+      # ${DATA_DIR}（= <stack_root>/data）。用具名卷的表现不是报错，
+      # 是数据默默写到了错误的盘上——直到系统盘满或换机时才发现。
+      #
+      # 挂载点是 /var/lib/postgresql，**不是** .../data：18 起镜像按
+      # pg_ctlcluster 的约定把数据放进带大版本号的子目录，挂在 .../data
+      # 上会直接拒绝启动并报「unused mount/volume」。这条是本地起一个
+      # 带持久卷的探针栈时撞出来的，Testcontainers 与不带卷的容器都不显形。
+      - ${DATA_DIR:-./data}/postgres:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d vx_tenderforge_db"]
       interval: 10s
@@ -205,7 +209,7 @@ services:
       USAGE_FLUSH_INTERVAL_MS: ${USAGE_FLUSH_INTERVAL_MS:-15000}
       USAGE_FLUSH_BATCH_SIZE: ${USAGE_FLUSH_BATCH_SIZE:-100}
     volumes:
-      - private-files:/app/data/private
+      - ${DATA_DIR:-./data}/private:/app/data/private
     # 容器探针**只探 liveness**（规范 025 §2 铁律 / 020 §4）。
     # 探就绪的表现是：一次数据库或上游抖动就把一个本来健康的容器判成
     # unhealthy 并重启——重启解决不了依赖不可用，只是让服务在依赖恢复期间
@@ -300,7 +304,7 @@ services:
       USAGE_FLUSH_INTERVAL_MS: ${USAGE_FLUSH_INTERVAL_MS:-15000}
       USAGE_FLUSH_BATCH_SIZE: ${USAGE_FLUSH_BATCH_SIZE:-100}
     volumes:
-      - private-files:/app/data/private
+      - ${DATA_DIR:-./data}/private:/app/data/private
 
   web:
     container_name: tenderforge-web
@@ -323,10 +327,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
-
-volumes:
-  db-data:
-  private-files:
 
 secrets:
   github_packages_token:
