@@ -123,16 +123,16 @@ cmd_start() {
   # 哪一行属于哪个镜像。
   local pids=() logs=() rc=0 i=0
   for image in "${IMAGES[@]}"; do
-    logs[$i]="$(mktemp)"
-    pull_one "$image" "$tag" > "${logs[$i]}" 2>&1 &
-    pids[$i]=$!
+    logs[i]="$(mktemp)"
+    pull_one "$image" "$tag" > "${logs[i]}" 2>&1 &
+    pids[i]=$!
     i=$((i + 1))
   done
   i=0
   for image in "${IMAGES[@]}"; do
-    wait "${pids[$i]}" || rc=1
-    cat "${logs[$i]}"
-    rm -f "${logs[$i]}"
+    wait "${pids[i]}" || rc=1
+    cat "${logs[i]}"
+    rm -f "${logs[i]}"
     i=$((i + 1))
   done
   [ "$rc" -eq 0 ] || { log "FATAL: 有镜像拉取失败，见上面各自的日志"; exit 1; }
