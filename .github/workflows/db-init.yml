@@ -113,12 +113,18 @@ jobs:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
-          DEPLOY_DIR: ${{ secrets.DEPLOY_DIR }}
+          # **变量不是 secret**：文件路径不是凭据，而把它做成 secret 的代价是
+          # 日志里全是 ***，出事时所有诊断信息一起被抹掉——这一条是 2026-09-10
+          # 那次排查花掉一整轮才换来的。
+          DEPLOY_DIR: ${{ vars.DEPLOY_DIR }}
           PASSED_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           port="${DEPLOY_PORT:-22}"
           deploy_dir="${DEPLOY_DIR:-/srv/md0/${PRODUCT_CODE}}"
+          # 任何远端命令之前先把话说死。错值在 Linux 上是合法的相对路径，
+          # 每一步都会一致地成功，直到某处偶然把它再解析一次——见脚本头注释。
+          bash scripts/ci/assert-deploy-dir.sh "$deploy_dir"
           ssh_opts=(-i ~/.ssh/deploy_key -p "$port" -o ServerAliveInterval=30 \
                     -o ServerAliveCountMax=20 -o ConnectTimeout=30)
 

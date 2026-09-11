@@ -204,6 +204,12 @@ jobs:
       - name: Deploy routing guardrail (tag -> environment)
         run: python scripts/guardrails/check_deploy_routing.py
 
+      # DEPLOY_DIR 的错值在 Linux 上是合法的相对路径，每一步都会一致地成功，
+      # 直到某处偶然把它再解析一次。这个断言是它唯一的报错面——护栏跑的是
+      # 那个脚本本身，并断言四个使用点都接了它。
+      - name: Deploy dir assertion guardrail (absolute POSIX path)
+        run: python scripts/guardrails/check_deploy_dir_guard.py
+
       - name: Python lint (ruff)
         working-directory: backend/project-name-python
         run: |
