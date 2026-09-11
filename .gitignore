@@ -80,6 +80,11 @@ test/*apiKey*.csv
 .tmp/
 
 # Local business data
+# 仓根的 ./data 是 compose 在 DATA_DIR 未设时的落点（postgres 数据目录与
+# 私有文件）。下面两条只盖住了 Java 模块下的旧位置，库层迁移后真正会被
+# 写满的是仓根这个——**一次 `git add .` 就会把一个数据库提交进仓库**。
+# 部署态不走这里：绑定挂载到 /srv/md0|md1 下的 DATA_DIR。
+/data/
 backend/project-name-java/data/
 backend/project-name-java/project-name-start/data/
 frontend/project-name-web/.test-dist/
