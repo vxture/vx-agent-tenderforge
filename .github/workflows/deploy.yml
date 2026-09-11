@@ -154,7 +154,10 @@ jobs:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
-          DEPLOY_DIR: ${{ secrets.DEPLOY_DIR }}
+          # **变量不是 secret**：文件路径不是凭据，而把它做成 secret 的代价是
+          # 日志里全是 ***，出事时所有诊断信息一起被抹掉——这一条是 2026-09-10
+          # 那次排查花掉一整轮才换来的。
+          DEPLOY_DIR: ${{ vars.DEPLOY_DIR }}
           ENV_FILE_B64: ${{ secrets.ENV_FILE_BASE64 }}
         run: |
           set -euo pipefail
@@ -162,6 +165,9 @@ jobs:
           # DEPLOY_DIR 必须精确到**含 compose + .env 的那一层**（治理规范 §6）。
           # 差一级的表现是镜像能拉、compose 找不到 env_file 而失败（varda 教训）。
           deploy_dir="${DEPLOY_DIR:-/srv/md0/${PRODUCT_CODE}}"
+          # 任何远端命令之前先把话说死。错值在 Linux 上是合法的相对路径，
+          # 每一步都会一致地成功，直到某处偶然把它再解析一次——见脚本头注释。
+          bash scripts/ci/assert-deploy-dir.sh "$deploy_dir"
           ssh_opts=(-i ~/.ssh/deploy_key -p "$port" -o ServerAliveInterval=30 \
                     -o ServerAliveCountMax=20 -o ConnectTimeout=30)
           # .env 只在**首次**投递。之后运维在主机上改的值是权威——
@@ -181,7 +187,10 @@ jobs:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
-          DEPLOY_DIR: ${{ secrets.DEPLOY_DIR }}
+          # **变量不是 secret**：文件路径不是凭据，而把它做成 secret 的代价是
+          # 日志里全是 ***，出事时所有诊断信息一起被抹掉——这一条是 2026-09-10
+          # 那次排查花掉一整轮才换来的。
+          DEPLOY_DIR: ${{ vars.DEPLOY_DIR }}
           PASSED_SHA: ${{ github.sha }}
           IMAGE_TAG: ${{ needs.call-build.outputs.image_tag }}
           ALIYUN_ACR_REGISTRY: ${{ vars.ALIYUN_ACR_REGISTRY }}
@@ -196,6 +205,9 @@ jobs:
           # DEPLOY_DIR 必须精确到**含 compose + .env 的那一层**（治理规范 §6）。
           # 差一级的表现是镜像能拉、compose 找不到 env_file 而失败（varda 教训）。
           deploy_dir="${DEPLOY_DIR:-/srv/md0/${PRODUCT_CODE}}"
+          # 任何远端命令之前先把话说死。错值在 Linux 上是合法的相对路径，
+          # 每一步都会一致地成功，直到某处偶然把它再解析一次——见脚本头注释。
+          bash scripts/ci/assert-deploy-dir.sh "$deploy_dir"
           image_tag="$IMAGE_TAG"
           test -n "$image_tag"
           ssh_opts=(-i ~/.ssh/deploy_key -p "$port" -o ServerAliveInterval=30 \
