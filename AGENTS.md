@@ -13,6 +13,7 @@ docker-compose.yml               编排：db / ai / temporal / api / worker / we
 deploy/                          部署脚本、数据库 DDL 与基线
 scripts/qa/                      真实 AI 和浏览器端到端验收
 docs/30-design/10-detailed-design.md           唯一现行详细设计
+docs/80-liaison/                 跨线联络函，一函一事、只增不改
 .claude/skills/                  当前工程与 Java 编码规范
 ```
 
