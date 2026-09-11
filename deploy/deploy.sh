@@ -169,24 +169,39 @@ dump_failure_context() {
   # （temporal-db-init）跑完就退出，恰恰是最需要看日志的那个。少了这个 -a，
   # 上一次排查白跑了一轮——现场转储把唯一有用的那份日志漏掉了。
   compose ps -a || true
-  # 只打印没在正常运行的那些：全打会把真正相关的几十行埋进几千行里。
-  local svc state
+
+  # **默认打印，只在确认健康时才跳过。**
+  #
+  # 上一版反过来：默认跳过，只在状态匹配到某几个值时才打。它漏掉了崩溃重启的
+  # api——`Restarting` 的容器状态在 running 与 restarting 之间来回跳，判断恰好
+  # 撞上那一瞬的 running 就被跳过了。于是三个正常容器的日志都打了，唯独那个
+  # 真正出问题的没有。
+  #
+  # 方向反过来之后，一次竞态最多让日志多打几屏，不会让它消失。诊断信息宁可冗余，
+  # 不能缺失——缺失的代价上一轮量过：一次本地重搭复现。
+  #
+  # 判据用 Status 而不是 State：Status 里带健康信息（`Up 3 minutes (healthy)` /
+  # `Restarting (1)` / `Exited (0)`），而 State 只有一个词，分不出健康与否。
+  local svc status
   for svc in $(compose config --services 2>/dev/null); do
-    state="$(compose ps -a --format '{{.State}}' "$svc" 2>/dev/null | head -1)"
-    case "$state" in
-      running|"") continue ;;
-      # 其余状态（exited / restarting / created / dead）正是要打日志的那些。
+    status="$(compose ps -a --format '{{.Status}}' "$svc" 2>/dev/null | head -1)"
+    # 判据表（Status 的真实形态，逐条验过）：
+    #   Up 3 minutes (healthy)          跳过——健康
+    #   Up 5 minutes                    跳过——没有健康检查的服务，稳定运行
+    #   Up 10 seconds (health: starting) 打印——失败那刻还没起来的，正是可疑的那个
+    #   Up 2 seconds (unhealthy)        打印
+    #   Restarting (1) 2 seconds ago    打印（不以 Up 开头，落最后一支）
+    #   Exited (0) / Created / Dead / 空 打印
+    case "$status" in
+      *"(healthy)"*) continue ;;
+      # 带健康信息但不是 healthy：starting 与 unhealthy 都要看。
+      Up*"("*) ;;
+      Up*) continue ;;
+      # 取不到状态也打：宁可多打，不可漏掉。
       *) ;;
     esac
-    log "--- $svc（state=$state）最后 80 行 ---"
+    log "--- $svc（${status:-状态未知}）最后 80 行 ---"
     compose logs --no-color --tail=80 "$svc" 2>&1 || true
-  done
-  # 健康检查失败但仍在 running 的容器也要看——unhealthy 的状态是 running。
-  for svc in $(compose config --services 2>/dev/null); do
-    if compose ps -a --format '{{.Status}}' "$svc" 2>/dev/null | grep -q 'unhealthy'; then
-      log "--- $svc（unhealthy）最后 80 行 ---"
-      compose logs --no-color --tail=80 "$svc" 2>&1 || true
-    fi
   done
 }
 
