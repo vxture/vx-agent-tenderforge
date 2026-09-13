@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.td.czghagent.application.query.service.AuthQueryService;
 import com.td.czghagent.domain.model.CurrentUser;
 import com.td.czghagent.domain.model.PlatformCallerContext;
+import com.td.czghagent.domain.model.ProductIdentity;
 import com.td.czghagent.rest.support.ErrorEnvelope;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -48,7 +49,10 @@ public class AuthenticationFilter extends OncePerRequestFilter {
                 || "/api/auth/oidc/backchannel-logout".equals(path)
                 // 平台下发的开通/停用事件。调用方是平台，按定义没有会话；
                 // 它的鉴权全部来自 HMAC 验签，而验签在控制器里是第一件事。
-                || "/api/platform/provisioning/webhook".equals(path)
+                // 取常量而不是再写一遍字面量：这一处与控制器映射分叉时，
+                // 表现是平台的投递被登录过滤器挡在控制器之前，验签代码根本没跑，
+                // 而平台那边只看见一个非 2xx。
+                || ProductIdentity.PLATFORM_WEBHOOK_PATH.equals(path)
                 // 运行时探针必须公开：探测方是编排器和平台健康页，它们没有会话。
                 || "/api/health".equals(path)
                 || "/api/ready".equals(path)

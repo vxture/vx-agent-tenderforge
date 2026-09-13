@@ -43,7 +43,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class ProvisioningWebhookIntegrationTest extends PostgresBackedTest {
 
     static final String SECRET = "whsec_integration";
-    private static final String PATH = "/api/platform/provisioning/webhook";
+
+    /**
+     * 取常量，不重抄字面量——这条测试验的是<strong>接缝</strong>（原始字节、过滤器放行、
+     * 状态码），不是路径取值本身。路径取的对不对由
+     * {@code scripts/guardrails/check_webhook_path.py} 钉死：它把常量与通则规定的
+     * 字面量、以及 nginx / 部署文档 / {@code .env.example} 四处独立写下的地址逐一比对。
+     * 让这条测试也去抄一遍字面量，只会在改名时多一处要改的地方，换不来任何一次拦截。
+     */
+    private static final String PATH = com.td.czghagent.domain.model.ProductIdentity
+            .PLATFORM_WEBHOOK_PATH;
 
     @Autowired
     private MockMvc mockMvc;

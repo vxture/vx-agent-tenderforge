@@ -820,9 +820,23 @@ Java `BidDocumentExporter` 的本地实现用于文档服务关闭时的开发/�
 
 ### 10.5 开通事件接收（C3 下发）
 
-接收地址 **`POST /api/platform/provisioning/webhook`**，完整 URL
-`https://tenderforge.vxture.com/api/platform/provisioning/webhook`——需要连同
+接收地址 **`POST /api/webhooks/vxture`**，完整 URL
+`https://tenderforge.vxture.com/api/webhooks/vxture`——需要连同
 `TENDERFORGE_PROVISION_WEBHOOK_SECRET` 一起交给平台线。
+
+**路径不是本产品自拟的，是通则规定的**：所有产品同一个路径，变的只有域名，
+版本也不进路径（URL 在平台侧按产品登记一次，把版本写进路径等于每次信封升级
+都要逐个产品改登记）。源码里的唯一取值是 `ProductIdentity.PLATFORM_WEBHOOK_PATH`，
+`scripts/guardrails/check_webhook_path.py` 守着它与 nginx、本文件、
+`docs/50-deployment/10-deployment-plan.md`、`.env.example` 四处独立写下的地址一致。
+
+> **这一节此前写错过，值得记下原因。** 早期取值是 `/provisioning/webhook`，
+> 依据是「vxtpl 和 yucer 都这么写」。查下去：那两处路由的注释都标着
+> 「product_200 section 4」，而 `product_200_integration.md` §4.3 通篇只规定了
+> 义务（HMAC、幂等、建/拆空间），**从没规定过路径**。两个产品各自造了同一个
+> 名字，又互相成了对方的「先例」。平台侧的登记接口 `normalizeUrl()` 只校验
+> 协议与长度、不看路径，上线检查单也只问「填了没有」，所以这个偏离从产生到
+> 被发现之间没有任何一道闸门。
 
 这个端点**不要求会话**（调用方是平台，不是浏览器），鉴权全部来自 HMAC 验签。
 验签是控制器里的第一件事，未配置密钥时**一律拒绝**：放行是最糟的兜底，
