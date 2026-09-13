@@ -31,7 +31,18 @@ services:
       # 带持久卷的探针栈时撞出来的，Testcontainers 与不带卷的容器都不显形。
       - ${DATA_DIR:-./data}/postgres:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d vx_tenderforge_db"]
+      # **必须带 -h 127.0.0.1 强制走 TCP。**不带 -h 时 pg_isready 走 Unix socket，
+      # 而 postgres 首次初始化时会先起一个**只监听 socket** 的临时服务器来跑
+      # 初始化脚本，那一刻它就会答 "ready"——容器被判为 healthy，TCP 却还没开。
+      #
+      # 本地首启实测这个窗口是 39 秒（11:48:56 socket ready → 11:49:34 IPv4
+      # listening），而 temporal-db-init 用 psql -h db 走 TCP，正好落进去：
+      # `connection to server at "db" failed: Connection refused`，退出码 2，
+      # 整条依赖链停在那里。
+      #
+      # 生产没撞上只是因为那边的库早已初始化过，首次那一段不再发生——
+      # 但 beta 首次部署、或任何一次灾难恢复都会正面撞上。
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d vx_tenderforge_db"]
       interval: 10s
       timeout: 5s
       retries: 20
