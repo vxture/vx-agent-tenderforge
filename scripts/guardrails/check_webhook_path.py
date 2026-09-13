@@ -28,11 +28,18 @@ SPA catch-all，平台拿到 **index.html 和 HTTP 200**——投递被判为送
 那两处路由的注释都标着「product_200 section 4」，而那一节通篇只规定义务、
 **从没规定过路径**——两个产品各自造了同一个名字，又互相成了对方的先例。
 
+**第 4b 条管的是迁移本身，不是取值。** 平台侧登记的还是旧地址，所以 nginx 上留着
+一条把旧路径转到标准路径的别名——这是 X-4 的第 ① 步。它的删除条件不靠人记得：
+`LEGACY_INBOUND_PATH` 置成 `None` 的那一刻，这条判据会反过来要求别名必须消失。
+
 反证做法（每条判据都这么验过，确认会红）：
   - 把常量改成 `/provisioning/webhook`      → 第 1 条红
   - 控制器改回字面量                         → 第 2 条红
   - 豁免名单里删掉那一行                     → 第 3 条红
   - nginx 把 `location /api/` 删掉           → 第 4 条红
+  - nginx 删掉迁移期别名                     → 第 4b 条红
+  - 别名转到旧的控制器路径                   → 第 4b 条红
+  - LEGACY_INBOUND_PATH 置 None 但别名还在   → 第 4b 条红
   - 文档里留一个旧地址                       → 第 5 条红
 """
 
@@ -78,6 +85,18 @@ CONSTANT_REF = "ProductIdentity.PLATFORM_WEBHOOK_PATH"
 
 #: 本仓与兄弟仓用过的非标准取值。出现在**投递地址**上即为偏离。
 RETIRED_PATHS = ["/api/platform/provisioning/webhook", "/provisioning/webhook"]
+
+#: 迁移期允许保留的**入站别名**，或 `None` 表示迁移已完成。
+#:
+#: 平台侧当前登记的还是旧地址，所以 nginx 上要留一条别名把它转到标准路径——
+#: 这是 X-4 的第 ① 步「先同时收两个路径」。**不留这条就是跳过第 ① 步直接做第 ②**：
+#: 发版那一刻起，平台按旧地址投递会落到 SPA catch-all 拿回 index.html 和 HTTP 200，
+#: 投递被判为送达而产品什么都没收到，两侧都不报错。
+#:
+#: **第 ③ 步的删除条件就写在这里**：平台侧把登记地址改成标准路径之后，
+#: 把这个常量置成 `None`——守卫会立刻反过来要求 nginx 上那条 location 必须消失。
+#: 这样「什么时候能删」不靠人记得，它是一处会进 diff 的显式动作。
+LEGACY_INBOUND_PATH: str | None = "/provisioning/webhook"
 
 
 def read(path: Path) -> str:
@@ -150,12 +169,42 @@ def main() -> int:
             "nginx 里找不到末尾的 SPA catch-all——它是上面那条判据的前提，"
             "前提没了说明这份配置已经改过形，判据要重新写"
         )
-    for retired in RETIRED_PATHS:
-        if retired in nginx_text:
+    # ── 4b. 迁移期别名：该在时必须在且转对，该走时必须走 ─────────────────
+    alias_re = re.compile(
+        r"location\s+=\s+(\S+)\s*\{[^}]*proxy_pass\s+http://api:8081(\S*?)\s*;",
+        re.S,
+    )
+    aliases = {m.group(1): m.group(2) for m in alias_re.finditer(nginx_text)}
+    if LEGACY_INBOUND_PATH is None:
+        for retired in RETIRED_PATHS:
+            if retired in nginx_text:
+                problems.append(
+                    f"迁移已标记完成（LEGACY_INBOUND_PATH = None），但 nginx 里还留着 "
+                    f"{retired}。留着两条路，下一个人无法从代码判断线上登记的是哪一个"
+                )
+    else:
+        target = aliases.get(LEGACY_INBOUND_PATH)
+        if target is None:
             problems.append(
-                f"nginx 里还留着 {retired}——旧路径的 location 会让两个地址同时可用，"
-                "而平台登记的是哪一个从代码里看不出来"
+                f"nginx 上缺少迁移期别名 `location = {LEGACY_INBOUND_PATH}`。"
+                "平台侧登记的还是旧地址，少了这条别名，发版那一刻平台的投递就会落到 "
+                "SPA catch-all 拿回 index.html 和 HTTP 200——投递被判为送达而我们"
+                "什么都没收到。这是跳过 X-4 第 ① 步直接做第 ②"
             )
+        elif target != STANDARD_PATH:
+            problems.append(
+                f"迁移期别名 `location = {LEGACY_INBOUND_PATH}` 转到了 {target!r}，"
+                f"应当转到 {STANDARD_PATH!r}。两条路必须进同一个控制器——"
+                "否则会得到两份各自演进的验签与幂等逻辑，而它们不一致时的症状"
+                "取决于平台当天登记的是哪个地址"
+            )
+        # 除了这一个别名，不该再有第二个通往 api 的旧路径入口。
+        for path in aliases:
+            if path in RETIRED_PATHS and path != LEGACY_INBOUND_PATH:
+                problems.append(
+                    f"nginx 上有第二个旧路径别名 `location = {path}`——"
+                    "迁移期只登记了一个，多出来的那个没有删除条件管着"
+                )
 
     # ── 5. 交给平台登记的那个值，三处必须是完整标准 URL ─────────────────
     for site in URL_SITES:

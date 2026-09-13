@@ -186,6 +186,20 @@ Insights → Dependency graph → Dependabot 手动跑一次 "Check for updates"
 需要交给平台线的两个具体值：
 - webhook 投递地址：`https://tenderforge.vxture.com/api/webhooks/vxture`
   （路径由通则统一规定，所有产品一致；平台侧登记这个值）
+
+  **这个地址的切换分三步，顺序不能换**（X-4）。平台侧当前登记的还是旧地址
+  `/provisioning/webhook`：
+
+  1. 本产品新旧两路都能收，并发版 —— nginx 上留一条 `location = /provisioning/webhook`
+     把旧路径转到标准路径，两条路进同一个控制器；
+  2. 平台侧把登记地址改成 `/api/webhooks/vxture`；
+  3. 删掉那条 nginx 别名，并把 `check_webhook_path.py` 的 `LEGACY_INBOUND_PATH`
+     置成 `None` —— 守卫会立刻反过来要求别名必须消失。
+
+  **跳过第 1 步直接做第 2 步，或者只上新路径就发版，都会有一段投递落空的窗口，
+  而落空不报错**：未匹配的路径落到 SPA catch-all，平台拿回 index.html 和 HTTP 200，
+  投递被判为送达。第 3 步也不是可选的——留着两条路，下一个人无法从代码判断
+  线上登记的是哪一个。
 - 需要授权的 Atlas endpoint：见 `atlas_endpoints.required_endpoint_codes()`；
   授权到位前保持 `ATLAS_USE_DEDICATED_ENDPOINTS=false`，全部走 `chat/default`
 
