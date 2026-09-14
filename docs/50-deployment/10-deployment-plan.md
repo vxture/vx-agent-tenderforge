@@ -74,6 +74,13 @@
 * DDL 单一权威 = `deploy/database/ddl/`（`00_baseline` + `97_service_role`
   + `98_column_locks` + `incr/`），手写、create-once
 * 施加通道 = `db-init.yml`（`confirm=yes` + `expected_sha` + 生产环境审批门）
+* **每次施加都是整份重放**，所以 DDL 必须能在活库上再跑一遍：外键包在
+  `duplicate_object` 守卫里（`ADD CONSTRAINT` 没有 `IF NOT EXISTS`），由
+  `PostgresBackedTest` 在同一个库上施加两遍来守。2026-09-15 之前这条只写在注释里，
+  第一次在活库上重放就倒在了第一条外键上
+* db-init **不 source 宿主机 `.env`**，只经 `deploy/database/env-value.sh` 按键取
+  `DEPLOY_STAGE` / `POSTGRES_ROOT_PASSWORD` / `DATABASE_PASSWORD`。compose 允许未加引号
+  的空格值，bash 会把它当命令执行（同日 `OIDC_SCOPES` 让 db-init 以 127 退出）
 * 应用以最小权限角色连库，**连 CREATE 的权限都没有**——就算有人把 Flyway
   加回来，建表也会被库直接拒绝。配置可以被改错，权限不会
 
