@@ -227,8 +227,11 @@ jobs:
           # --delete 会清掉目标目录里不在源里的东西，所以三样必须排除：
           # 运维的 .env（删了会被下次 bootstrap 用 CI 版本覆盖，运维改过的
           # 值无声消失）、VERSION（溯源）、data（容器写的 root 所有的持久
-          # 数据，碰它下次 rsync 会以权限错误失败）。
+          # 数据，碰它下次 rsync 会以权限错误失败）。另外还排除
+          # docker-compose.override.yml：deploy.sh 生成的镜像钉子，删了而这次又倒在
+          # 拉取阶段，主机上手工执行的 compose 就会解析回 :local。
           rsync -az --delete --exclude='.env' --exclude='VERSION' --exclude='data' \
+            --exclude='docker-compose.override.yml' \
             -e "ssh -i ~/.ssh/deploy_key -p $port -o ConnectTimeout=30" \
             "$stage/" "$DEPLOY_USER@$DEPLOY_HOST:$deploy_dir/"
           rm -rf "$stage"

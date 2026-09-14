@@ -9,6 +9,7 @@
 #   bash deploy/deploy.sh all      # 目录 → 拉镜像 → 起栈 → 验证 → 清旧镜像
 #   bash deploy/deploy.sh start    # 只拉 + 修 private/ 属主 + 起
 #   bash deploy/deploy.sh owner    # 只修 private/ 属主（uid 取自 api 镜像）
+#   bash deploy/deploy.sh pin      # 只把 IMAGE_* 对应的镜像钉进 docker-compose.override.yml
 #   bash deploy/deploy.sh verify   # 只验证
 #   bash deploy/deploy.sh prune    # 只清旧镜像
 #
@@ -159,6 +160,48 @@ pull_one() {
   docker tag "$fallback" "$primary"
 }
 
+# 把本次部署的镜像引用钉进 docker-compose.override.yml（compose 自动合并它）。
+#
+# 为什么需要：compose 里的镜像是 ${IMAGE_REGISTRY}/${IMAGE_NAMESPACE}/…:${IMAGE_TAG}，
+# 这三个变量只在 CI 部署时导出，宿主机 .env 里没有。2026-09-15 在主机上手工
+# `docker compose up -d api` 改一个环境变量，镜像被解析成
+# ghcr.io/vxture/tenderforge-api:local：拉取被拒，转去本地构建，再因主机上没有源码
+# 而失败。更坏的结局是主机上恰好有个 :local 镜像，服务被悄悄换成它。
+#
+# 为什么是 override 而不是写进 .env：.env 是运维的权威文件，部署从不覆盖它
+# （见 deploy.yml 的 bootstrap 注释）；让部署改写它，等于每次发布都去动运维的配置。
+# override 由部署独占生成，deploy.yml / rollback.yml 的 rsync --delete 排除它——
+# 一次倒在拉取阶段的部署不会把上一次的钉子删掉。
+#
+# 引用写**主源名**：备源回落时 pull_one 已经把镜像打回主源名，本地一定有。
+# 必须在拉取全部成功之后写（钉一个本地没有的引用，手工 up 会去拉），并在 up 之前写
+# （up 与之后每一次手工操作读到的是同一组引用）。
+# scripts/guardrails/check_deploy_image_pins.py 对着真实的 `docker compose config` 验它。
+write_image_pins() {
+  local tag="${IMAGE_TAG:-local}"
+  local prefix="${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-vxture}/${PRODUCT_CODE}"
+  local target="$REPO_DIR/docker-compose.override.yml" tmp
+  # 同目录临时文件 + mv：写到一半被打断时，compose 读到的要么是旧钉子要么是新钉子，
+  # 不会是半个 YAML。
+  tmp="$(mktemp "$REPO_DIR/.docker-compose.override.XXXXXX")"
+  cat > "$tmp" <<EOF
+# 由 deploy/deploy.sh 在每次部署时生成——不入仓，不要手改。
+# 让宿主机上手工执行的 docker compose 解析到本次部署的镜像，而不是 :local。
+services:
+  api:
+    image: ${prefix}-api:${tag}
+  worker:
+    image: ${prefix}-api:${tag}
+  ai:
+    image: ${prefix}-ai:${tag}
+  web:
+    image: ${prefix}-web:${tag}
+EOF
+  chmod 644 "$tmp"
+  mv "$tmp" "$target"
+  log "镜像已钉入 docker-compose.override.yml（${prefix}-*:${tag}）"
+}
+
 cmd_start() {
   local tag="${IMAGE_TAG:-local}"
   test -n "$tag"
@@ -184,6 +227,9 @@ cmd_start() {
     i=$((i + 1))
   done
   [ "$rc" -eq 0 ] || { log "FATAL: 有镜像拉取失败，见上面各自的日志"; exit 1; }
+
+  # 拉取全部成功才钉，且赶在 up 之前——理由见 write_image_pins。
+  write_image_pins
 
   # 第三方镜像（Postgres / Temporal / temporal-ui）单独拉，失败不致命：
   # 它们的 tag 是钉死的，本地多半已经有，而拉不到时 `up -d` 会用本地那份。
@@ -382,8 +428,9 @@ case "${1:-}" in
   environment) cmd_environment ;;
   directories) cmd_directories ;;
   owner)       ensure_private_owner ;;
+  pin)         write_image_pins ;;
   start)       cmd_start ;;
   verify)      cmd_verify ;;
   prune)       cmd_prune ;;
-  *) echo "usage: bash deploy/deploy.sh {all|environment|directories|owner|start|verify|prune}"; exit 1 ;;
+  *) echo "usage: bash deploy/deploy.sh {all|environment|directories|owner|pin|start|verify|prune}"; exit 1 ;;
 esac

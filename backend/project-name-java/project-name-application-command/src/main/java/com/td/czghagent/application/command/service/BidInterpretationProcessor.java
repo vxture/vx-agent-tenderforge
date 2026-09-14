@@ -63,7 +63,7 @@ public class BidInterpretationProcessor {
 
     public void parseDocument(String sourceId, String bidId, String ownerId,
                               String traceId, String ipAddress) {
-        BidDocument bid = support.requireBid(bidId, ownerId);
+        BidDocument bid = support.requireBidForTask(bidId, ownerId);
         OperationContext context = context(bid, traceId, ipAddress);
         BidRepository.SourceFileRecord source = currentParsingSource(sourceId, bidId);
         if (source == null) {
@@ -96,7 +96,7 @@ public class BidInterpretationProcessor {
 
     public void generateProjectOverview(String sourceId, String bidId, String ownerId,
                                         String traceId, String ipAddress) {
-        BidDocument bid = support.requireBid(bidId, ownerId);
+        BidDocument bid = support.requireBidForTask(bidId, ownerId);
         OperationContext context = context(bid, traceId, ipAddress);
         BidRepository.SourceFileRecord source = currentParsingSource(sourceId, bidId);
         if (source == null || "SUCCEEDED".equals(source.overviewStatus())) {
@@ -121,7 +121,7 @@ public class BidInterpretationProcessor {
 
     public void generateTechnicalScoring(String sourceId, String bidId, String ownerId,
                                          String traceId, String ipAddress) {
-        BidDocument bid = support.requireBid(bidId, ownerId);
+        BidDocument bid = support.requireBidForTask(bidId, ownerId);
         OperationContext context = context(bid, traceId, ipAddress);
         BidRepository.SourceFileRecord source = currentParsingSource(sourceId, bidId);
         if (source == null || "SUCCEEDED".equals(source.scoringStatus())) {
@@ -147,7 +147,7 @@ public class BidInterpretationProcessor {
     @Transactional
     public void complete(String sourceId, String bidId, String ownerId,
                          String traceId, String ipAddress) {
-        BidDocument bid = support.requireBid(bidId, ownerId);
+        BidDocument bid = support.requireBidForTask(bidId, ownerId);
         OperationContext context = context(bid, traceId, ipAddress);
         if (!progress(sourceId, "SAVING", 95)
                 || !bidRepository.completeSourceParse(sourceId, bidId)) {

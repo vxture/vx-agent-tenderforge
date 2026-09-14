@@ -100,7 +100,8 @@ public class BidProductionService {
     }
 
     private BidDocument requireBid(String bidId, OperationContext context) {
-        return bidRepository.findBid(bidId, context.user().id()).orElseThrow(() ->
+        return bidRepository.findBid(bidId, context.user().id(), context.user().tenant())
+                .orElseThrow(() ->
                 bidRepository.existsBid(bidId)
                         ? new BusinessException("BID_ACCESS_DENIED", "无权访问该标书", 403)
                         : new BusinessException("BID_NOT_FOUND", "标书不存在", 404));

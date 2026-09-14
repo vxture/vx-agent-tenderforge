@@ -1,6 +1,7 @@
 package com.td.czghagent.infrastructure.repository;
 
 import com.td.czghagent.domain.exception.BusinessException;
+import com.td.czghagent.domain.model.TenantScope;
 import com.td.czghagent.domain.model.BidDocument;
 import com.td.czghagent.domain.model.BidWorkspace;
 import com.td.czghagent.domain.repository.BidRepository;
@@ -273,14 +274,15 @@ final class JdbcBidDraftPersistence {
         return prefix + "_" + suffix;
     }
 
-    void replaceAssetSelections(String bidId, String ownerId, List<String> assetIds) {
+    void replaceAssetSelections(String bidId, String ownerId, TenantScope tenant,
+                                List<String> assetIds) {
         jdbcTemplate.update("DELETE FROM bid_asset_selection WHERE bid_id = ?", bidId);
         for (String assetId : assetIds) {
             int inserted = jdbcTemplate.update("""
                     INSERT INTO bid_asset_selection(bid_id, asset_id)
                     SELECT ?, id FROM bid_reference_asset
-                    WHERE id = ? AND owner_id = ? AND status = 'ACTIVE'
-                    """, bidId, assetId, ownerId);
+                    WHERE id = ? AND owner_id = ? AND workspace_id = ? AND status = 'ACTIVE'
+                    """, bidId, assetId, ownerId, tenant.workspaceId());
             if (inserted != 1) {
                 throw new IllegalArgumentException("Selected asset is unavailable: " + assetId);
             }

@@ -104,6 +104,24 @@
 护栏 `check_deploy_private_owner.py` 对着真实 Docker 验它，用两个 uid 的探针镜像
 拦住写死 uid 的实现。`data/postgres` 不需要：postgres 镜像的入口脚本自己修属主。
 
+### 2.5 主机上手工执行 compose 的镜像
+
+compose 里的镜像是 `${IMAGE_REGISTRY}/${IMAGE_NAMESPACE}/…:${IMAGE_TAG}`，三个变量只在
+CI 部署时导出，宿主机 `.env` 里没有。2026-09-15 为改一个环境变量在主机上手工
+`docker compose up -d api`，镜像被解析成 `ghcr.io/vxture/tenderforge-api:local`——
+拉取被拒、转去本地构建、因主机上没有源码而失败。更坏的结局是主机上恰好有个
+`:local` 镜像，服务被悄悄换掉。
+
+`deploy.sh` 在镜像拉取全部成功后、`compose up` 之前生成 `docker-compose.override.yml`
+（compose 自动合并），把 api / worker / ai / web 钉到本次部署的主源引用；回滚走同一个
+`start`，一并覆盖。它**不写 `.env`**（运维权威文件，部署从不覆盖）；deploy.yml 与
+rollback.yml 的 `rsync --delete` 排除它，倒在拉取阶段的部署不会删掉上一次的钉子。
+仓根 `.gitignore` 忽略它，本地开发仍走 `:local` 构建。
+
+护栏 `check_deploy_image_pins.py` 跑 `deploy.sh pin` 本身，对真实的
+`docker compose config` 断言：不导出 `IMAGE_*` 时四个服务解析到部署引用、重复生成是覆盖
+而非追加；并静态断言生成位于拉取检查之后、`compose up` 之前，两个 workflow 都排除它。
+
 ---
 
 ## 3. 三级密钥与变量划分

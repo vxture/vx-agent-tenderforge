@@ -103,7 +103,7 @@ public class BidLayoutProcessor {
     }
 
     private BidDocument requireBid(String bidId, String ownerId) {
-        return bidRepository.findBid(bidId, ownerId).orElseThrow(() ->
+        return bidRepository.findBidForTask(bidId, ownerId).orElseThrow(() ->
                 new BusinessException("BID_NOT_FOUND", "排版任务对应标书不存在", 404));
     }
 

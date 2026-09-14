@@ -202,7 +202,7 @@ class BidContentReviewService {
     }
 
     private BidWorkspace loadWorkspace(String bidId, String ownerId) {
-        BidDocument bid = bidRepository.findBid(bidId, ownerId).orElseThrow();
+        BidDocument bid = bidRepository.findBidForTask(bidId, ownerId).orElseThrow();
         return bidRepository.loadWorkspace(bid);
     }
 

@@ -223,6 +223,12 @@ jobs:
       - name: db-init env reader guardrail (read by key, never execute .env)
         run: python scripts/guardrails/check_db_init_env_reader.py
 
+      # IMAGE_* 只在 CI 部署时导出；主机上手工 docker compose 会解析成 :local（2026-09-15）。
+      # deploy.sh 把部署的镜像钉进 docker-compose.override.yml。护栏跑 deploy.sh 本身，
+      # 对真实的 compose config 断言不导出 IMAGE_* 时四个服务仍解析到部署引用。
+      - name: Deployed image pins guardrail (manual compose resolves deployed images)
+        run: python scripts/guardrails/check_deploy_image_pins.py
+
       # C3 回调路径由通则统一规定（所有产品 /api/webhooks/vxture），而本仓有六处
       # 独立写下它。错开的表现都不像「路径配错了」：漏了会话豁免名单是平台收到
       # 非 2xx 重试十次，漏了 nginx 转发是平台拿到 index.html 和 HTTP 200——
