@@ -382,7 +382,8 @@ test('TenderAgent branding uses Funnel Display', () => {
   assert.match(source('src/main.tsx'), /@vxture\/design-system\/styles\/globals\.css/)
   assert.match(source('src/main.tsx'), /@vxture\/design-system\/styles\/brands\/vxture\.css/)
   assert.doesNotMatch(source('src/styles/globals.css'), /Funnel Display Variable/)
-  assert.match(source('src/pages/Login/index.tsx'), /TenderAgent/)
+  // 登录页照组织标准展示平台登记的产品名（owner 2026-09-14）；页头仍是 TenderAgent 字标。
+  assert.match(source('src/pages/Login/index.tsx'), /标书编写智能体/)
   assert.match(source('src/layouts/Header.tsx'), /TenderAgent/)
 })
 
