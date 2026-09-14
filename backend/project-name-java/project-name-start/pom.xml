@@ -67,7 +67,7 @@
                         <resources>
                             <resource>
                                 <directory>${project.basedir}/../../../deploy/database/ddl</directory>
-                                <includes><include>*.sql</include></includes>
+                                <includes><include>*.sql</include><include>incr/*.sql</include></includes>
                             </resource>
                         </resources>
                     </configuration>

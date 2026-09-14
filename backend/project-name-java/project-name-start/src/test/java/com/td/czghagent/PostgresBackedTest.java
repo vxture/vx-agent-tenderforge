@@ -12,12 +12,18 @@ import org.testcontainers.utility.DockerImageName;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URISyntaxException;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Stream;
 
 /**
  * 集成测试的数据库底座：**真 Postgres，跑生产用的那一份 DDL，以生产用的那个
@@ -77,25 +83,55 @@ public abstract class PostgresBackedTest {
 
     static {
         POSTGRES.start();
-        applyDdl();
+        applyDdl("首次施加");
+        // 第二遍不是冗余：db-init 在活库上跑的永远是这一遍。基线与增量都承诺可重放，
+        // 而空库上的首次施加看不出一条语句能不能再跑一次——2026-09-15 db-init 在生产上
+        // 倒在第一条外键上（ADD CONSTRAINT 没有 IF NOT EXISTS），而测试一直是绿的，
+        // 因为它只施加过一遍。在这里重放，任何不可重放的 DDL 会让全部集成测试起不来。
+        applyDdl("重放，即 db-init 在活库上的情形");
     }
 
     /**
-     * 施加三段基线，然后给服务角色一个口令。
+     * 按 db-init 的顺序施加：三段基线 → incr/ 下的编号增量，然后给服务角色一个口令。
      *
      * <p>以容器 superuser 施加——DDL 本来就该由拥有 DDL 权限的人跑，而
      * {@code tenderforge_svc} 恰恰没有这个权限（那正是 97 要保证的事）。
      */
-    private static void applyDdl() {
+    private static void applyDdl(String pass) {
         try (Connection connection = DriverManager.getConnection(
                 POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
              Statement statement = connection.createStatement()) {
-            for (String file : List.of("00_baseline.sql", "97_service_role.sql", "98_column_locks.sql")) {
+            List<String> files = new ArrayList<>(
+                    List.of("00_baseline.sql", "97_service_role.sql", "98_column_locks.sql"));
+            files.addAll(increments());
+            for (String file : files) {
                 statement.execute(read(file));
             }
             statement.execute("ALTER ROLE tenderforge_svc PASSWORD '" + SERVICE_PASSWORD + "'");
         } catch (SQLException exception) {
-            throw new IllegalStateException("施加基线 DDL 失败", exception);
+            throw new IllegalStateException("施加 DDL 失败（" + pass + "）", exception);
+        }
+    }
+
+    /**
+     * incr/ 下的增量，按文件名排序——与 db-init 的 glob 顺序一致。没有增量时为空。
+     *
+     * <p>由 copy-ddl-for-tests 一并复制；漏复制的表现是增量从不在测试里施加，
+     * 于是「增量必须可重放」这条又回到了没有任何检查的状态。
+     */
+    private static List<String> increments() {
+        URL directory = PostgresBackedTest.class.getResource("/ddl/incr");
+        if (directory == null) {
+            return List.of();
+        }
+        try (Stream<Path> paths = Files.list(Path.of(directory.toURI()))) {
+            return paths.map(path -> path.getFileName().toString())
+                    .filter(name -> name.endsWith(".sql"))
+                    .sorted()
+                    .map(name -> "incr/" + name)
+                    .toList();
+        } catch (IOException | URISyntaxException exception) {
+            throw new IllegalStateException("列出 /ddl/incr 失败", exception);
         }
     }
 

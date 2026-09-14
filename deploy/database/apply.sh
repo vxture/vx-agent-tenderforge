@@ -7,8 +7,11 @@
 # 永远不迁移数据库（治理规范 §11：常规部署链不跑 migration/seed）。
 #
 # 顺序：三段基线 → incr/ 下的编号增量，逐个 fail-fast。
-# 基线是 create-once 的（CREATE TABLE IF NOT EXISTS），所以重复施加是幂等的；
-# 增量必须自己写成幂等的（ADD COLUMN IF NOT EXISTS 之类），见 incr/README.md。
+# 整份 DDL 必须可以在活库上重放：建表建索引用 IF NOT EXISTS，外键包在
+# duplicate_object 守卫里（PostgreSQL 的 ADD CONSTRAINT 没有 IF NOT EXISTS）；
+# 增量同样必须自己幂等，见 incr/README.md。这件事由 PostgresBackedTest 在同一个
+# 库上施加两遍来守——此前这里写着「所以重复施加是幂等的」，而它从没被验过，
+# 2026-09-15 在生产上第一次重放就倒在了第一条外键上。
 set -euo pipefail
 
 DDL_DIR="$(cd "$(dirname "$0")/ddl" && pwd)"
