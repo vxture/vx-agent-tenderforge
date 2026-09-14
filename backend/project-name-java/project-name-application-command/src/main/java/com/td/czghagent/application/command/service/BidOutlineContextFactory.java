@@ -46,7 +46,7 @@ class BidOutlineContextFactory {
      * Error Semantics: BusinessException identifies ownership, state, or stale-input failures.
      */
     Context load(String taskId, String bidId, String ownerId, String traceId, String ipAddress) {
-        BidDocument bid = support.requireBid(bidId, ownerId);
+        BidDocument bid = support.requireBidForTask(bidId, ownerId);
         OperationContext operation = operation(bid, traceId, ipAddress);
         BidWorkspace workspace = bidRepository.loadWorkspace(bid);
         validateTask(taskId, workspace);
@@ -111,7 +111,7 @@ class BidOutlineContextFactory {
         List<TenderAiGateway.ReferenceSummary> references = new ArrayList<>();
         for (String assetId : workspace.selectedAssetIds()) {
             BidRepository.AssetRecord asset = bidRepository
-                    .findAsset(assetId, context.user().id()).orElse(null);
+                    .findAsset(assetId, context.user().id(), context.user().tenant()).orElse(null);
             if (asset != null && "OUTLINE".equals(asset.category())) {
                 references.add(referenceSummary(asset));
             }

@@ -740,10 +740,16 @@ Java `BidDocumentExporter` 的本地实现用于文档服务关闭时的开发/�
 与真实值冲突，而且肉眼可辨「这一行还没接上平台身份」。**不留空**是有意的：可空的租户键会让
 一次忘记加过滤的查询静默返回全部行，而那个响应看起来完全正常。
 
-**当前读过滤仍按 `owner_id`**，写入已按租户列落库。今天两者一一对应（`local:<ownerId>`），
-所以两个过滤等价；接通 OIDC 后同一个人可属于多个工作空间，那一刻**必须**把
-`bid_document` / `bid_reference_asset` 的读过滤切到 `workspace_id`。
-切换点由 `TenantScope.isLocal()` 标记：库里还带 `local:` 前缀的行就是尚未迁移的那些。
+**读过滤 = `owner_id` + `workspace_id`**（2026-09-15 切换；写入早已按租户列落库）。平台身份下
+同一个人可属于多个工作空间，只按 `owner_id` 过滤会让 A 空间的标书与素材出现在 B 空间里，
+而那个响应看起来完全正常。请求路径一律经 `BidRepository` 的 `findBid` / `listBids` /
+`findAsset` / `listAssets` / `removeAsset` / `replaceAssetSelections` 带上当前会话的
+`TenantScope`：别的空间里的标书与别人的标书同样答 403，素材删除答 404、选择答 400。
+**后台任务**（Temporal 活动）走 `findBidForTask`：bidId 来自一个已在请求路径上通过校验的任务，
+而租户轴以取回的标书行为准。`TenantIsolationIntegrationTest` 守着这件事。
+
+**可见范围没有扩大**：仍是「本人 × 当前空间」，不是「当前空间的全部成员」——空间内共享是
+产品决策，未做。库里带 `local:` 前缀的历史行归属本地账号，平台用户按 `owner_id` 本来就看不到。
 
 ### 10.1 账户与审计
 
@@ -897,8 +903,8 @@ Java `BidDocumentExporter` 的本地实现用于文档服务关闭时的开发/�
   cookie，库里只存它的哈希，默认时长 `RP_SESSION_TTL`（12 小时）。
 - `AuthenticationFilter` 放行登录回路、平台回调、健康、OpenAPI 和错误页；其他 API 必须解析
   有效的平台会话。
-- `/api/admin/**` 强制 `ADMIN`；具体用例仍检查角色。标书与素材仓储查询必须同时带
-  `owner_id`，越权统一返回 403/404 语义，不泄露对象键。
+- `/api/admin/**` 强制 `ADMIN`；具体用例仍检查角色。标书与素材的请求路径查询必须同时带
+  `owner_id` 与 `workspace_id`（§10.0），越权统一返回 403/404 语义，不泄露对象键。
 - Java 与 Python 使用常量时间比较内部 Token；模型 API Key 只从 `AI_MODEL_API_KEY` 环境变量读取。
 - `/health` 只表示进程存活，`/ready` 还会确认 `AI_MODEL_API_KEY` 非空；API 和 Worker 仅依赖
   ready 的 AI 容器启动。Key 缺失时不会向外部模型发起请求。

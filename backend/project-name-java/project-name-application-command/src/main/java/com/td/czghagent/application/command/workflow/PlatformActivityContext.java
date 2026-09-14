@@ -61,7 +61,7 @@ public class PlatformActivityContext {
      */
     private TenantScope tenantOf(String bidId, String ownerId) {
         try {
-            Optional<BidDocument> bid = bidRepository.findBid(bidId, ownerId);
+            Optional<BidDocument> bid = bidRepository.findBidForTask(bidId, ownerId);
             return bid.map(BidDocument::tenant).orElse(null);
         } catch (RuntimeException exception) {
             // 取不到租户不该让活动本身失败：模型调用会因为铸不出票而给出明确拒绝，

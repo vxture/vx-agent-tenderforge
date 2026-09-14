@@ -191,7 +191,7 @@ class BidContentCommandServiceTest {
                     bidRepository, mock(FileStorage.class), mock(BidAiExecutionService.class),
                     mock(BidDocumentExporter.class), productionRepository, generationOrchestrator,
                     generationService, support, metered::add);
-            when(bidRepository.findBid("bid-1", "owner-1")).thenReturn(Optional.of(bid));
+            when(bidRepository.findBid("bid-1", "owner-1", TENANT)).thenReturn(Optional.of(bid));
             when(bidRepository.loadWorkspace(bid)).thenReturn(workspace);
         }
     }
@@ -234,7 +234,7 @@ class BidContentCommandServiceTest {
         }
 
         private Fixture() {
-            when(bidRepository.findBid("bid-1", "owner-1")).thenReturn(Optional.of(bid));
+            when(bidRepository.findBid("bid-1", "owner-1", TENANT)).thenReturn(Optional.of(bid));
             when(bidRepository.loadWorkspace(bid)).thenReturn(workspace);
         }
 
