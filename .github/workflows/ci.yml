@@ -210,6 +210,12 @@ jobs:
       - name: Deploy dir assertion guardrail (absolute POSIX path)
         run: python scripts/guardrails/check_deploy_dir_guard.py
 
+      # data/private 是 bind mount，属主必须等于 api 镜像的运行用户——不等时容器
+      # 照常 healthy、部署照常报绿，第一次上传才报 AccessDenied（2026-09-14 生产）。
+      # 护栏对着真实 Docker 跑 deploy.sh，用两个 uid 的探针镜像拦住写死 uid 的实现。
+      - name: Deploy private dir owner guardrail (bind mount uid == image USER)
+        run: python scripts/guardrails/check_deploy_private_owner.py
+
       # C3 回调路径由通则统一规定（所有产品 /api/webhooks/vxture），而本仓有六处
       # 独立写下它。错开的表现都不像「路径配错了」：漏了会话豁免名单是平台收到
       # 非 2xx 重试十次，漏了 nginx 转发是平台拿到 index.html 和 HTTP 200——
