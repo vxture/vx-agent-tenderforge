@@ -99,8 +99,8 @@ app:
   platform:
     api-url: ${PLATFORM_API_URL:}
     internal-auth-token: ${PLATFORM_INTERNAL_AUTH_TOKEN:}
-    provision-webhook-secret: ${TENDERFORGE_PROVISION_WEBHOOK_SECRET:}
-    provision-webhook-secret-next: ${TENDERFORGE_PROVISION_WEBHOOK_SECRET_NEXT:}
+    provision-webhook-secret: ${PROVISION_WEBHOOK_SECRET:}
+    provision-webhook-secret-next: ${PROVISION_WEBHOOK_SECRET_NEXT:}
     console-url: ${CONSOLE_BASE_URL:https://console.vxture.com}
     # 仅本地：驱动权益替身走遍各档位分支。
     # tier=none 走「未订阅」那一屏——它在真实环境里最难复现，

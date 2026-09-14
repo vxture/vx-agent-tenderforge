@@ -822,7 +822,7 @@ Java `BidDocumentExporter` 的本地实现用于文档服务关闭时的开发/�
 
 接收地址 **`POST /api/webhooks/vxture`**，完整 URL
 `https://tenderforge.vxture.com/api/webhooks/vxture`——需要连同
-`TENDERFORGE_PROVISION_WEBHOOK_SECRET` 一起交给平台线。
+`PROVISION_WEBHOOK_SECRET` 一起交给平台线。
 
 **路径不是本产品自拟的，是通则规定的**：所有产品同一个路径，变的只有域名，
 版本也不进路径（URL 在平台侧按产品登记一次，把版本写进路径等于每次信封升级
