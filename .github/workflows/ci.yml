@@ -223,6 +223,11 @@ jobs:
       - name: db-init env reader guardrail (read by key, never execute .env)
         run: python scripts/guardrails/check_db_init_env_reader.py
 
+      # C2 权益：每个用户命令方法的第一条语句是 guard.require(...)，或在放行名单里带理由。
+      # 新加命令却忘了判定不会有任何症状——新功能对未订阅的人照常开放。
+      - name: C2 entitlement gate guardrail (every command checks entitlement first)
+        run: python scripts/guardrails/check_entitlement_gates.py
+
       # C3 回调路径由通则统一规定（所有产品 /api/webhooks/vxture），而本仓有六处
       # 独立写下它。错开的表现都不像「路径配错了」：漏了会话豁免名单是平台收到
       # 非 2xx 重试十次，漏了 nginx 转发是平台拿到 index.html 和 HTTP 200——

@@ -23,18 +23,23 @@ public class BidLayoutService {
     private final BidProductionRepository productionRepository;
     private final BidLayoutOrchestrator orchestrator;
     private final AuditRepository auditRepository;
+    private final EntitlementGuard guard;
 
     public BidLayoutService(BidRepository bidRepository,
                             BidProductionRepository productionRepository,
                             BidLayoutOrchestrator orchestrator,
-                            AuditRepository auditRepository) {
+                            AuditRepository auditRepository,
+                            EntitlementGuard guard) {
         this.bidRepository = bidRepository;
         this.productionRepository = productionRepository;
         this.orchestrator = orchestrator;
         this.auditRepository = auditRepository;
+        this.guard = guard;
     }
 
     public BidWorkspace start(String bidId, OperationContext context) {
+        // 排版产出的就是可下载的成稿，与导出同一项能力。先于取数判定，见 EntitlementGuard。
+        guard.require(context, com.td.czghagent.domain.model.BidCapability.DOCUMENT_EXPORT);
         BidDocument bid = requireBid(bidId, context);
         BidWorkspace workspace = bidRepository.loadWorkspace(bid);
         if (!"FROZEN".equals(workspace.production().contentStatus()) || bid.contentStale()) {

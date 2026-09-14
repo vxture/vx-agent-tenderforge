@@ -22,15 +22,19 @@ public class BidProductionService {
     private final BidRepository bidRepository;
     private final BidProductionRepository productionRepository;
     private final AuditRepository auditRepository;
+    private final EntitlementGuard guard;
 
     public BidProductionService(BidRepository bidRepository,
                                 BidProductionRepository productionRepository,
-                                AuditRepository auditRepository) {
+                                AuditRepository auditRepository,
+                                EntitlementGuard guard) {
         this.bidRepository = bidRepository;
         this.productionRepository = productionRepository;
         this.auditRepository = auditRepository;
+        this.guard = guard;
     }
 
+    /** 内部回写（解读活动、保存解读），不是用户命令入口，不判定权益——见 check_entitlement_gates.py。 */
     @Transactional
     public BidWorkspace synchronizeInterpretation(String bidId, OperationContext context) {
         BidDocument bid = requireBid(bidId, context);
@@ -42,6 +46,8 @@ public class BidProductionService {
     @Transactional
     public BidWorkspace freezeInterpretation(String bidId, long revision,
                                              OperationContext context) {
+        // 冻结是编写流程的一步：没有 BID_AUTHORING 时产品只读（BidCapability 注释）。
+        guard.require(context, com.td.czghagent.domain.model.BidCapability.BID_AUTHORING);
         BidDocument bid = requireRevision(bidId, revision, context);
         BidWorkspace workspace = bidRepository.loadWorkspace(bid);
         BidProductionRules.validateInterpretationFreeze(workspace.criteria());
@@ -58,6 +64,7 @@ public class BidProductionService {
 
     @Transactional
     public BidWorkspace freezeOutline(String bidId, long revision, OperationContext context) {
+        guard.require(context, com.td.czghagent.domain.model.BidCapability.BID_AUTHORING);
         BidDocument bid = requireRevision(bidId, revision, context);
         BidWorkspace workspace = bidRepository.loadWorkspace(bid);
         if (!"FROZEN".equals(workspace.production().interpretationStatus())) {
@@ -76,6 +83,7 @@ public class BidProductionService {
 
     @Transactional
     public BidWorkspace freezeContent(String bidId, long revision, OperationContext context) {
+        guard.require(context, com.td.czghagent.domain.model.BidCapability.BID_AUTHORING);
         BidDocument bid = requireRevision(bidId, revision, context);
         BidWorkspace workspace = bidRepository.loadWorkspace(bid);
         BidProductionRules.validateContentFreeze(

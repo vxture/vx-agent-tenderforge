@@ -493,3 +493,20 @@ test('runtime frontend contains no village-planning residue', () => {
     .filter((path) => forbidden.test(readFileSync(path, 'utf8')))
   assert.deepEqual(matches, [])
 })
+
+/**
+ * C2 权益拒绝：标书工作区的统一错误展示把它渲染成订阅引导，并且永不自动跳转。
+ *
+ * 自动跳走会让用户丢掉正在编辑的内容、也看不到为什么被拒（通则 C2 深链只在显式点击时打开）。
+ * 断言写在两个文件上：ErrorState 必须经 rejectionNotice 分流，SubscriptionNotice 只在
+ * onClick 里打开深链、不碰 location / 路由跳转。
+ */
+test('entitlement rejections render a subscribe notice that only opens on click', () => {
+  const feedback = source('src/features/tender/components/Feedback.tsx')
+  assert.match(feedback, /const notice = rejectionNotice\(error\)/)
+  assert.match(feedback, /<SubscriptionNotice notice=\{notice\} \/>/)
+
+  const notice = source('src/features/entitlement/SubscriptionNotice.tsx')
+  assert.match(notice, /onClick=\{\(\) => window\.open\(subscribeUrl, '_blank', 'noopener,noreferrer'\)\}/)
+  assert.doesNotMatch(notice, /window\.location|location\.(href|assign|replace)|useNavigate|<Navigate/)
+})
