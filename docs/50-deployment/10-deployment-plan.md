@@ -85,6 +85,18 @@
 它在 api 之前就绪；`init-temporal.sh` 的换行符问题本轮已经用 `.gitattributes` 修掉
 （CRLF 会让容器内 `sh` 报 `set: -: invalid option`）。
 
+### 2.4 bind mount 的属主
+
+`data/private` 是 bind mount，而 api / worker 以镜像里的 `app`（uid 10001）运行。
+部署用户在宿主机上建出的目录属于部署用户——2026-09-14 生产实测 uid 1000、775，
+容器能读不能写：服务 healthy、部署报绿，第一次上传招标文件才报
+`AccessDeniedException: /app/data/private/bids`。探针只探 liveness，中间没有任何信号。
+
+`deploy.sh` 在 `compose up` 之前由 `ensure_private_owner` 修正：uid 从 api 镜像读、
+不写死，已正确则跳过，可单独执行 `bash deploy/deploy.sh owner`。
+护栏 `check_deploy_private_owner.py` 对着真实 Docker 验它，用两个 uid 的探针镜像
+拦住写死 uid 的实现。`data/postgres` 不需要：postgres 镜像的入口脚本自己修属主。
+
 ---
 
 ## 3. 三级密钥与变量划分

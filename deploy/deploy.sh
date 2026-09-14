@@ -7,7 +7,8 @@
 # 通过 SSH 调用，也可以在主机上手工跑。
 #
 #   bash deploy/deploy.sh all      # 目录 → 拉镜像 → 起栈 → 验证 → 清旧镜像
-#   bash deploy/deploy.sh start    # 只拉 + 起
+#   bash deploy/deploy.sh start    # 只拉 + 修 private/ 属主 + 起
+#   bash deploy/deploy.sh owner    # 只修 private/ 属主（uid 取自 api 镜像）
 #   bash deploy/deploy.sh verify   # 只验证
 #   bash deploy/deploy.sh prune    # 只清旧镜像
 #
@@ -91,6 +92,53 @@ cmd_directories() {
   log "数据目录就位：$DATA_DIR（postgres / private）"
 }
 
+# private/ 的属主必须是 api 镜像里的运行用户（api 与 worker 共用这个镜像）。
+#
+# 2026-09-14 生产上撞过：cmd_directories 以部署用户（uid 1000）建出 private/，
+# 容器以镜像里的 app（uid 10001）运行，目录 775——能读不能写。服务照常 healthy、
+# 部署照常报绿，直到第一次有人上传招标文件才报 AccessDeniedException。
+#
+# uid **从镜像里读**，不写死：Dockerfile 的 useradd 才是它的唯一来源，这里再写一份
+# 10001，就是 Dockerfile 改了之后悄悄过期的那一份。
+#
+# chown 借同一个镜像以 root 做：部署用户不是 root、不保证有 sudo，但它必然能跑
+# docker（整个脚本都靠它）。用 api 镜像而不是另拉一个工具镜像——它刚拉下来、
+# tag 钉死，不给部署多引入一个镜像源依赖。
+#
+# **不递归**：目录里的东西都是容器自己写的，属主本来就对；递归 chown 会让每次部署
+# 的耗时随招标原件与导出文件的数量增长。
+#
+# postgres/ 不需要这一步：postgres 镜像的入口脚本以 root 启动时自己修数据目录属主。
+ensure_private_owner() {
+  local image="${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-vxture}/${PRODUCT_CODE}-api:${IMAGE_TAG:-local}"
+  local dir="$DATA_DIR/private" want have
+  # start 可以不经 directories 单独跑；那时目录缺失，交给 compose 建出来的是 root 的。
+  mkdir -p "$dir"
+  want="$(docker run --rm --entrypoint id "$image" -u)" || {
+    log "FATAL: 无法从 ${image} 读出运行用户 uid"
+    exit 1
+  }
+  case "$want" in
+    '' | *[!0-9]*)
+      log "FATAL: 从 ${image} 读到的 uid 不是数字：'${want}'"
+      exit 1
+      ;;
+  esac
+  have="$(stat -c %u "$dir")"
+  if [ "$have" = "$want" ]; then
+    log "private/ 属主已是 uid ${want}，跳过"
+    return 0
+  fi
+  docker run --rm --user 0 --entrypoint chown -v "$dir:/target" "$image" "$want" /target
+  # 修完再读一次：chown 返回 0 不等于这个目录的属主真的变了。
+  have="$(stat -c %u "$dir")"
+  if [ "$have" != "$want" ]; then
+    log "FATAL: private/ 属主修正后仍是 uid ${have}，期望 ${want}"
+    exit 1
+  fi
+  log "private/ 属主已修正为 uid ${want}（取自 ${image} 的运行用户）"
+}
+
 # 拉一个镜像：主源失败就走备源，并把备源打上主源的名字，
 # 这样 compose 里的镜像引用不需要知道自己是从哪拉来的。
 pull_one() {
@@ -145,6 +193,9 @@ cmd_start() {
   # 三个第三方镜像一个都没被预拉；等到 `up -d` 阶段才去拉，任何一次镜像源抖动
   # 都会直接拖垮整次部署，而日志里只看得到那一次拉取失败。
   compose pull db temporal temporal-ui || true
+
+  # 必须在拉镜像之后（uid 从 api 镜像里读）、在 up 之前（容器一起来就要写 private/）。
+  ensure_private_owner
 
   # depends_on 里带 condition: service_healthy，所以 compose 会自己排序：
   # db → temporal-db-init（一次性）→ temporal → api → worker/web。
@@ -330,8 +381,9 @@ case "${1:-}" in
   all)         cmd_all ;;
   environment) cmd_environment ;;
   directories) cmd_directories ;;
+  owner)       ensure_private_owner ;;
   start)       cmd_start ;;
   verify)      cmd_verify ;;
   prune)       cmd_prune ;;
-  *) echo "usage: bash deploy/deploy.sh {all|environment|directories|start|verify|prune}"; exit 1 ;;
+  *) echo "usage: bash deploy/deploy.sh {all|environment|directories|owner|start|verify|prune}"; exit 1 ;;
 esac
