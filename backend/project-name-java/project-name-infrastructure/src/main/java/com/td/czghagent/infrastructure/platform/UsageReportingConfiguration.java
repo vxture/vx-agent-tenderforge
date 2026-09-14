@@ -81,7 +81,7 @@ public class UsageReportingConfiguration {
         if (!verifier.isConfigured()) {
             if (stage.isDeployed() && !allowMock) {
                 throw new IllegalStateException(
-                        "部署阶段 " + stage + " 缺少 TENDERFORGE_PROVISION_WEBHOOK_SECRET，"
+                        "部署阶段 " + stage + " 缺少 PROVISION_WEBHOOK_SECRET，"
                                 + "开通/停用事件将全部被拒。补齐配置或显式设置"
                                 + " app.allow-mock-on-deploy=true");
             }
