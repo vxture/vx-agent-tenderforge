@@ -30,9 +30,9 @@ import java.time.Duration;
  * <p>这一组路由<strong>返回跳转而不是 JSON</strong>：它们是浏览器顶层导航的一部分，
  * 不是给前端 fetch 调的。前端只需要知道「把用户送到 /api/auth/oidc/login」。
  *
- * <p>本地口令登录（{@code AuthController}）在此期间并存。两条通道同时活着是过渡态，
- * 不是设计：平台身份接通并验证后，本地那条连同 {@code app_user} 一起退役，
- * 本地只保留 workspace 内的业务角色。
+ * <p>这是本产品<strong>唯一</strong>的登录入口。本地口令登录 2026-09-15 退役
+ * （平台登录已在生产闭环验证）；{@code app_user} 表与用户管理页暂留，
+ * 整体退役另行进行，届时本地只保留 workspace 内的业务角色。
  */
 @RestController
 @RequestMapping("/api/auth/oidc")

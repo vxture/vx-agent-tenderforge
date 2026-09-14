@@ -31,8 +31,7 @@ REVOKE UPDATE ON local_authz.rp_session FROM tenderforge_svc;
 GRANT UPDATE (access_expires_at, access_token, last_seen_at, refresh_token)
   ON local_authz.rp_session TO tenderforge_svc;
 REVOKE UPDATE ON local_authz.user_session FROM tenderforge_svc;
-GRANT UPDATE (last_seen_at)
-  ON local_authz.user_session TO tenderforge_svc;
+-- user_session: 本地口令会话 2026-09-15 退役，代码里没有任何 UPDATE —— 不给 UPDATE。
 
 -- --- local_usage ---
 REVOKE UPDATE ON local_usage.platform_usage_event FROM tenderforge_svc;

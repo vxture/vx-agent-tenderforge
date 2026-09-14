@@ -367,11 +367,16 @@ test('tender API covers setup, parsing, outline, content, export and assets', ()
   }
 })
 
-test('user management is limited to the current profile, avatar and password', () => {
+/**
+ * 本地口令通道 2026-09-15 退役：身份只来自平台 IdP，前端既不能登录也不能改口令。
+ * 反过来断言而不是删掉这条——把口令入口加回 API 模块，这里会先红。
+ */
+test('account management is limited to the current profile and avatar, with no password channel', () => {
   const accountApi = source('src/api/modules/auth.ts')
   assert.match(accountApi, /\/api\/account\/profile/)
   assert.match(accountApi, /\/api\/account\/avatar/)
-  assert.match(accountApi, /\/api\/account\/password/)
+  assert.doesNotMatch(accountApi, /\/api\/account\/password/)
+  assert.doesNotMatch(accountApi, /\/api\/auth\/login['"]/)
   assert.doesNotMatch(accountApi, /\/api\/admin\/users/)
 
   const page = source('src/pages/PlannerAccount/index.tsx')

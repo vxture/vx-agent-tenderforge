@@ -14,7 +14,6 @@ import httpx
 BASE_URL = os.getenv("TENDER_WEB_BASE_URL", "http://host.docker.internal:5174")
 DOCUMENT = Path(os.getenv("TENDER_REFERENCE_DOCUMENT", "/workspace/test/tender-reference.doc"))
 OUTPUT_DIR = Path(os.getenv("TENDER_E2E_OUTPUT_DIR", "/workspace/test/e2e-output"))
-PLANNER_PASSWORD = os.environ["BOOTSTRAP_PLANNER_PASSWORD"]
 
 
 def api_request(
@@ -139,19 +138,27 @@ def docx_text(content: bytes) -> str:
         )
 
 
+def sign_in(client: httpx.Client) -> None:
+    """Enter through the platform login loop and keep the session cookie on the client.
+
+    Local password login was retired on 2026-09-15. Against a local stack without
+    OIDC_* configured, the identity stand-in redirects straight back to the callback,
+    which sets the session cookie; httpx keeps it in the client's cookie jar.
+    """
+    response = client.get("/api/auth/oidc/login", follow_redirects=True)
+    if not client.cookies:
+        raise RuntimeError(
+            f"platform sign-in set no session cookie (HTTP {response.status_code})"
+        )
+
+
 def main() -> None:
     """Run the real tender DOC through the complete production workflow."""
     if not DOCUMENT.is_file():
         raise RuntimeError(f"reference document not found: {DOCUMENT}")
     timeout = httpx.Timeout(900.0, connect=30.0)
     with httpx.Client(base_url=BASE_URL, timeout=timeout) as client:
-        login = api_request(
-            client,
-            "POST",
-            "/api/auth/login",
-            json={"username": "planner", "password": PLANNER_PASSWORD},
-        )
-        client.headers["Authorization"] = f"Bearer {login['token']}"
+        sign_in(client)
         workspace = cast(
             dict[str, Any],
             api_request(

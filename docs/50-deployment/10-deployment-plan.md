@@ -162,7 +162,7 @@ Insights → Dependency graph → Dependabot 手动跑一次 "Check for updates"
 
 **a. 本产品自持（部署时生成，运维保管）**
 `MYSQL_PASSWORD` `MYSQL_ROOT_PASSWORD` `TEMPORAL_DB_PASSWORD`
-`AI_SERVICE_INTERNAL_TOKEN` `BOOTSTRAP_ADMIN_PASSWORD` `BOOTSTRAP_PLANNER_PASSWORD`
+`AI_SERVICE_INTERNAL_TOKEN`
 
 **b. 平台线提供（见 §4）**
 `OIDC_*` `PLATFORM_API_URL`
@@ -407,7 +407,7 @@ beta 与生产同机（vx-worker-02），但**落在另一块阵列**：`/srv/md
 | 部署审批 | 必需审批人 | 无 |
 
 Temporal UI 端口必须错开：两个栈同机跑，8233 撞了第二个栈直接起不来。
-库口令、内部令牌与初始账号口令两边各自独立——共用的话，beta 泄一次等于生产也泄了。
+库口令与内部令牌两边各自独立——共用的话，beta 泄一次等于生产也泄了。
 `DATA_DIR` 不单独设：`deploy.sh` 里它默认取 `$REPO_DIR/data`，因此自动跟着 `DEPLOY_DIR` 走。
 
 ---

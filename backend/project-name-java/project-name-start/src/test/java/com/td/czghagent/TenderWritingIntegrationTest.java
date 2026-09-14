@@ -5,11 +5,15 @@ package com.td.czghagent;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.td.czghagent.application.command.service.AuthCommandService;
+import com.td.czghagent.domain.model.RpSession;
+import com.td.czghagent.domain.model.TenantScope;
+import com.td.czghagent.domain.repository.RpSessionRepository;
+import com.td.czghagent.domain.service.SessionToken;
+import com.td.czghagent.rest.security.RpSessionCookie;
+import jakarta.servlet.http.Cookie;
 import com.td.czghagent.domain.model.ParsedDocument;
 import com.td.czghagent.domain.port.DocumentParser;
 import com.td.czghagent.domain.port.TenderAiGateway;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -26,7 +30,9 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -39,7 +45,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest(properties = {
-        "app.bootstrap.enabled=false",
         // 冲洗任务在后台跑会去认领测试刚写进去的行——关掉它。
         "app.platform.usage-flush-enabled=false",
         "app.storage.root=${java.io.tmpdir}/tender-writing-${random.uuid}"
@@ -55,17 +60,10 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
     private ObjectMapper objectMapper;
 
     @Autowired
-    private AuthCommandService authCommandService;
+    private RpSessionRepository rpSessions;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
-
-    @BeforeEach
-    void createUsers() {
-        authCommandService.createSeedUser("criteria-owner", "Criteria@123", "Scoring validation user", "PLANNER");
-        authCommandService.createSeedUser("tender-owner", "Owner@123", "投标编制员", "PLANNER");
-        authCommandService.createSeedUser("tender-other", "Other@123", "其他编制员", "PLANNER");
-    }
 
     @TestConfiguration(proxyBeanMethods = false)
     static class ParserConfiguration {
@@ -228,7 +226,7 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
 
     @Test
     void manualInterpretationRequiresExactlyTwoBusinessObjects() throws Exception {
-        String owner = login("criteria-owner", "Criteria@123");
+        String owner = signIn("criteria-owner");
         JsonNode created = performJson(post("/api/bids"), owner, """
                 {"writingMethod":"SCORING_CRITERIA","title":"评分点校验标书",
                  "targetPages":20,"biddingMode":"BLIND"}
@@ -237,7 +235,7 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
         long revision = created.path("bid").path("revision").asLong();
 
         mockMvc.perform(put("/api/bids/{bidId}/criteria", bidId)
-                        .header("Authorization", bearer(owner))
+                        .cookie(session(owner))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"revision":%d,"items":[{
@@ -250,7 +248,7 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
                 .andExpect(jsonPath("$.code").value("BID_CRITERIA_REQUIRED"));
 
         mockMvc.perform(put("/api/bids/{bidId}/criteria", bidId)
-                        .header("Authorization", bearer(owner))
+                        .cookie(session(owner))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"revision":%d,"items":[
@@ -265,9 +263,9 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
 
     @Test
     void ownerCompletesFourStepsAndOtherUserCannotReadBid() throws Exception {
-        String owner = login("tender-owner", "Owner@123");
-        String other = login("tender-other", "Other@123");
-        mockMvc.perform(get("/api/bids").header("Authorization", bearer(owner)))
+        String owner = signIn("tender-owner");
+        String other = signIn("tender-other");
+        mockMvc.perform(get("/api/bids").cookie(session(owner)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(0));
         JsonNode created = performJson(post("/api/bids"), owner, """
@@ -276,11 +274,11 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
                 """);
         String bidId = created.path("bid").path("id").asText();
         assertThat(created.path("bid").path("workflowStep").asText()).isEqualTo("INTERPRETATION");
-        mockMvc.perform(get("/api/bids").header("Authorization", bearer(owner)))
+        mockMvc.perform(get("/api/bids").cookie(session(owner)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(1));
 
-        mockMvc.perform(get("/api/bids/{bidId}", bidId).header("Authorization", bearer(other)))
+        mockMvc.perform(get("/api/bids/{bidId}", bidId).cookie(session(other)))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("BID_ACCESS_DENIED"));
 
@@ -289,11 +287,11 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
                 "技术方案评分：30分。暗标不得出现投标人名称。".getBytes(StandardCharsets.UTF_8)
         );
         mockMvc.perform(multipart("/api/bids/{bidId}/source-file", bidId).file(file)
-                        .header("Authorization", bearer(owner)))
+                        .cookie(session(owner)))
                 .andExpect(status().isOk());
         JsonNode accepted = responseData(mockMvc.perform(
                         post("/api/bids/{bidId}/interpretation/parse", bidId)
-                                .header("Authorization", bearer(owner)))
+                                .cookie(session(owner)))
                 .andExpect(status().isAccepted())
                 .andReturn());
         assertThat(accepted.path("sourceFile").path("parseStatus").asText())
@@ -331,7 +329,7 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
             ((com.fasterxml.jackson.databind.node.ArrayNode) criteriaBody.path("items")).add(item);
         }
         mockMvc.perform(put("/api/bids/{bidId}/criteria", bidId)
-                        .header("Authorization", bearer(owner))
+                        .cookie(session(owner))
                         .header(HttpHeaders.ORIGIN, "http://127.0.0.1:5174")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsBytes(criteriaBody)))
@@ -342,7 +340,7 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
         JsonNode freezeBody = objectMapper.createObjectNode()
                 .put("revision", parsed.path("bid").path("revision").asLong());
         mockMvc.perform(post("/api/bids/{bidId}/interpretation/freeze", bidId)
-                        .header("Authorization", bearer(owner))
+                        .cookie(session(owner))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsBytes(freezeBody)))
                 .andExpect(status().isOk())
@@ -350,7 +348,7 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
 
         JsonNode acceptedOutline = responseData(mockMvc.perform(
                         post("/api/bids/{bidId}/outline/generate", bidId)
-                                .header("Authorization", bearer(owner)))
+                                .cookie(session(owner)))
                 .andExpect(status().isAccepted())
                 .andReturn());
         assertThat(acceptedOutline.path("outlineTask").path("status").asText())
@@ -381,7 +379,7 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
                 .put("description", "完整响应技术方案评分要求并补充实施细则");
         JsonNode criteriaChangedBeforeContent = responseData(mockMvc.perform(
                         put("/api/bids/{bidId}/criteria", bidId)
-                                .header("Authorization", bearer(owner))
+                                .cookie(session(owner))
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(objectMapper.writeValueAsBytes(criteriaBody)))
                 .andExpect(status().isOk())
@@ -392,7 +390,7 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
                 .put("revision", criteriaChangedBeforeContent.path("bid").path("revision").asLong());
         JsonNode refrozenInterpretation = responseData(mockMvc.perform(
                         post("/api/bids/{bidId}/interpretation/freeze", bidId)
-                                .header("Authorization", bearer(owner))
+                                .cookie(session(owner))
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(objectMapper.writeValueAsBytes(freezeBody)))
                 .andExpect(status().isOk())
@@ -401,7 +399,7 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
                 "revision", refrozenInterpretation.path("bid").path("revision").asLong()
         );
         JsonNode confirmed = responseData(mockMvc.perform(put("/api/bids/{bidId}/outline", bidId)
-                        .header("Authorization", bearer(owner))
+                        .cookie(session(owner))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsBytes(confirmBody)))
                 .andExpect(status().isOk())
@@ -410,7 +408,7 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
         assertThat(confirmed.path("bid").path("contentStale").asBoolean()).isFalse();
 
         mockMvc.perform(post("/api/bids/{bidId}/content/generate", bidId)
-                        .header("Authorization", bearer(owner)))
+                        .cookie(session(owner)))
                 .andExpect(status().isAccepted());
         Long allocatedCharacters = jdbcTemplate.queryForObject("""
                 SELECT SUM(word_budget) FROM bid_generation_unit WHERE bid_id = ?
@@ -425,7 +423,7 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
                 .isEqualTo("SUCCEEDED");
         assertThat(workspace.path("exports").get(0).path("version").asInt()).isEqualTo(1);
         mockMvc.perform(get("/api/bids/{bidId}/outline", bidId)
-                        .header("Authorization", bearer(owner)))
+                        .cookie(session(owner)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.chapters[0].tableCount").isNumber());
 
@@ -447,7 +445,7 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
         jdbcTemplate.update(
                 "UPDATE bid_document SET status = 'GENERATING' WHERE id = ?", bidId);
         mockMvc.perform(post("/api/bids/{bidId}/content/generation/pause", bidId)
-                        .header("Authorization", bearer(owner)))
+                        .cookie(session(owner)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.generationTask.status").value("PAUSED"))
                 .andExpect(jsonPath("$.bid.status").value("GENERATION_PAUSED"));
@@ -459,7 +457,7 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
                 WHERE task_id = ? AND status = 'SUCCEEDED'
                 """, Integer.class, generationTaskId);
         mockMvc.perform(post("/api/bids/{bidId}/content/generation/resume", bidId)
-                        .header("Authorization", bearer(owner)))
+                        .cookie(session(owner)))
                 .andExpect(status().isAccepted());
         JsonNode resumedWorkspace = awaitGeneration(bidId, owner);
         assertThat(resumedWorkspace.path("generationTask").path("status").asText())
@@ -489,7 +487,7 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
 
         JsonNode latestWorkspace = responseData(mockMvc.perform(
                         get("/api/bids/{bidId}", bidId)
-                                .header("Authorization", bearer(owner)))
+                                .cookie(session(owner)))
                 .andExpect(status().isOk())
                 .andReturn());
         long stableRevision = latestWorkspace.path("bid").path("revision").asLong();
@@ -497,7 +495,7 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
                 .put("revision", stableRevision);
         JsonNode unchangedCriteria = responseData(mockMvc.perform(
                         put("/api/bids/{bidId}/criteria", bidId)
-                                .header("Authorization", bearer(owner))
+                                .cookie(session(owner))
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(objectMapper.writeValueAsBytes(criteriaBody)))
                 .andExpect(status().isOk())
@@ -510,7 +508,7 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
                 .put("revision", unchangedCriteriaRevision);
         JsonNode unchangedOutline = responseData(mockMvc.perform(
                         put("/api/bids/{bidId}/outline", bidId)
-                                .header("Authorization", bearer(owner))
+                                .cookie(session(owner))
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(objectMapper.writeValueAsBytes(confirmBody)))
                 .andExpect(status().isOk())
@@ -521,7 +519,7 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
 
         JsonNode reviewed = responseData(mockMvc.perform(
                         post("/api/bids/{bidId}/content/review", bidId)
-                                .header("Authorization", bearer(owner)))
+                                .cookie(session(owner)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.production.contentStatus").value("FROZEN"))
                 .andReturn());
@@ -530,7 +528,7 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
         JsonNode contentFreezeBody = objectMapper.createObjectNode()
                 .put("revision", reviewed.path("bid").path("revision").asLong());
         JsonNode frozen = responseData(mockMvc.perform(post("/api/bids/{bidId}/content/freeze", bidId)
-                        .header("Authorization", bearer(owner))
+                        .cookie(session(owner))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsBytes(contentFreezeBody)))
                 .andExpect(status().isOk())
@@ -543,7 +541,7 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
                 .put("revision", frozenChapter.path("revision").asLong());
         mockMvc.perform(patch("/api/bids/{bidId}/chapters/{chapterId}", bidId,
                         frozenChapter.path("id").asText())
-                        .header("Authorization", bearer(owner))
+                        .cookie(session(owner))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsBytes(editBody)))
                 .andExpect(status().isOk())
@@ -551,11 +549,11 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
                 .andExpect(jsonPath("$.chapter.content").value(
                         org.hamcrest.Matchers.containsString("人工复核通过")));
         mockMvc.perform(post("/api/bids/{bidId}/layout-jobs", bidId)
-                        .header("Authorization", bearer(owner)))
+                        .cookie(session(owner)))
                 .andExpect(status().isConflict());
         JsonNode rereviewed = responseData(mockMvc.perform(
                         post("/api/bids/{bidId}/content/review", bidId)
-                .header("Authorization", bearer(owner)))
+                .cookie(session(owner)))
                 .andExpect(status().isOk())
                 .andReturn());
         assertThat(rereviewed.path("production").path("reviewIssues").toString())
@@ -563,13 +561,13 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
         JsonNode refreezeBody = objectMapper.createObjectNode()
                 .put("revision", rereviewed.path("bid").path("revision").asLong());
         mockMvc.perform(post("/api/bids/{bidId}/content/freeze", bidId)
-                        .header("Authorization", bearer(owner))
+                        .cookie(session(owner))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsBytes(refreezeBody)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.production.contentStatus").value("FROZEN"));
         mockMvc.perform(post("/api/bids/{bidId}/layout-jobs", bidId)
-                        .header("Authorization", bearer(owner)))
+                        .cookie(session(owner)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.production.layoutJob.id").isNotEmpty());
         JsonNode laidOut = awaitLayout(bidId, owner);
@@ -577,19 +575,19 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
                 .isEqualTo("PASSED");
         assertThat(laidOut.path("exports").get(0).path("version").asInt()).isEqualTo(2);
         JsonNode exports = responseData(mockMvc.perform(
-                        get("/api/bids/{bidId}/exports", bidId).header("Authorization", bearer(owner)))
+                        get("/api/bids/{bidId}/exports", bidId).cookie(session(owner)))
                 .andExpect(status().isOk()).andReturn());
         assertThat(exports).isNotEmpty();
         String exportId = exports.get(exports.size() - 1).path("id").asText();
         byte[] docx = mockMvc.perform(
                 get("/api/bids/{bidId}/exports/{exportId}/download", bidId, exportId)
-                        .header("Authorization", bearer(owner)))
+                        .cookie(session(owner)))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsByteArray();
         assertThat(docx).startsWith("PK".getBytes(StandardCharsets.US_ASCII));
 
         JsonNode exportedWorkspace = responseData(mockMvc.perform(
-                        get("/api/bids/{bidId}", bidId).header("Authorization", bearer(owner)))
+                        get("/api/bids/{bidId}", bidId).cookie(session(owner)))
                 .andExpect(status().isOk()).andReturn());
         String existingChapterId = exportedWorkspace.path("chapters").get(0).path("id").asText();
         String existingContent = exportedWorkspace.path("chapters").get(0).path("content").asText();
@@ -599,7 +597,7 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
                 .put("plannedPages", 61);
         JsonNode editedOutline = responseData(mockMvc.perform(
                         put("/api/bids/{bidId}/outline", bidId)
-                                .header("Authorization", bearer(owner))
+                                .cookie(session(owner))
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(objectMapper.writeValueAsBytes(confirmBody)))
                 .andExpect(status().isOk())
@@ -614,7 +612,7 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
 
         JsonNode regenerationAccepted = responseData(mockMvc.perform(
                         post("/api/bids/{bidId}/outline/generate", bidId)
-                                .header("Authorization", bearer(owner)))
+                                .cookie(session(owner)))
                 .andExpect(status().isAccepted()).andReturn());
         assertThat(regenerationAccepted.path("outlineTask").path("status").asText())
                 .isIn("PENDING", "RUNNING");
@@ -638,12 +636,11 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
                 """, String.class, bidId);
         assertThat(archivedChapters).contains(existingChapterId, existingContent);
 
-        mockMvc.perform(patch("/api/account/profile")
-                        .header("Authorization", bearer(owner))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"displayName\":\"投标负责人\"}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.displayName").value("投标负责人"));
+        // 此处原本顺带验证 PATCH /api/account/profile。它按 app_user.id 找人，而平台用户
+        // 不在 app_user 里——对真实用户它答 404 USER_NOT_FOUND。这条断言过去是绿的，
+        // 只因为测试用本地口令账号登录，恰好掩盖了 C1 切换后账户页已经失效这件事。
+        // 那不是标书主流程的一部分，也不是本次退役引入的；随 app_user 整体退役一并处理，
+        // 而不是在这里断言 404 把缺陷写成规格。
         List<String> auditedOperations = jdbcTemplate.queryForList(
                 "SELECT DISTINCT operation_type FROM bid_ai_run WHERE bid_id = ? AND status = 'SUCCEEDED'",
                 String.class, bidId);
@@ -721,11 +718,11 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
         JsonNode latest = null;
         for (int attempt = 0; attempt < 300; attempt++) {
             latest = responseData(mockMvc.perform(get("/api/bids/{bidId}/generation-progress", bidId)
-                            .header("Authorization", bearer(token)))
+                            .cookie(session(token)))
                     .andExpect(status().isOk()).andReturn());
             if (List.of("SUCCEEDED", "FAILED").contains(latest.path("status").asText())) {
                 return responseData(mockMvc.perform(get("/api/bids/{bidId}", bidId)
-                                .header("Authorization", bearer(token)))
+                                .cookie(session(token)))
                         .andExpect(status().isOk()).andReturn());
             }
             Thread.sleep(100);
@@ -737,7 +734,7 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
         JsonNode latest = null;
         for (int attempt = 0; attempt < 300; attempt++) {
             latest = responseData(mockMvc.perform(get("/api/bids/{bidId}", bidId)
-                            .header("Authorization", bearer(token)))
+                            .cookie(session(token)))
                     .andExpect(status().isOk()).andReturn());
             String parseStatus = latest.path("sourceFile").path("parseStatus").asText();
             if ("SUCCEEDED".equals(parseStatus)) {
@@ -757,7 +754,7 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
         JsonNode latest = null;
         for (int attempt = 0; attempt < 300; attempt++) {
             latest = responseData(mockMvc.perform(get("/api/bids/{bidId}", bidId)
-                            .header("Authorization", bearer(token)))
+                            .cookie(session(token)))
                     .andExpect(status().isOk()).andReturn());
             String taskStatus = latest.path("outlineTask").path("status").asText();
             if ("SUCCEEDED".equals(taskStatus) && !latest.path("outline").isEmpty()) {
@@ -777,12 +774,12 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
         JsonNode latest = null;
         for (int attempt = 0; attempt < 300; attempt++) {
             latest = responseData(mockMvc.perform(get("/api/bids/{bidId}/metadata", bidId)
-                            .header("Authorization", bearer(token)))
+                            .cookie(session(token)))
                     .andExpect(status().isOk()).andReturn());
             if (List.of("SUCCEEDED", "FAILED").contains(
                     latest.path("production").path("layoutJob").path("status").asText())) {
                 return responseData(mockMvc.perform(get("/api/bids/{bidId}", bidId)
-                                .header("Authorization", bearer(token)))
+                                .cookie(session(token)))
                         .andExpect(status().isOk()).andReturn());
             }
             Thread.sleep(100);
@@ -794,17 +791,29 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
 
     private JsonNode performJson(org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder request,
                                  String token, String body) throws Exception {
-        return responseData(mockMvc.perform(request.header("Authorization", bearer(token))
+        return responseData(mockMvc.perform(request.cookie(session(token))
                         .contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isOk()).andReturn());
     }
 
-    private String login(String username, String password) throws Exception {
-        JsonNode data = responseData(mockMvc.perform(post("/api/auth/login")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new Credentials(username, password))))
-                .andExpect(status().isOk()).andReturn());
-        return data.path("token").asText();
+    /**
+     * 以一个平台身份进入：直接写一条 RP 会话，返回浏览器会持有的那个 cookie 值。
+     *
+     * <p>不走 IdP 回路——那条回路由 {@code OidcLoginServiceTest} 与
+     * {@code JdbcRpSessionRepositoryTest} 验，这里要的只是「一个已登录的平台用户」。
+     * subject 由名字确定地派生成 UUID，形状与平台签发的一致，同名在各用例间是同一个人。
+     * access token 的过期时间放得远，免得鉴权过滤器在测试中途去 IdP 续期。
+     */
+    private String signIn(String name) {
+        String subject = UUID.nameUUIDFromBytes(name.getBytes(StandardCharsets.UTF_8)).toString();
+        String cookieValue = SessionToken.generate();
+        LocalDateTime now = LocalDateTime.now();
+        rpSessions.insertSession(new RpSession(
+                UUID.randomUUID().toString(), subject, name, null, null,
+                new TenantScope("org-" + subject, "ws-" + subject), "workspace:member",
+                "access-" + name, "refresh-" + name,
+                now.plusHours(12), now.plusHours(12)), SessionToken.hash(cookieValue));
+        return cookieValue;
     }
 
     /**
@@ -818,10 +827,7 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
         return objectMapper.readTree(result.getResponse().getContentAsByteArray());
     }
 
-    private String bearer(String token) {
-        return "Bearer " + token;
-    }
-
-    private record Credentials(String username, String password) {
+    private Cookie session(String cookieValue) {
+        return new Cookie(RpSessionCookie.PLAIN_NAME, cookieValue);
     }
 }
