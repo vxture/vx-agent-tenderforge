@@ -32,12 +32,14 @@ final class JdbcBidAssetPersistence {
                 asset.contentHash(), asset.status());
     }
 
-    List<BidReferenceAsset> listAssets(String ownerId, String category, String keyword) {
+    List<BidReferenceAsset> listAssets(String ownerId, TenantScope tenant, String category, String keyword) {
         StringBuilder sql = new StringBuilder("""
-                SELECT * FROM bid_reference_asset WHERE owner_id = ? AND status = 'ACTIVE'
+                SELECT * FROM bid_reference_asset
+                WHERE owner_id = ? AND workspace_id = ? AND status = 'ACTIVE'
                 """);
         List<Object> args = new ArrayList<>();
         args.add(ownerId);
+        args.add(tenant.workspaceId());
         if (category != null && !category.isBlank()) {
             sql.append(" AND category = ?");
             args.add(category);
@@ -50,16 +52,18 @@ final class JdbcBidAssetPersistence {
         return jdbcTemplate.query(sql.toString(), BidJdbcMappers.ASSET, args.toArray());
     }
 
-    Optional<BidRepository.AssetRecord> findAsset(String assetId, String ownerId) {
+    Optional<BidRepository.AssetRecord> findAsset(String assetId, String ownerId, TenantScope tenant) {
         return jdbcTemplate.query("""
-                SELECT * FROM bid_reference_asset WHERE id = ? AND owner_id = ? AND status = 'ACTIVE'
+                SELECT * FROM bid_reference_asset
+                WHERE id = ? AND owner_id = ? AND workspace_id = ? AND status = 'ACTIVE'
                 """, (rs, row) -> new BidRepository.AssetRecord(
                 rs.getString("id"), rs.getString("owner_id"),
                 new TenantScope(rs.getString("org_id"), rs.getString("workspace_id")),
                 rs.getString("category"),
                 rs.getString("display_name"), rs.getString("original_file_name"),
                 rs.getString("object_key"), rs.getString("media_type"), rs.getLong("file_size"),
-                rs.getString("content_hash"), rs.getString("status")), assetId, ownerId)
+                rs.getString("content_hash"), rs.getString("status")), assetId, ownerId,
+                tenant.workspaceId())
                 .stream().findFirst();
     }
 
@@ -100,10 +104,11 @@ final class JdbcBidAssetPersistence {
                 """, status, errorMessage, assetId);
     }
 
-    boolean removeAsset(String assetId, String ownerId) {
+    boolean removeAsset(String assetId, String ownerId, TenantScope tenant) {
         return jdbcTemplate.update("""
                 UPDATE bid_reference_asset SET status = 'REMOVED', updated_at = CURRENT_TIMESTAMP,
-                    revision = revision + 1 WHERE id = ? AND owner_id = ? AND status = 'ACTIVE'
-                """, assetId, ownerId) == 1;
+                    revision = revision + 1
+                WHERE id = ? AND owner_id = ? AND workspace_id = ? AND status = 'ACTIVE'
+                """, assetId, ownerId, tenant.workspaceId()) == 1;
     }
 }

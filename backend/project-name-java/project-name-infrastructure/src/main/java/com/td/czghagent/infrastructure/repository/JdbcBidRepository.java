@@ -1,5 +1,6 @@
 package com.td.czghagent.infrastructure.repository;
 
+import com.td.czghagent.domain.model.TenantScope;
 import com.td.czghagent.domain.model.BidDocument;
 import com.td.czghagent.domain.model.BidExport;
 import com.td.czghagent.domain.model.BidReferenceAsset;
@@ -40,13 +41,18 @@ public class JdbcBidRepository implements BidRepository {
     }
 
     @Override
-    public List<BidSummary> listBids(String ownerId) {
-        return reader.listBids(ownerId);
+    public List<BidSummary> listBids(String ownerId, TenantScope tenant) {
+        return reader.listBids(ownerId, tenant);
     }
 
     @Override
-    public Optional<BidDocument> findBid(String bidId, String ownerId) {
-        return reader.findBid(bidId, ownerId);
+    public Optional<BidDocument> findBid(String bidId, String ownerId, TenantScope tenant) {
+        return reader.findBid(bidId, ownerId, tenant);
+    }
+
+    @Override
+    public Optional<BidDocument> findBidForTask(String bidId, String ownerId) {
+        return reader.findBidForTask(bidId, ownerId);
     }
 
     @Override
@@ -163,8 +169,9 @@ public class JdbcBidRepository implements BidRepository {
 
     @Override
     @Transactional
-    public void replaceAssetSelections(String bidId, String ownerId, List<String> assetIds) {
-        drafts.replaceAssetSelections(bidId, ownerId, assetIds);
+    public void replaceAssetSelections(String bidId, String ownerId, TenantScope tenant,
+                                       List<String> assetIds) {
+        drafts.replaceAssetSelections(bidId, ownerId, tenant, assetIds);
     }
 
     @Override
@@ -276,13 +283,13 @@ public class JdbcBidRepository implements BidRepository {
 
     @Override
     public List<BidReferenceAsset> listAssets(
-            String ownerId, String category, String keyword) {
-        return assets.listAssets(ownerId, category, keyword);
+            String ownerId, TenantScope tenant, String category, String keyword) {
+        return assets.listAssets(ownerId, tenant, category, keyword);
     }
 
     @Override
-    public Optional<AssetRecord> findAsset(String assetId, String ownerId) {
-        return assets.findAsset(assetId, ownerId);
+    public Optional<AssetRecord> findAsset(String assetId, String ownerId, TenantScope tenant) {
+        return assets.findAsset(assetId, ownerId, tenant);
     }
 
     @Override
@@ -302,8 +309,8 @@ public class JdbcBidRepository implements BidRepository {
     }
 
     @Override
-    public boolean removeAsset(String assetId, String ownerId) {
-        return assets.removeAsset(assetId, ownerId);
+    public boolean removeAsset(String assetId, String ownerId, TenantScope tenant) {
+        return assets.removeAsset(assetId, ownerId, tenant);
     }
 
     @Override

@@ -18,9 +18,25 @@ import java.util.Optional;
 public interface BidRepository {
     void insertBid(BidDocument bid);
 
-    List<BidSummary> listBids(String ownerId);
+    /**
+     * 当前用户在当前工作空间里的标书。
+     *
+     * <p>归属人与工作空间<strong>两个条件都要</strong>：同一个平台用户可以属于多个工作空间，
+     * 只按归属人过滤会让 A 空间的标书出现在 B 空间里——而那个响应看起来完全正常。
+     */
+    List<BidSummary> listBids(String ownerId, TenantScope tenant);
 
-    Optional<BidDocument> findBid(String bidId, String ownerId);
+    /** 请求路径的归属校验：归属人 + 工作空间。见 {@link #listBids}。 */
+    Optional<BidDocument> findBid(String bidId, String ownerId, TenantScope tenant);
+
+    /**
+     * <strong>只给后台任务用</strong>：按归属人取标书，不看工作空间。
+     *
+     * <p>Temporal 活动拿到的 bidId 来自一个已经在请求路径上通过了归属与租户校验的任务，
+     * 而它必须先取到标书才知道租户轴（租户轴以标书行为准）。请求路径不得调用它——
+     * 那会绕过工作空间隔离，而且不报任何错。
+     */
+    Optional<BidDocument> findBidForTask(String bidId, String ownerId);
 
     boolean existsBid(String bidId);
 
@@ -62,7 +78,7 @@ public interface BidRepository {
 
     void replaceCriteria(String bidId, List<BidWorkspace.Criterion> criteria, boolean manual);
 
-    void replaceAssetSelections(String bidId, String ownerId, List<String> assetIds);
+    void replaceAssetSelections(String bidId, String ownerId, TenantScope tenant, List<String> assetIds);
 
     void replaceOutline(String bidId, List<BidWorkspace.OutlineNode> nodes, boolean confirmed);
 
@@ -101,9 +117,9 @@ public interface BidRepository {
 
     void insertAsset(AssetRecord asset);
 
-    List<BidReferenceAsset> listAssets(String ownerId, String category, String keyword);
+    List<BidReferenceAsset> listAssets(String ownerId, TenantScope tenant, String category, String keyword);
 
-    Optional<AssetRecord> findAsset(String assetId, String ownerId);
+    Optional<AssetRecord> findAsset(String assetId, String ownerId, TenantScope tenant);
 
     void replaceAssetChunks(String assetId, List<BidReferenceChunk> chunks);
 
@@ -111,7 +127,7 @@ public interface BidRepository {
 
     void markAssetIngestion(String assetId, String status, String errorMessage);
 
-    boolean removeAsset(String assetId, String ownerId);
+    boolean removeAsset(String assetId, String ownerId, TenantScope tenant);
 
     int nextExportVersion(String bidId);
 
@@ -157,8 +173,8 @@ public interface BidRepository {
      * 个人素材。
      *
      * <p>{@code tenant} 与 {@code ownerId} 并存而不是二选一：归属人决定谁能编辑，
-     * 工作空间决定这份素材属于哪个租户的数据。今天两者一一对应，接通平台身份后不再对应
-     * ——同一个人在两个工作空间里传的素材不该互相可见。
+     * 工作空间决定这份素材属于哪个租户的数据。平台身份下两者不再一一对应——同一个人在
+     * 两个工作空间里传的素材互不可见，所以读路径两个条件都带。
      */
     record AssetRecord(
             String id, String ownerId, TenantScope tenant, String category, String displayName,

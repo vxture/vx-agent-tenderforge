@@ -151,7 +151,8 @@ class BidSourceCommandService {
         support.requireBid(bidId, context);
         List<String> unique = assetIds == null ? List.of() : assetIds.stream().distinct().toList();
         for (String assetId : unique) {
-            BidRepository.AssetRecord asset = bidRepository.findAsset(assetId, context.user().id())
+            BidRepository.AssetRecord asset = bidRepository.findAsset(
+                    assetId, context.user().id(), context.user().tenant())
                     .orElseThrow(() -> new BusinessException(
                             "BID_ASSET_INVALID", "所选素材不可用", 400));
             if ("GALLERY".equals(asset.category())) {
@@ -159,7 +160,8 @@ class BidSourceCommandService {
                         "BID_ASSET_INVALID", "图库不能作为范本或大纲引用", 400);
             }
         }
-        bidRepository.replaceAssetSelections(bidId, context.user().id(), unique);
+        bidRepository.replaceAssetSelections(
+                bidId, context.user().id(), context.user().tenant(), unique);
         return support.workspace(bidId, context);
     }
 

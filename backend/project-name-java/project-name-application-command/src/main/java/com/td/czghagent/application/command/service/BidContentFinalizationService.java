@@ -238,7 +238,7 @@ class BidContentFinalizationService {
     }
 
     private BidWorkspace loadWorkspace(String bidId, String ownerId) {
-        BidDocument bid = bidRepository.findBid(bidId, ownerId).orElseThrow(() ->
+        BidDocument bid = bidRepository.findBidForTask(bidId, ownerId).orElseThrow(() ->
                 new BusinessException("BID_NOT_FOUND", "正文最终化对应标书不存在", 404));
         return bidRepository.loadWorkspace(bid);
     }

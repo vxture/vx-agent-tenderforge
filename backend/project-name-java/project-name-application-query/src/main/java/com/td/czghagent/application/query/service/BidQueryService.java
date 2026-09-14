@@ -30,7 +30,7 @@ public class BidQueryService {
     }
 
     public List<BidSummary> list(CurrentUser user) {
-        return bidRepository.listBids(user.id());
+        return bidRepository.listBids(user.id(), user.tenant());
     }
 
     public BidWorkspace workspace(String bidId, CurrentUser user) {
@@ -58,7 +58,8 @@ public class BidQueryService {
     }
 
     public List<BidReferenceAsset> assets(String category, String keyword, CurrentUser user) {
-        return bidRepository.listAssets(user.id(), normalize(category), normalize(keyword));
+        return bidRepository.listAssets(
+                user.id(), user.tenant(), normalize(category), normalize(keyword));
     }
 
     public List<BidExport> exports(String bidId, CurrentUser user) {
@@ -87,7 +88,7 @@ public class BidQueryService {
     }
 
     private BidDocument requireBid(String bidId, CurrentUser user) {
-        return bidRepository.findBid(bidId, user.id()).orElseThrow(() ->
+        return bidRepository.findBid(bidId, user.id(), user.tenant()).orElseThrow(() ->
                 bidRepository.existsBid(bidId)
                         ? new BusinessException("BID_ACCESS_DENIED", "无权访问该标书", 403)
                         : new BusinessException("BID_NOT_FOUND", "标书不存在", 404)

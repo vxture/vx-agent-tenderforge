@@ -3,6 +3,7 @@
 // DATE: 2026-08-27
 package com.td.czghagent.infrastructure.repository;
 
+import com.td.czghagent.domain.model.TenantScope;
 import com.td.czghagent.domain.model.BidDocument;
 import com.td.czghagent.domain.model.BidExport;
 import com.td.czghagent.domain.model.BidProductionState;
@@ -29,7 +30,7 @@ final class JdbcBidWorkspaceReader {
         this.tasks = tasks;
     }
 
-    List<BidSummary> listBids(String ownerId) {
+    List<BidSummary> listBids(String ownerId, TenantScope tenant) {
         return jdbcTemplate.query("""
                 SELECT b.*,
                        (SELECT COUNT(*) FROM bid_chapter c WHERE c.bid_id = b.id) AS total_chapters,
@@ -45,7 +46,7 @@ final class JdbcBidWorkspaceReader {
                            ORDER BY j.created_at DESC, j.id DESC LIMIT 1) AS actual_pages,
                        (SELECT MAX(e.version_no) FROM bid_export e WHERE e.bid_id = b.id)
                            AS latest_export_version
-                FROM bid_document b WHERE b.owner_id = ?
+                FROM bid_document b WHERE b.owner_id = ? AND b.workspace_id = ?
                 ORDER BY b.updated_at DESC, b.id DESC
                 """, (rs, row) -> new BidSummary(
                 rs.getString("id"), rs.getString("code"), rs.getString("title"),
@@ -57,10 +58,17 @@ final class JdbcBidWorkspaceReader {
                 BidJdbcMappers.nullableInteger(rs.getObject("actual_pages")),
                 BidJdbcMappers.nullableInteger(rs.getObject("latest_export_version")),
                 JdbcTimes.localDateTime(rs, "created_at"),
-                JdbcTimes.localDateTime(rs, "updated_at")), ownerId);
+                JdbcTimes.localDateTime(rs, "updated_at")), ownerId, tenant.workspaceId());
     }
 
-    Optional<BidDocument> findBid(String bidId, String ownerId) {
+    Optional<BidDocument> findBid(String bidId, String ownerId, TenantScope tenant) {
+        return jdbcTemplate.query(
+                "SELECT * FROM bid_document WHERE id = ? AND owner_id = ? AND workspace_id = ?",
+                BidJdbcMappers.BID, bidId, ownerId, tenant.workspaceId()).stream().findFirst();
+    }
+
+    /** 后台任务用：不看工作空间。见 {@code BidRepository#findBidForTask}。 */
+    Optional<BidDocument> findBidForTask(String bidId, String ownerId) {
         return jdbcTemplate.query(
                 "SELECT * FROM bid_document WHERE id = ? AND owner_id = ?",
                 BidJdbcMappers.BID, bidId, ownerId).stream().findFirst();
@@ -203,6 +211,6 @@ final class JdbcBidWorkspaceReader {
     }
 
     private BidDocument latestBid(BidDocument bid) {
-        return findBid(bid.id(), bid.ownerId()).orElse(bid);
+        return findBidForTask(bid.id(), bid.ownerId()).orElse(bid);
     }
 }

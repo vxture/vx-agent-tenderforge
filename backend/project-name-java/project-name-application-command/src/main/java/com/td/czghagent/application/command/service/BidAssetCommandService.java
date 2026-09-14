@@ -52,17 +52,18 @@ class BidAssetCommandService {
         if (!"GALLERY".equals(category)) {
             assetIngestionService.ensureIngested(asset);
         }
-        return bidRepository.listAssets(context.user().id(), category, null).stream()
+        return bidRepository.listAssets(context.user().id(), context.user().tenant(), category, null)
+                .stream()
                 .filter(item -> item.id().equals(id)).findFirst().orElseThrow();
     }
 
     @Transactional
     void removeAsset(String assetId, OperationContext context) {
         BidRepository.AssetRecord asset = bidRepository
-                .findAsset(assetId, context.user().id())
+                .findAsset(assetId, context.user().id(), context.user().tenant())
                 .orElseThrow(() -> new BusinessException(
                         "BID_ASSET_NOT_FOUND", "素材不存在", 404));
-        if (!bidRepository.removeAsset(assetId, context.user().id())) {
+        if (!bidRepository.removeAsset(assetId, context.user().id(), context.user().tenant())) {
             throw new BusinessException("BID_ASSET_NOT_FOUND", "素材不存在", 404);
         }
         fileStorage.delete(asset.objectKey());

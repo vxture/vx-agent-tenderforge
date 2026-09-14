@@ -25,25 +25,35 @@ final class BidCommandSupport {
         this.auditRepository = auditRepository;
     }
 
+    /**
+     * 请求路径的归属校验：归属人 + 当前工作空间。
+     *
+     * <p>别的工作空间里的标书与别人的标书同样答 403，不因为「是我自己的」就放行——
+     * 同一个平台用户在 A 空间里看不到 B 空间的数据，这正是租户隔离要保证的事。
+     */
     BidDocument requireBid(String bidId, OperationContext context) {
-        return requireBid(bidId, context.user().id());
+        return bidRepository.findBid(bidId, context.user().id(), context.user().tenant())
+                .orElseThrow(() -> accessFailure(bidId));
     }
 
     /**
-     * 按归属人取标书。
+     * 按归属人取标书，<strong>只给后台任务用</strong>（见 {@link BidRepository#findBidForTask}）。
      *
-     * <p>后台路径（Temporal 活动）需要这个重载：它必须<strong>先拿到标书才知道租户轴</strong>，
+     * <p>后台路径（Temporal 活动）需要这个方法：它必须<strong>先拿到标书才知道租户轴</strong>，
      * 而合成一个身份去取标书就得先有租户轴——鸡生蛋。解法是承认这条链的顺序：
      * 归属校验用 ownerId 就够，租户轴由取回来的标书提供，它才是权威。
      *
      * <p>「不存在」与「无权访问」<strong>刻意分开报</strong>：这一面的调用方是自家 worker，
      * 两者的处置完全不同（前者是数据被删了，后者是归属算错了）。
      */
-    BidDocument requireBid(String bidId, String ownerId) {
-        return bidRepository.findBid(bidId, ownerId).orElseThrow(() ->
-                bidRepository.existsBid(bidId)
-                        ? new BusinessException("BID_ACCESS_DENIED", "无权访问该标书", 403)
-                        : new BusinessException("BID_NOT_FOUND", "标书不存在", 404));
+    BidDocument requireBidForTask(String bidId, String ownerId) {
+        return bidRepository.findBidForTask(bidId, ownerId).orElseThrow(() -> accessFailure(bidId));
+    }
+
+    private BusinessException accessFailure(String bidId) {
+        return bidRepository.existsBid(bidId)
+                ? new BusinessException("BID_ACCESS_DENIED", "无权访问该标书", 403)
+                : new BusinessException("BID_NOT_FOUND", "标书不存在", 404);
     }
 
     BidWorkspace workspace(String bidId, OperationContext context) {
