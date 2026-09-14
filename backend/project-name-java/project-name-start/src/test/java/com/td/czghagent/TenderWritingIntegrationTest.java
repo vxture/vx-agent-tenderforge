@@ -636,11 +636,6 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
                 """, String.class, bidId);
         assertThat(archivedChapters).contains(existingChapterId, existingContent);
 
-        // 此处原本顺带验证 PATCH /api/account/profile。它按 app_user.id 找人，而平台用户
-        // 不在 app_user 里——对真实用户它答 404 USER_NOT_FOUND。这条断言过去是绿的，
-        // 只因为测试用本地口令账号登录，恰好掩盖了 C1 切换后账户页已经失效这件事。
-        // 那不是标书主流程的一部分，也不是本次退役引入的；随 app_user 整体退役一并处理，
-        // 而不是在这里断言 404 把缺陷写成规格。
         List<String> auditedOperations = jdbcTemplate.queryForList(
                 "SELECT DISTINCT operation_type FROM bid_ai_run WHERE bid_id = ? AND status = 'SUCCEEDED'",
                 String.class, bidId);

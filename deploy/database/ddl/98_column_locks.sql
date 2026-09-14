@@ -23,8 +23,7 @@ GRANT UPDATE (deprovisioned_at, last_seq, provisioned_at, state, updated_at)
 
 -- --- local_authz ---
 REVOKE UPDATE ON local_authz.app_user FROM tenderforge_svc;
-GRANT UPDATE (avatar_revision, avatar_url, display_name, enabled, password_hash, revision, role_code, updated_at)
-  ON local_authz.app_user TO tenderforge_svc;
+-- app_user: 本地账号管理与资料编辑 2026-09-15 退役，代码里没有任何 UPDATE —— 不给 UPDATE。
 REVOKE UPDATE ON local_authz.oidc_authorization_request FROM tenderforge_svc;
 -- oidc_authorization_request: 代码里没有任何 UPDATE —— 追加型，不给 UPDATE。
 REVOKE UPDATE ON local_authz.rp_session FROM tenderforge_svc;

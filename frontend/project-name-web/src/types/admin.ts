@@ -13,40 +13,6 @@ export interface CursorPage<T> {
   nextCursor: string | null
 }
 
-export interface ManagedUser {
-  id: string
-  username: string
-  displayName: string
-  roleCode: 'ADMIN' | 'PLANNER'
-  avatarUrl: string | null
-  enabled: boolean
-  createdAt: string
-  updatedAt: string
-  revision: number
-}
-
-export interface ManagedUserFilters {
-  limit: number
-  keyword: string
-  roleCode: '' | ManagedUser['roleCode']
-  enabled: '' | 'true' | 'false'
-}
-
-export interface CreateManagedUserInput {
-  username: string
-  displayName: string
-  roleCode: ManagedUser['roleCode']
-  password: string
-}
-
-export interface UpdateManagedUserInput {
-  displayName: string
-  roleCode: ManagedUser['roleCode']
-  enabled: boolean
-  password?: string
-  revision: number
-}
-
 /**
  * 审计条目，字段名取自《产品接入通则》X-3 的最小字段集。
  *

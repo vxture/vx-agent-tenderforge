@@ -4,7 +4,6 @@
 package com.td.czghagent.infrastructure.repository;
 
 import com.td.czghagent.domain.model.AuditLogEntry;
-import com.td.czghagent.domain.model.ManagedUser;
 import com.td.czghagent.domain.repository.AdminRepository;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -14,18 +13,9 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.Optional;
 
 @Repository
 public class JdbcAdminRepository implements AdminRepository {
-
-    private static final RowMapper<ManagedUser> USER_MAPPER = (resultSet, rowNumber) -> new ManagedUser(
-            resultSet.getString("id"), resultSet.getString("username"),
-            resultSet.getString("display_name"), resultSet.getString("role_code"),
-            resultSet.getString("avatar_url"), resultSet.getBoolean("enabled"),
-            JdbcTimes.localDateTime(resultSet, "created_at"),
-            JdbcTimes.localDateTime(resultSet, "updated_at"), resultSet.getLong("revision")
-    );
 
     private static final RowMapper<AuditLogEntry> AUDIT_MAPPER = (resultSet, rowNumber) ->
             new AuditLogEntry(
@@ -40,11 +30,20 @@ public class JdbcAdminRepository implements AdminRepository {
                     JdbcTimes.localDateTime(resultSet, "occurred_at")
             );
 
+    // app_user 的两处 LEFT JOIN 只为给历史本地账号的审计行解析出操作者与对象名。
+    // 本地账号体系已退役、表保留；平台身份的 actor_id 是 subject，join 不中，展示回落到原始值。
+    //
+    // **id 必须显式 ::text。** audit_log 的 actor_id / object_id 是 VARCHAR（它们要装平台
+    // subject），而 app_user.id 与 bid_document.id 是 UUID——PostgreSQL 没有 uuid = varchar
+    // 运算符，这条查询连计划都生成不出来，审计页对每个管理员都是 500。迁到 PostgreSQL 起
+    // 就是坏的，因为唯一覆盖它的测试用的是替身仓储；现在由
+    // LocalAccountSurfacesRetiredIntegrationTest 以真实库验。转换放在 UUID 一侧：反过来
+    // 把 actor_id 转成 uuid，遇到非 UUID 的平台 subject 会直接报错。
     private static final String AUDIT_JOINS = """
             FROM audit_log a
-            LEFT JOIN app_user u ON u.id = a.actor_id
-            LEFT JOIN bid_document b ON a.object_type = 'BID' AND b.id = a.object_id
-            LEFT JOIN app_user target_user ON a.object_type = 'USER' AND target_user.id = a.object_id
+            LEFT JOIN app_user u ON u.id::text = a.actor_id
+            LEFT JOIN bid_document b ON a.object_type = 'BID' AND b.id::text = a.object_id
+            LEFT JOIN app_user target_user ON a.object_type = 'USER' AND target_user.id::text = a.object_id
             """;
 
     private static final String AUDIT_SELECT = """
@@ -56,24 +55,6 @@ public class JdbcAdminRepository implements AdminRepository {
 
     public JdbcAdminRepository(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
-    }
-
-    @Override
-    public List<ManagedUser> listUsers(UserFilter filter) {
-        QueryParts where = userWhere(filter);
-        List<Object> parameters = new ArrayList<>(where.parameters());
-        parameters.add(filter.limit());
-        return jdbcTemplate.query(
-                "SELECT * FROM app_user" + where.sql()
-                        + " ORDER BY created_at DESC, id DESC LIMIT ?",
-                USER_MAPPER, parameters.toArray()
-        );
-    }
-
-    @Override
-    public Optional<ManagedUser> findUserById(String userId) {
-        return jdbcTemplate.query("SELECT * FROM app_user WHERE id = ?", USER_MAPPER, userId)
-                .stream().findFirst();
     }
 
     /**
@@ -97,23 +78,6 @@ public class JdbcAdminRepository implements AdminRepository {
         sql.append(" ORDER BY a.occurred_at DESC, a.event_id DESC LIMIT ?");
         parameters.add(filter.limit());
         return jdbcTemplate.query(sql.toString(), AUDIT_MAPPER, parameters.toArray());
-    }
-
-    private QueryParts userWhere(UserFilter filter) {
-        StringBuilder sql = new StringBuilder(" WHERE 1 = 1");
-        List<Object> parameters = new ArrayList<>();
-        if (hasText(filter.keyword())) {
-            sql.append(" AND (LOWER(username) LIKE ? OR LOWER(display_name) LIKE ?)");
-            String keyword = like(filter.keyword());
-            parameters.add(keyword);
-            parameters.add(keyword);
-        }
-        appendEquals(sql, parameters, "role_code", filter.roleCode());
-        if (filter.enabled() != null) {
-            sql.append(" AND enabled = ?");
-            parameters.add(filter.enabled());
-        }
-        return new QueryParts(sql.toString(), parameters);
     }
 
     private QueryParts auditWhere(AuditFilter filter) {

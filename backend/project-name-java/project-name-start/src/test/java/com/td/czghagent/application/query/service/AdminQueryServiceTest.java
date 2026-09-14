@@ -7,7 +7,6 @@ import com.td.czghagent.domain.exception.BusinessException;
 import com.td.czghagent.domain.model.AuditLogEntry;
 import com.td.czghagent.domain.model.CurrentUser;
 import com.td.czghagent.domain.model.CursorPage;
-import com.td.czghagent.domain.model.ManagedUser;
 import com.td.czghagent.domain.model.PageCursor;
 import com.td.czghagent.domain.model.TenantScope;
 import com.td.czghagent.domain.repository.AdminRepository;
@@ -17,7 +16,6 @@ import org.junit.jupiter.api.Test;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -47,10 +45,6 @@ class AdminQueryServiceTest {
     void refusesEveryQueryToANonAdministrator() {
         CurrentUser planner = userWithRole("PLANNER");
 
-        assertThat(rejectionOf(() -> service.listUsers(planner, 10, null, null, null)))
-                .isEqualTo("ADMIN_ACCESS_DENIED");
-        assertThat(rejectionOf(() -> service.getUser(planner, "u-1")))
-                .isEqualTo("ADMIN_ACCESS_DENIED");
         assertThat(rejectionOf(() ->
                 service.listAuditLogs(planner, 10, null, null, null, null, null, null)))
                 .isEqualTo("ADMIN_ACCESS_DENIED");
@@ -58,44 +52,8 @@ class AdminQueryServiceTest {
 
     @Test
     void refusesAnAnonymousCaller() {
-        assertThat(rejectionOf(() -> service.listUsers(null, 10, null, null, null)))
+        assertThat(rejectionOf(() -> service.listAuditLogs(null, 10, null, null, null, null, null, null)))
                 .isEqualTo("ADMIN_ACCESS_DENIED");
-    }
-
-    // ── 账号列表 ────────────────────────────────────────────────────────────
-
-    @Test
-    void clampsTheRequestedLimitServerSide() {
-        service.listUsers(admin(), 10_000, null, null, null);
-        assertThat(repository.lastUserFilter.limit()).isEqualTo(CursorPage.MAX_LIMIT);
-
-        service.listUsers(admin(), null, null, null, null);
-        assertThat(repository.lastUserFilter.limit()).isEqualTo(CursorPage.DEFAULT_LIMIT);
-
-        service.listUsers(admin(), 0, null, null, null);
-        assertThat(repository.lastUserFilter.limit()).isEqualTo(1);
-    }
-
-    @Test
-    void normalisesBlankFiltersToNullSoTheyDoNotNarrowTheQuery() {
-        service.listUsers(admin(), 10, "   ", null, null);
-
-        assertThat(repository.lastUserFilter.keyword())
-                .as("空白关键字若原样下推，会变成一个匹配不到任何行的 LIKE")
-                .isNull();
-    }
-
-    @Test
-    void rejectsAnUnknownRoleFilter() {
-        assertThat(rejectionOf(() -> service.listUsers(admin(), 10, null, "SUPERUSER", null)))
-                .isEqualTo("USER_ROLE_INVALID");
-    }
-
-    @Test
-    void acceptsRoleFiltersCaseInsensitively() {
-        service.listUsers(admin(), 10, null, "admin", null);
-
-        assertThat(repository.lastUserFilter.roleCode()).isEqualTo("ADMIN");
     }
 
     // ── 审计流水的游标 ──────────────────────────────────────────────────────
@@ -225,20 +183,8 @@ class AdminQueryServiceTest {
     }
 
     private static final class RecordingRepository implements AdminRepository {
-        private AdminRepository.UserFilter lastUserFilter;
         private AdminRepository.AuditFilter lastAuditFilter;
         private List<AuditLogEntry> auditRows = new ArrayList<>();
-
-        @Override
-        public List<ManagedUser> listUsers(UserFilter filter) {
-            lastUserFilter = filter;
-            return List.of();
-        }
-
-        @Override
-        public Optional<ManagedUser> findUserById(String userId) {
-            return Optional.empty();
-        }
 
         @Override
         public List<AuditLogEntry> listAuditLogs(AuditFilter filter) {

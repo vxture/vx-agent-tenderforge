@@ -108,9 +108,9 @@ Compose 项目名是 `tenderforge`（`docker-compose.yml` 顶层 `name:`），�
 
 **登记的偏离，两条，均带失效条件：**
 
-1. `/api/admin/users` 的启停仍是布尔 `enabled`，而 B-3 要求单一字符串 `state`。
-   理由不是迁移成本——这整个资源即将被「平台 IdP 提供身份 + 本地只存 workspace 内业务角色」
-   替换，新资源会一出生就用 `state`。**失效条件：本地账号体系被替换即作废。**
+1. ~~`/api/admin/users` 的启停仍是布尔 `enabled`，而 B-3 要求单一字符串 `state`。~~ ——
+   **2026-09-15 已销号**：失效条件「本地账号体系被替换」已满足。身份归平台 IdP，
+   本地口令通道先行退役，随后 `/api/admin/users*` 与本地资料编辑整体删除，偏离随资源消失。
 2. 仓内类型名 `BidWorkspace`（标书编辑聚合）与平台 `workspace`（租户工作空间）同词异义。
    线上契约没有撞名——`BidWorkspace` 从不作为 JSON 键出现，响应键是
    `{bid, sourceFile, criteria, outline, chapters, ...}`；这是仓内可读性问题而非契约违规。
@@ -127,8 +127,8 @@ Compose 项目名是 `tenderforge`（`docker-compose.yml` 顶层 `name:`），�
 | `api/client.ts` | 同源会话 cookie（浏览器零 token）、统一响应解包、401 清会话、受保护文件下载 |
 | `api/modules/` | `auth`、`admin`、`tender` 后端契约 |
 | `features/tender/` | 标书、素材和五个工作区页面 |
-| `features/account/` | 显示名称、头像 |
-| `features/admin/` | 用户与审计管理 |
+| `features/account/` | 平台身份只读展示与控制台资料入口 |
+| `features/admin/` | 审计日志 |
 | `router/` | 路由、登录和角色守卫、错误边界 |
 | `stores/` | Zustand 会话和少量全局 UI 状态 |
 | `config/` | TanStack Query 客户端 |
@@ -210,14 +210,13 @@ Compose 项目名是 `tenderforge`（`docker-compose.yml` 顶层 `name:`），�
 | `/planner/writing` | 编写方式 | `PLANNER` |
 | `/planner/assets` | 个人素材 | `PLANNER` |
 | `/planner/bids` | 我的标书 | `PLANNER` |
-| `/planner/account` | 当前账号 | `PLANNER` |
+| `/planner/account` | 个人资料（平台身份只读，链到控制台资料页） | 已登录 |
 | `/planner/bids/new/setup` | 新建标书 | `PLANNER` |
 | `/planner/bids/{id}/setup` | 标书设置 | 所有者 |
 | `/planner/bids/{id}/interpretation` | 招标文件解读 | 所有者 |
 | `/planner/bids/{id}/outline` | 目录编写 | 所有者 |
 | `/planner/bids/{id}/generating` | 正文生成进度 | 所有者 |
 | `/planner/bids/{id}/content` | 正文编辑、审查、排版和下载 | 所有者 |
-| `/console/users` | 用户管理 | `ADMIN` |
 | `/console/audit-logs` | 审计日志 | `ADMIN` |
 | `/403`、`/404`、`/500` | 错误页 | 按错误进入 |
 
@@ -411,7 +410,7 @@ Compose 中 `api` 只提交工作流，`worker` 注册四个队列并执行 Acti
 
 | 情形 | 形状 | 本系统的例子 |
 | --- | --- | --- |
-| 无回显内容 | 裸 JSON 数组 | `/api/bids`、`/api/bid-assets`、`/api/admin/users`、`/api/bids/{bidId}/exports` |
+| 无回显内容 | 裸 JSON 数组 | `/api/bids`、`/api/bid-assets`、`/api/bids/{bidId}/exports` |
 | 无界游标流水 | `{ items, nextCursor }` | `/api/admin/audit-logs` |
 | 单个对象 | 对象本体 | 其余全部 |
 
@@ -436,19 +435,12 @@ Compose 中 `api` 只提交工作流，`worker` 注册四个队列并执行 Acti
 
 | 方法 | 路径 | 作用 |
 | --- | --- | --- |
-| `GET` | `/api/auth/me` | 返回当前用户 |
+| `GET` | `/api/auth/me` | 返回当前用户（平台身份），同层附控制台资料页地址 `consoleProfileUrl` |
 | `GET` | `/api/auth/oidc/login` | 发起平台登录，`302` 跳 IdP；`returnTo` 已白名单化 |
 | `GET` | `/api/auth/oidc/callback` | IdP 回调，种下不透明会话 cookie 并 `302` 回站内 |
 | `POST` | `/api/auth/oidc/backchannel-logout` | 平台反向登出通知；验签后撤销该 subject 的全部会话 |
 | `POST` | `/api/auth/logout` | **唯一的登出入口**，撤销当前平台会话并清 cookie，返回 `204` |
 | `GET` | `/api/status` | 平台接入自证：四条通道的真实状态；只报状态不报值 |
-| `POST` | `/api/account/avatar` | 上传、处理并替换当前用户头像 |
-| `GET` | `/api/account/avatar` | 鉴权读取当前用户头像 |
-| `PATCH` | `/api/account/profile` | 修改显示名称 |
-| `GET/POST` | `/api/admin/users` | 按 `limit` 钳制的筛选（裸数组）/ 创建用户 |
-| `GET/PATCH` | `/api/admin/users/{userId}` | 查询 / 乐观锁部分更新 |
-| `POST` | `/api/admin/users/{userId}/deactivate` | 停用账号，幂等 |
-| `POST` | `/api/admin/users/{userId}/activate` | 启用账号，幂等 |
 | `GET` | `/api/admin/audit-logs` | 按关键字、动作、结果和时间查询审计，键集游标翻页 |
 
 ### 7.2 素材与标书
@@ -502,7 +494,11 @@ Strict 会让浏览器不带上刚种下的 cookie，表现为「登录成功后
 任何知道 `admin` 口令的人都能绕过平台身份，C2 权益与 C3 计量随之失效，界面上毫无异样。
 鉴权过滤器**不读** `Authorization` 头，库里残留的 `user_session` 行因此全部失效。
 `LocalPasswordChannelRetiredIntegrationTest` 用库里真实有效的旧凭据守着它回不来。
-`app_user` 表、用户管理页与账户页的改名/头像暂留，整体退役另行进行。
+本地账号管理（`/api/admin/users*`）与资料编辑（`/api/account/*`）同日随后退役：它们按
+`app_user.id` 找人，对平台用户一律 404，而管理的账号已经无法登录。显示名与头像归平台 IdP，
+账户页只读展示，并链到控制台资料页（地址由 `CONSOLE_BASE_URL` 单点拼出，经 `/api/auth/me` 下发）。
+头像是 IdP 的绝对地址，直接渲染，不走本站的受保护读取。`app_user` / `user_session` 表保留
+（DDL 不动）、代码不再读写。`LocalAccountSurfacesRetiredIntegrationTest` 守着这组入口不回来。
 
 **是否已登录由服务端裁定**，不由 localStorage 里有没有字符串裁定：RP 会话装在
 HttpOnly cookie 里，浏览器读不到它。
@@ -755,14 +751,20 @@ Java `BidDocumentExporter` 的本地实现用于文档服务关闭时的开发/�
 
 | 表 | 作用 |
 | --- | --- |
-| `app_user`、`app_role`、`app_user_role` | 用户、角色和启停状态 |
-| `auth_session` | 哈希会话 Token、过期和注销时间 |
+| `app_user`、`user_session` | **已退役**的本地账号与会话（2026-09-15）。表保留、DDL 不动，代码不再读写；审计列表为历史行解析操作者名时 LEFT JOIN `app_user` |
 | `audit_log` | 按 X-3 最小字段集：`event_id`、`occurred_at`、`actor_id`、`actor_console`、`object_type`、`object_id`、`action`、`outcome`，另加 `task_id`、`org_id`、`workspace_id`、`trace_id`、`ip_address`、`detail_summary` |
 
 审计表**只追加**：`AuditRepository` 上不暴露 update / delete，更正只能是补偿事件。
 `actor_console` 对本产品界面发起的写填产品码 `tenderforge`，对后台通道（Temporal 活动）
 留空——通则明确 MUST NOT 硬编一个，编出来的控制台名会让审计员按控制台筛查时
 收到一批根本不是从那里发起的动作。
+
+**审计列表的关联必须显式 `::text`。** `actor_id` / `object_id` 是 `VARCHAR`（要装平台
+subject），`app_user.id` / `bid_document.id` 是 `UUID`；PostgreSQL 没有 `uuid = varchar`
+运算符，未加转换时这条查询连计划都生成不出来——迁到 PostgreSQL 起审计页对每个管理员
+都是 500，而唯一覆盖它的单测用的是替身仓储，看不见。2026-09-15 修正，转换放在 UUID 一侧
+（反过来会让非 UUID 的 subject 报错），由 `LocalAccountSurfacesRetiredIntegrationTest`
+以真实库守着。
 
 ### 10.2 工作区
 

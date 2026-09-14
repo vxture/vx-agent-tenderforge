@@ -19,9 +19,9 @@ import {
 } from '@vxture/design-system'
 
 import { authApi } from '@/api/modules/auth'
-import { useProtectedImageUrl } from '@/hooks/useProtectedImageUrl'
 import { useAuthStore } from '@/stores/auth'
 import { useGlobalStore } from '@/stores/global'
+import { platformAvatarSrc } from '@/utils/avatar'
 
 import type { MenuItem } from './menuConfig'
 import { getMenuListByPortal } from './menuConfig'
@@ -100,14 +100,14 @@ function AccountPanel() {
   const { density, fontSize, mode, setDensity, setFontSize, setMode } = useTheme()
   const displayName = user?.displayName || user?.username || '当前用户'
   const roleLabel = user?.admin ? '管理员' : '标书编制人员'
-  const avatar = useProtectedImageUrl(user?.avatarUrl)
 
   return (
     <ShellUserMenu
       user={{
         displayName,
         uniqueLine: user?.username,
-        avatarSrc: avatar.url,
+        // IdP 的 picture 是外部绝对地址，直接渲染；不走本站的受保护读取。
+        avatarSrc: platformAvatarSrc(user?.avatarUrl) ?? '',
         avatarAlt: displayName,
         avatarFallback: displayName.slice(0, 1),
         meta: `${roleLabel}账户`,
@@ -138,16 +138,8 @@ function AccountPanel() {
           onFontSizeChange={setFontSize}
         />
       }
-      links={[
-        user?.admin
-          ? { key: 'account', label: '账号管理', href: '/console/users', icon: 'users' }
-          : {
-              key: 'account',
-              label: '个人资料',
-              href: '/planner/account',
-              icon: 'user-circle',
-            },
-      ]}
+      // 管理员与编制人员同一个入口：账号归平台，本产品不再有本地账号管理页。
+      links={[{ key: 'account', label: '个人资料', href: '/planner/account', icon: 'user-circle' }]}
       actions={[
         {
           key: 'logout',
