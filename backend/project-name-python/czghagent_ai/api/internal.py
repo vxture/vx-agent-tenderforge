@@ -25,6 +25,7 @@ from czghagent_ai.services.ai_provider import (
     OpenAiCompatibleProvider,
     TenderAiProvider,
 )
+from czghagent_ai.services.atlas_endpoints import AUTHORIZED_ENDPOINT_CODES
 from czghagent_ai.services.atlas_provider import (
     AtlasNotEntitledError,
     AtlasProvider,
@@ -83,7 +84,7 @@ def describe_model_exit() -> str:
     if settings.atlas_api_url:
         return (
             f"模型出口：Atlas {settings.atlas_api_url}"
-            f"（专属 endpoint={'开' if settings.atlas_use_dedicated_endpoints else '关，全部走 chat/default'}）"
+            f"（按任务分走 {' / '.join(sorted(AUTHORIZED_ENDPOINT_CODES))}）"
         )
     if settings.deploy_stage in _DEPLOYED_STAGES:
         return (
@@ -109,7 +110,6 @@ def create_ai_provider() -> TenderAiProvider:
             settings.atlas_api_url,
             timeout_seconds=settings.atlas_timeout_seconds,
             max_retries=settings.ai_model_max_retries,
-            use_dedicated_endpoints=settings.atlas_use_dedicated_endpoints,
         )
     if settings.deploy_stage in _DEPLOYED_STAGES and not settings.allow_mock_on_deploy:
         raise RuntimeError(

@@ -31,10 +31,10 @@
 `DOCUMENT_SERVICE_ENABLED` `DOCUMENT_SERVICE_TIMEOUT_SECONDS` `MOCK_BUNDLED`
 `MOCK_STATUS` `MOCK_TIER` `MOCK_USAGE_GATED` `OIDC_CLIENT_ID` `OIDC_CLIENT_SECRET`
 `OIDC_ISSUER` `OIDC_POST_LOGOUT_REDIRECT_URI` `OIDC_REDIRECT_URI` `OIDC_RP_ENABLED`
-`OIDC_SCOPES` `PLATFORM_API_URL` `PLATFORM_INTERNAL_AUTH_TOKEN`
+`OIDC_SCOPES` `PLATFORM_API_URL`
 `RP_SESSION_SECURE_COOKIE` `RP_SESSION_TTL` `TEMPORAL_ADDRESS` `TEMPORAL_DB_PASSWORD`
-`TEMPORAL_ENABLED` `TENDERFORGE_PROVISION_WEBHOOK_SECRET`
-`TENDERFORGE_PROVISION_WEBHOOK_SECRET_NEXT` `UPLOAD_MAX_FILE_SIZE`
+`TEMPORAL_ENABLED` `PROVISION_WEBHOOK_SECRET`
+`PROVISION_WEBHOOK_SECRET_NEXT` `UPLOAD_MAX_FILE_SIZE`
 `UPLOAD_MAX_REQUEST_SIZE` `USAGE_FLUSH_BATCH_SIZE` `USAGE_FLUSH_INTERVAL_MS`
 
 ~~`.env.example` 里的 `WEB_PORT=5274` 与 `CORS_ALLOWED_ORIGINS=http://124.222.17.146:5274`
@@ -74,6 +74,13 @@
 * DDL 单一权威 = `deploy/database/ddl/`（`00_baseline` + `97_service_role`
   + `98_column_locks` + `incr/`），手写、create-once
 * 施加通道 = `db-init.yml`（`confirm=yes` + `expected_sha` + 生产环境审批门）
+* **每次施加都是整份重放**，所以 DDL 必须能在活库上再跑一遍：外键包在
+  `duplicate_object` 守卫里（`ADD CONSTRAINT` 没有 `IF NOT EXISTS`），由
+  `PostgresBackedTest` 在同一个库上施加两遍来守。2026-09-15 之前这条只写在注释里，
+  第一次在活库上重放就倒在了第一条外键上
+* db-init **不 source 宿主机 `.env`**，只经 `deploy/database/env-value.sh` 按键取
+  `DEPLOY_STAGE` / `POSTGRES_ROOT_PASSWORD` / `DATABASE_PASSWORD`。compose 允许未加引号
+  的空格值，bash 会把它当命令执行（同日 `OIDC_SCOPES` 让 db-init 以 127 退出）
 * 应用以最小权限角色连库，**连 CREATE 的权限都没有**——就算有人把 Flyway
   加回来，建表也会被库直接拒绝。配置可以被改错，权限不会
 
@@ -84,6 +91,18 @@
 `temporal-db-init` 是一次性 job，`temporal` 用 `auto-setup` 镜像。首次部署要保证
 它在 api 之前就绪；`init-temporal.sh` 的换行符问题本轮已经用 `.gitattributes` 修掉
 （CRLF 会让容器内 `sh` 报 `set: -: invalid option`）。
+
+### 2.4 bind mount 的属主
+
+`data/private` 是 bind mount，而 api / worker 以镜像里的 `app`（uid 10001）运行。
+部署用户在宿主机上建出的目录属于部署用户——2026-09-14 生产实测 uid 1000、775，
+容器能读不能写：服务 healthy、部署报绿，第一次上传招标文件才报
+`AccessDeniedException: /app/data/private/bids`。探针只探 liveness，中间没有任何信号。
+
+`deploy.sh` 在 `compose up` 之前由 `ensure_private_owner` 修正：uid 从 api 镜像读、
+不写死，已正确则跳过，可单独执行 `bash deploy/deploy.sh owner`。
+护栏 `check_deploy_private_owner.py` 对着真实 Docker 验它，用两个 uid 的探针镜像
+拦住写死 uid 的实现。`data/postgres` 不需要：postgres 镜像的入口脚本自己修属主。
 
 ---
 
@@ -150,11 +169,11 @@ Insights → Dependency graph → Dependabot 手动跑一次 "Check for updates"
 
 **a. 本产品自持（部署时生成，运维保管）**
 `MYSQL_PASSWORD` `MYSQL_ROOT_PASSWORD` `TEMPORAL_DB_PASSWORD`
-`AI_SERVICE_INTERNAL_TOKEN` `BOOTSTRAP_ADMIN_PASSWORD` `BOOTSTRAP_PLANNER_PASSWORD`
+`AI_SERVICE_INTERNAL_TOKEN`
 
 **b. 平台线提供（见 §4）**
-`OIDC_*` `PLATFORM_API_URL` `PLATFORM_INTERNAL_AUTH_TOKEN`
-`TENDERFORGE_PROVISION_WEBHOOK_SECRET(_NEXT)` `ATLAS_API_URL` `CONSOLE_BASE_URL`
+`OIDC_*` `PLATFORM_API_URL`
+`PROVISION_WEBHOOK_SECRET(_NEXT)` `ATLAS_API_URL` `CONSOLE_BASE_URL`
 
 **c. 部署形态（运维决定）**
 `DEPLOY_STAGE=production` `APP_VERSION` `ALLOW_MOCK_ON_DEPLOY=false`
@@ -174,8 +193,8 @@ Insights → Dependency graph → Dependabot 手动跑一次 "Check for updates"
 | 依赖 | 缺了会怎样 |
 | --- | --- |
 | `tenderforge` 产品登记 + OIDC client 对 | 登录不可用；**所有 S2S 调用铸不出票**（一对凭据同时解锁两者） |
-| `PLATFORM_API_URL` + 内部令牌 | C2 权益与 C3 用量上报落到替身，部署态拒绝启动 |
-| `TENDERFORGE_PROVISION_WEBHOOK_SECRET` | 开通/停用事件全部被拒；未配密钥时接收端一律拒绝 |
+| `PLATFORM_API_URL` + OIDC client（用来换 S2S 票） | C2 权益与 C3 用量上报落到替身，部署态拒绝启动 |
+| `PROVISION_WEBHOOK_SECRET` | 开通/停用事件全部被拒；未配密钥时接收端一律拒绝 |
 | Atlas `ATLAS_API_URL` + **endpoint 授权** | 缺授权时每次调用 `403 NOT_ENTITLED`，与令牌是否有效无关 |
 | 工作空间覆盖 | 铸币校验的是**调用方**是否覆盖该工作空间 |
 
@@ -184,9 +203,27 @@ Insights → Dependency graph → Dependabot 手动跑一次 "Check for updates"
 无法真正生效**——这两件事不能分别排期。
 
 需要交给平台线的两个具体值：
-- webhook 投递地址：`https://tenderforge.vxture.com/api/platform/provisioning/webhook`
-- 需要授权的 Atlas endpoint：见 `atlas_endpoints.required_endpoint_codes()`；
-  授权到位前保持 `ATLAS_USE_DEDICATED_ENDPOINTS=false`，全部走 `chat/default`
+- webhook 投递地址：`https://tenderforge.vxture.com/api/webhooks/vxture`
+  （路径由通则统一规定，所有产品一致；平台侧登记这个值）
+
+  **这个地址的切换分三步，顺序不能换**（X-4）。平台侧当前登记的还是旧地址
+  `/provisioning/webhook`：
+
+  1. 本产品新旧两路都能收，并发版 —— nginx 上留一条 `location = /provisioning/webhook`
+     把旧路径转到标准路径，两条路进同一个控制器；
+  2. 平台侧把登记地址改成 `/api/webhooks/vxture`；
+  3. 删掉那条 nginx 别名，并把 `check_webhook_path.py` 的 `LEGACY_INBOUND_PATH`
+     置成 `None` —— 守卫会立刻反过来要求别名必须消失。
+
+  **跳过第 1 步直接做第 2 步，或者只上新路径就发版，都会有一段投递落空的窗口，
+  而落空不报错**：未匹配的路径落到 SPA catch-all，平台拿回 index.html 和 HTTP 200，
+  投递被判为送达。第 3 步也不是可选的——留着两条路，下一个人无法从代码判断
+  线上登记的是哪一个。
+- ~~需要授权的 Atlas endpoint~~ —— 2026-09-14 已授权四条通用路由
+  `chat/deterministic` / `chat/fast` / `chat/default` / `chat/reasoning`，
+  operation 到路由的对应见 `atlas_endpoints.OPERATION_ROUTES`。
+  降级开关 `ATLAS_USE_DEDICATED_ENDPOINTS` 同日退役：它只为「等授权」那段时期存在。
+  宿主机 `.env` 里残留的这一行已无效（compose 白名单不再列它），可删
 
 ---
 
@@ -377,7 +414,7 @@ beta 与生产同机（vx-worker-02），但**落在另一块阵列**：`/srv/md
 | 部署审批 | 必需审批人 | 无 |
 
 Temporal UI 端口必须错开：两个栈同机跑，8233 撞了第二个栈直接起不来。
-库口令、内部令牌与初始账号口令两边各自独立——共用的话，beta 泄一次等于生产也泄了。
+库口令与内部令牌两边各自独立——共用的话，beta 泄一次等于生产也泄了。
 `DATA_DIR` 不单独设：`deploy.sh` 里它默认取 `$REPO_DIR/data`，因此自动跟着 `DEPLOY_DIR` 走。
 
 ---

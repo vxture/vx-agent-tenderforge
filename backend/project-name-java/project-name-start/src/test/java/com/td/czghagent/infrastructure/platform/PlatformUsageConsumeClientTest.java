@@ -7,6 +7,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpServer;
+import com.td.czghagent.domain.exception.BusinessException;
+import com.td.czghagent.domain.model.S2SToken;
 import com.td.czghagent.domain.port.UsageConsumeClient;
 import com.td.czghagent.domain.repository.UsageBufferRepository.BufferedUsage;
 import org.junit.jupiter.api.AfterEach;
@@ -36,6 +38,7 @@ class PlatformUsageConsumeClientTest {
 
     private HttpServer server;
     private PlatformUsageConsumeClient client;
+    private RecordingPlatformMinter minter;
     private final AtomicInteger requestCount = new AtomicInteger();
     private final AtomicReference<String> lastBody = new AtomicReference<>();
     private final AtomicReference<Headers> lastHeaders = new AtomicReference<>();
@@ -57,8 +60,10 @@ class PlatformUsageConsumeClientTest {
             }
         });
         server.start();
+        minter = new RecordingPlatformMinter();
         client = new PlatformUsageConsumeClient(RestClient.builder(),
-                "http://127.0.0.1:" + server.getAddress().getPort(), "internal-token");
+                "http://127.0.0.1:" + server.getAddress().getPort(),
+                new PlatformCallCredentials(minter));
     }
 
     @AfterEach
@@ -92,7 +97,52 @@ class PlatformUsageConsumeClientTest {
         client.consume(usage("k-1", "ws-1", null));
 
         assertThat(lastHeaders.get().getFirst("x-request-id")).isEqualTo("k-1");
-        assertThat(lastHeaders.get().getFirst("x-vxture-internal-auth")).isEqualTo("internal-token");
+    }
+
+    // ── 凭证 ────────────────────────────────────────────────────────────────
+
+    /** 票为这条用量所属的工作空间铸——平台按票上的工作空间记账。 */
+    @Test
+    void presentsAPlatformTokenMintedForTheUsagesWorkspace() {
+        client.consume(usage("k-1", "ws-9", null));
+
+        assertThat(minter.mintedFor).containsExactly("vxture|ws-9");
+        assertThat(lastHeaders.get().getFirst("Authorization")).isEqualTo("Bearer s2s-1");
+        assertThat(lastHeaders.get().getFirst("x-vxture-internal-auth"))
+                .as("共享口令已退役，这个头不该再出现").isNull();
+    }
+
+    /** 铸不出票时不发请求、不抛，这一行留在缓冲区里下一轮再来。 */
+    @Test
+    void keepsTheUsageBufferedWithoutCallingThePlatformWhenNoTokenCanBeMinted() {
+        minter.failure = new BusinessException("S2S_EXCHANGE_FAILED", "身份服务暂时不可用",
+                502, true, null);
+
+        UsageConsumeClient.Outcome outcome = client.consume(usage("k-1", "ws-1", null));
+
+        assertThat(outcome.recorded()).isFalse();
+        assertThat(requestCount.get()).isZero();
+    }
+
+    /** 票被拒就作废，下一轮换新票，而不是把同一张重放到过期。 */
+    @Test
+    void invalidatesARejectedTokenSoTheNextRoundRemints() {
+        responseStatus.set(401);
+
+        UsageConsumeClient.Outcome outcome = client.consume(usage("k-1", "ws-1", null));
+
+        assertThat(outcome.recorded()).isFalse();
+        assertThat(minter.invalidated).extracting(S2SToken::value).containsExactly("s2s-1");
+    }
+
+    /** 与凭证无关的失败不作废票——那会让每次平台抖动都多一次换票。 */
+    @Test
+    void keepsTheTokenWhenTheFailureIsNotAboutIt() {
+        responseStatus.set(503);
+
+        client.consume(usage("k-1", "ws-1", null));
+
+        assertThat(minter.invalidated).isEmpty();
     }
 
     /** 有 task_id 就带上（X-2），没有就不要发一个空头。 */
@@ -161,7 +211,7 @@ class PlatformUsageConsumeClientTest {
     @Test
     void survivesAPlatformThatIsNotThere() {
         PlatformUsageConsumeClient offline = new PlatformUsageConsumeClient(
-                RestClient.builder(), "http://127.0.0.1:1", "internal-token");
+                RestClient.builder(), "http://127.0.0.1:1", new PlatformCallCredentials(minter));
 
         UsageConsumeClient.Outcome outcome = offline.consume(usage("k-1", "ws-1", null));
 

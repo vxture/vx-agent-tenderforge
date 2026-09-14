@@ -39,6 +39,7 @@ final class FakeIdp implements AutoCloseable {
     private final RSAKey strangerKey;
     private final AtomicReference<String> tokenResponse = new AtomicReference<>();
     private final AtomicReference<Integer> tokenStatus = new AtomicReference<>(200);
+    private final AtomicReference<String> lastTokenForm = new AtomicReference<>();
 
     FakeIdp() throws Exception {
         this.signingKey = new RSAKeyGenerator(2048).keyID("test-key-1").generate();
@@ -53,13 +54,21 @@ final class FakeIdp implements AutoCloseable {
         // 的形式失败，而那看起来像是被测代码的问题。
         server.createContext("/jwks", exchange ->
                 respond(exchange, 200, new JWKSet(signingKey.toPublicJWK()).toString()));
-        server.createContext("/token", exchange ->
-                respond(exchange, tokenStatus.get(), tokenResponse.get()));
+        server.createContext("/token", exchange -> {
+            lastTokenForm.set(new String(exchange.getRequestBody().readAllBytes(),
+                    java.nio.charset.StandardCharsets.UTF_8));
+            respond(exchange, tokenStatus.get(), tokenResponse.get());
+        });
         server.start();
     }
 
     String issuer() {
         return "http://127.0.0.1:" + server.getAddress().getPort();
+    }
+
+    /** 最近一次打到 /token 的表单原文（url-encoded）。 */
+    String lastTokenForm() {
+        return lastTokenForm.get();
     }
 
     /** 设定 /token 的下一次应答。 */

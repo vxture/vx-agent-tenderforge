@@ -210,6 +210,26 @@ jobs:
       - name: Deploy dir assertion guardrail (absolute POSIX path)
         run: python scripts/guardrails/check_deploy_dir_guard.py
 
+      # data/private 是 bind mount，属主必须等于 api 镜像的运行用户——不等时容器
+      # 照常 healthy、部署照常报绿，第一次上传才报 AccessDenied（2026-09-14 生产）。
+      # 护栏对着真实 Docker 跑 deploy.sh，用两个 uid 的探针镜像拦住写死 uid 的实现。
+      - name: Deploy private dir owner guardrail (bind mount uid == image USER)
+        run: python scripts/guardrails/check_deploy_private_owner.py
+
+      # db-init 以前 `set -a; . ./.env`：compose 允许未加引号的空格值，bash 却把它当命令
+      # 执行，db-init 在生产上以 127 退出（2026-09-15）。护栏跑读取器本身，喂一份带
+      # 空格、引号、命令替换的 .env，断言值取对且命令一条没被执行；并断言远端脚本
+      # 用到的每个配置变量都经读取器取得。
+      - name: db-init env reader guardrail (read by key, never execute .env)
+        run: python scripts/guardrails/check_db_init_env_reader.py
+
+      # C3 回调路径由通则统一规定（所有产品 /api/webhooks/vxture），而本仓有六处
+      # 独立写下它。错开的表现都不像「路径配错了」：漏了会话豁免名单是平台收到
+      # 非 2xx 重试十次，漏了 nginx 转发是平台拿到 index.html 和 HTTP 200——
+      # 投递被判为送达，开通与档位变更静默消失，两侧都不报错。
+      - name: Webhook path guardrail (C3 下发 · 六处一致)
+        run: python scripts/guardrails/check_webhook_path.py
+
       - name: Python lint (ruff)
         working-directory: backend/project-name-python
         run: |
@@ -238,7 +258,8 @@ jobs:
           echo "${sha256}  /tmp/shellcheck.tar.xz" | sha256sum -c -
           tar -xJf /tmp/shellcheck.tar.xz -C /tmp
           /tmp/shellcheck-v${SHELLCHECK_VERSION}/shellcheck --version
-          /tmp/shellcheck-v${SHELLCHECK_VERSION}/shellcheck deploy/deploy.sh scripts/ci/sca-scan.sh
+          /tmp/shellcheck-v${SHELLCHECK_VERSION}/shellcheck deploy/deploy.sh scripts/ci/sca-scan.sh \
+            deploy/database/env-value.sh deploy/database/apply.sh
 
   # ── 质量闸门（聚合器；稳定的必需检查名）─────────────────────────────────
   quality-gate:

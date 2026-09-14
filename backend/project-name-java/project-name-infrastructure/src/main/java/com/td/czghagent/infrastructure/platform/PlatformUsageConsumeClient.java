@@ -5,6 +5,7 @@ package com.td.czghagent.infrastructure.platform;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.td.czghagent.domain.model.ProductIdentity;
+import com.td.czghagent.domain.model.S2SToken;
 import com.td.czghagent.domain.port.UsageConsumeClient;
 import com.td.czghagent.domain.repository.UsageBufferRepository.BufferedUsage;
 import org.slf4j.Logger;
@@ -27,13 +28,13 @@ public class PlatformUsageConsumeClient implements UsageConsumeClient {
 
     private final RestClient client;
     private final String baseUrl;
-    private final String internalAuthToken;
+    private final PlatformCallCredentials credentials;
 
     public PlatformUsageConsumeClient(RestClient.Builder builder, String baseUrl,
-                                      String internalAuthToken) {
+                                      PlatformCallCredentials credentials) {
         this.client = builder.build();
         this.baseUrl = baseUrl.replaceAll("/+$", "");
-        this.internalAuthToken = internalAuthToken;
+        this.credentials = credentials;
     }
 
     @Override
@@ -47,6 +48,12 @@ public class PlatformUsageConsumeClient implements UsageConsumeClient {
         if (usage.endUserId() != null) {
             body.put("end_user_id", usage.endUserId());
         }
+        S2SToken token = mintOrNull(usage);
+        if (token == null) {
+            // 铸不出票 = 这一轮没法上报，不等于这条用量有问题。
+            // 不发请求，留在缓冲区里按冲洗任务既有的重试节奏再来。
+            return new Outcome(0, false, false, null, "s2s_token_unavailable");
+        }
         try {
             // 取字符串再自己解析，<strong>不</strong>直接反序列化成 JsonNode：
             // 后者在身体不是合法 JSON 时会抛，于是一个已经被平台记下的 200
@@ -54,12 +61,12 @@ public class PlatformUsageConsumeClient implements UsageConsumeClient {
             // 的判据，身体只是细节——细节读不出来不该推翻判据。
             String raw = client.post()
                     .uri(baseUrl + "/usage/consume")
-                    .header("x-vxture-internal-auth", internalAuthToken)
                     // 幂等键同时作为请求标识落在平台的事件旁边——
                     // 对账时两侧要按同一个 id 找同一件事，而这是双方本来就共有的那个 id。
                     .header("x-request-id", usage.idempotencyKey())
                     // X-2：有 task_id 就带上，让这次计量能和触发它的那条链对上。
                     .headers(headers -> {
+                        PlatformCallCredentials.apply(headers, token);
                         if (usage.taskId() != null) {
                             headers.add("x-task-id", usage.taskId());
                         }
@@ -70,6 +77,10 @@ public class PlatformUsageConsumeClient implements UsageConsumeClient {
             return parse(200, readTree(raw));
         } catch (org.springframework.web.client.RestClientResponseException failure) {
             // 非 200 = 还没记下。不抛给冲洗任务，让它把这一行留在缓冲区里重试。
+            if (failure.getStatusCode().value() == 401) {
+                // 票被拒：作废，下一轮重铸，而不是把同一张重放到它过期。
+                credentials.invalidate(token);
+            }
             return new Outcome(failure.getStatusCode().value(), false, false, null,
                     failure.getResponseBodyAsString());
         } catch (RuntimeException exception) {
@@ -81,6 +92,16 @@ public class PlatformUsageConsumeClient implements UsageConsumeClient {
     @Override
     public boolean isMock() {
         return false;
+    }
+
+    private S2SToken mintOrNull(BufferedUsage usage) {
+        try {
+            return credentials.mint(usage.workspaceId());
+        } catch (RuntimeException exception) {
+            LOGGER.warn("No S2S token for usage {} (workspace {})",
+                    usage.idempotencyKey(), usage.workspaceId(), exception);
+            return null;
+        }
     }
 
     /** 宽容解析：读不出来就当没有细节，而不是当作一次失败。 */

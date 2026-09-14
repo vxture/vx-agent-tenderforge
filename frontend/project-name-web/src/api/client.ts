@@ -97,9 +97,9 @@ const toApiError = (envelope: Partial<ErrorEnvelope> | null, status: number, fal
  */
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const authenticated = options.authenticated !== false
-  const token = storage.get('token')
+  // 不发 Authorization：会话是服务端的 HttpOnly cookie，同源请求由浏览器自动带上。
+  // 本地口令的 Bearer 通道已退役，服务端不再读这个头（浏览器零 token，详细设计 §7.2b）。
   const headers = new Headers()
-  if (authenticated && token) headers.set('Authorization', `Bearer ${token}`)
   if (!options.formData) headers.set('Content-Type', 'application/json')
 
   const response = await fetch(`${baseUrl}${path}`, {
@@ -126,9 +126,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
 }
 
 export async function downloadFile(path: string, fallbackName: string): Promise<void> {
-  const response = await fetch(`${baseUrl}${path}`, {
-    headers: { Authorization: `Bearer ${storage.get('token')}` },
-  })
+  const response = await fetch(`${baseUrl}${path}`)
   if (response.status === 401) unauthorized()
   if (!response.ok) {
     const envelope = (await response.json().catch(() => null)) as ErrorEnvelope | null
@@ -146,15 +144,13 @@ export async function downloadFile(path: string, fallbackName: string): Promise<
 }
 
 /**
- * 读取需要 Bearer 鉴权的图片或文件，并返回浏览器 Blob。
+ * 读取需要会话鉴权的图片或文件，并返回浏览器 Blob。
  * @preconditions - path 为当前账号有权读取的站内文件接口
  * @sideEffects - 发起网络请求；登录失效时清理会话并跳转登录页
  * @errorHandling - 非成功响应转换为 ApiError，不暴露服务端对象键
  */
 export async function fetchProtectedBlob(path: string): Promise<Blob> {
-  const response = await fetch(`${baseUrl}${path}`, {
-    headers: { Authorization: `Bearer ${storage.get('token')}` },
-  })
+  const response = await fetch(`${baseUrl}${path}`)
   if (response.status === 401) unauthorized()
   if (!response.ok) {
     const envelope = (await response.json().catch(() => null)) as ErrorEnvelope | null

@@ -9,7 +9,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
 
-import java.time.LocalDateTime;
 import java.util.Optional;
 
 @Repository
@@ -45,17 +44,6 @@ public class JdbcAuthRepository implements AuthRepository {
     public Optional<UserAccount> findById(String userId) {
         return jdbcTemplate.query("SELECT * FROM app_user WHERE id = ?", USER_MAPPER, userId)
                 .stream().findFirst();
-    }
-
-    @Override
-    public Optional<UserAccount> findBySessionTokenHash(String tokenHash, LocalDateTime now) {
-        String sql = """
-                SELECT u.*
-                FROM app_user u
-                JOIN user_session s ON s.user_id = u.id
-                WHERE s.token_hash = ? AND s.expires_at > ? AND u.enabled = TRUE
-                """;
-        return jdbcTemplate.query(sql, USER_MAPPER, tokenHash, now).stream().findFirst();
     }
 
     @Override
@@ -108,15 +96,6 @@ public class JdbcAuthRepository implements AuthRepository {
     }
 
     @Override
-    public void updatePassword(String userId, String passwordHash) {
-        jdbcTemplate.update("""
-                UPDATE app_user
-                SET password_hash = ?, updated_at = CURRENT_TIMESTAMP, revision = revision + 1
-                WHERE id = ?
-                """, passwordHash, userId);
-    }
-
-    @Override
     public long countEnabledAdmins() {
         Long count = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM app_user WHERE role_code = 'ADMIN' AND enabled = TRUE",
@@ -126,30 +105,7 @@ public class JdbcAuthRepository implements AuthRepository {
     }
 
     @Override
-    public void insertSession(String id, String userId, String tokenHash, LocalDateTime expiresAt) {
-        jdbcTemplate.update("""
-                INSERT INTO user_session(id, user_id, token_hash, expires_at)
-                VALUES (?, ?, ?, ?)
-                """, id, userId, tokenHash, expiresAt);
-    }
-
-    @Override
-    public void touchSession(String tokenHash, LocalDateTime seenAt) {
-        jdbcTemplate.update("UPDATE user_session SET last_seen_at = ? WHERE token_hash = ?", seenAt, tokenHash);
-    }
-
-    @Override
-    public void deleteSession(String tokenHash) {
-        jdbcTemplate.update("DELETE FROM user_session WHERE token_hash = ?", tokenHash);
-    }
-
-    @Override
     public void deleteSessionsByUserId(String userId) {
         jdbcTemplate.update("DELETE FROM user_session WHERE user_id = ?", userId);
-    }
-
-    @Override
-    public void deleteExpiredSessions(LocalDateTime now) {
-        jdbcTemplate.update("DELETE FROM user_session WHERE expires_at <= ?", now);
     }
 }

@@ -6,7 +6,9 @@ package com.td.czghagent.infrastructure.platform;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
+import com.td.czghagent.domain.exception.BusinessException;
 import com.td.czghagent.domain.model.Entitlement;
+import com.td.czghagent.domain.model.S2SToken;
 import com.td.czghagent.domain.port.EntitlementResolver;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -36,6 +38,11 @@ class PlatformEntitlementResolverTest {
     private final AtomicReference<String> responseBody = new AtomicReference<>("{}");
     private final AtomicReference<Integer> responseStatus = new AtomicReference<>(200);
     private final AtomicReference<String> lastQuery = new AtomicReference<>();
+    private final AtomicReference<String> lastAuthorization = new AtomicReference<>();
+    private final AtomicReference<String> lastInternalAuth = new AtomicReference<>();
+    /** 接下来这么多次请求答 401，之后恢复 {@link #responseStatus}。 */
+    private final AtomicInteger unauthorizedLeft = new AtomicInteger();
+    private RecordingPlatformMinter minter;
     private EntitlementResolver resolver;
 
     @BeforeEach
@@ -44,16 +51,21 @@ class PlatformEntitlementResolverTest {
         server.createContext("/platform/entitlements", exchange -> {
             requestCount.incrementAndGet();
             lastQuery.set(exchange.getRequestURI().getQuery());
+            lastAuthorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+            lastInternalAuth.set(exchange.getRequestHeaders().getFirst("x-vxture-internal-auth"));
+            boolean reject = unauthorizedLeft.getAndUpdate(n -> Math.max(0, n - 1)) > 0;
             byte[] bytes = responseBody.get().getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().add("Content-Type", "application/json");
-            exchange.sendResponseHeaders(responseStatus.get(), bytes.length);
+            exchange.sendResponseHeaders(reject ? 401 : responseStatus.get(), bytes.length);
             try (OutputStream out = exchange.getResponseBody()) {
                 out.write(bytes);
             }
         });
         server.start();
+        minter = new RecordingPlatformMinter();
         resolver = new PlatformEntitlementResolver(RestClient.builder(),
-                "http://127.0.0.1:" + server.getAddress().getPort(), "internal-token");
+                "http://127.0.0.1:" + server.getAddress().getPort(),
+                new PlatformCallCredentials(minter));
     }
 
     @AfterEach
@@ -72,6 +84,67 @@ class PlatformEntitlementResolverTest {
         assertThat(lastQuery.get())
                 .contains("workspace_id=ws-1")
                 .contains("product=tenderforge");
+    }
+
+    // ── 凭证 ────────────────────────────────────────────────────────────────
+
+    /**
+     * 带的是为<strong>这个</strong>工作空间铸的平台面票，不是共享口令。
+     *
+     * <p>平台按票上的工作空间作答，查询串里的会被丢弃——票铸错了工作空间，
+     * 拿回来的就是另一个工作空间的权益。
+     */
+    @Test
+    void presentsAPlatformTokenMintedForThatWorkspace() {
+        responseBody.set("{\"tier\":\"free\"}");
+
+        resolver.resolve("ws-1");
+
+        assertThat(minter.mintedFor).containsExactly("vxture|ws-1");
+        assertThat(lastAuthorization.get()).isEqualTo("Bearer s2s-1");
+        assertThat(lastInternalAuth.get())
+                .as("共享口令已退役，这个头不该再出现").isNull();
+    }
+
+    /** 票在平台侧不被接受时，作废它并换一张新票再问一次。 */
+    @Test
+    void remintsOnceWhenThePlatformRejectsTheToken() {
+        unauthorizedLeft.set(1);
+        responseBody.set("{\"tier\":\"pro\"}");
+
+        Entitlement entitlement = resolver.resolve("ws-1");
+
+        assertThat(entitlement.tier()).isEqualTo("pro");
+        assertThat(minter.invalidated).extracting(S2SToken::value).containsExactly("s2s-1");
+        assertThat(lastAuthorization.get()).isEqualTo("Bearer s2s-2");
+        assertThat(requestCount.get()).isEqualTo(2);
+    }
+
+    @Test
+    void givesUpAfterOneRemintAndFailsClosed() {
+        unauthorizedLeft.set(5);
+        responseBody.set("{\"tier\":\"pro\"}");
+
+        Entitlement entitlement = resolver.resolve("ws-1");
+
+        assertThat(entitlement.allowsProductSurface()).isFalse();
+        assertThat(requestCount.get())
+                .as("新票仍被拒说明问题不在票上，不连环重试").isEqualTo(2);
+    }
+
+    /**
+     * 铸不出票（例如本产品在该工作空间没有订阅或开通，平台答 invalid_target）
+     * 就是没有权益，而且不必去问平台。
+     */
+    @Test
+    void failsClosedWithoutCallingThePlatformWhenNoTokenCanBeMinted() {
+        minter.failure = new BusinessException("S2S_EXCHANGE_FAILED",
+                "平台尚未在当前工作空间为本产品开通 vxture 的调用权限", 502, false, null);
+
+        Entitlement entitlement = resolver.resolve("ws-1");
+
+        assertThat(entitlement.allowsProductSurface()).isFalse();
+        assertThat(requestCount.get()).isZero();
     }
 
     // ── 缓存与失效链 ────────────────────────────────────────────────────────
