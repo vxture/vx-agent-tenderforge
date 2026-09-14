@@ -4,33 +4,13 @@
 package com.td.czghagent.domain.repository;
 
 import com.td.czghagent.domain.model.AuditLogEntry;
-import com.td.czghagent.domain.model.ManagedUser;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Optional;
 
 public interface AdminRepository {
 
-    /**
-     * 有界的管理面对象，按服务端钳制的 limit 全量返回（产品接入通则 A-3 / A-4）。
-     *
-     * <p>刻意没有配套的 count：账号集合的规模由组织人数决定，不会因为系统自己跑而增长，
-     * 所以它不是无界流水，不需要游标，也不需要一个立刻过期的总数。
-     */
-    List<ManagedUser> listUsers(UserFilter filter);
-
-    Optional<ManagedUser> findUserById(String userId);
-
     List<AuditLogEntry> listAuditLogs(AuditFilter filter);
-
-    record UserFilter(
-            String keyword,
-            String roleCode,
-            Boolean enabled,
-            int limit
-    ) {
-    }
 
     /**
      * 审计流水的游标过滤器（产品接入通则 A-3）。

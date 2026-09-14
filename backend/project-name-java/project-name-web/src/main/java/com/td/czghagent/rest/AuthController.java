@@ -3,7 +3,9 @@
 // DATE: 2026-09-08
 package com.td.czghagent.rest;
 
+import com.fasterxml.jackson.annotation.JsonUnwrapped;
 import com.td.czghagent.application.command.service.OidcLoginService;
+import com.td.czghagent.domain.model.ConsoleLinks;
 import com.td.czghagent.domain.model.CurrentUser;
 import com.td.czghagent.rest.security.RequestIdentity;
 import com.td.czghagent.rest.security.RpSessionCookie;
@@ -30,17 +32,31 @@ public class AuthController {
 
     private final OidcLoginService oidcLoginService;
     private final boolean secureCookie;
+    private final String consoleBaseUrl;
 
     public AuthController(OidcLoginService oidcLoginService,
                           @org.springframework.beans.factory.annotation.Value(
-                                  "${app.oidc.secure-cookie:false}") boolean secureCookie) {
+                                  "${app.oidc.secure-cookie:false}") boolean secureCookie,
+                          @org.springframework.beans.factory.annotation.Value(
+                                  "${app.platform.console-url:}") String consoleBaseUrl) {
         this.oidcLoginService = oidcLoginService;
         this.secureCookie = secureCookie;
+        this.consoleBaseUrl = consoleBaseUrl;
     }
 
+    /**
+     * 当前用户，外加它在平台控制台的资料页地址。
+     *
+     * <p>显示名与头像归平台 IdP，本产品只读——修改入口是控制台，不是这里。
+     * 用户字段原样平铺（前端的会话恢复与角色判断读的就是它们），只在同一层多出
+     * {@code consoleProfileUrl}；未配置控制台地址时为 {@code null}，界面据此不渲染入口。
+     */
     @GetMapping("/me")
-    public CurrentUser me(HttpServletRequest request) {
-        return RequestIdentity.user(request);
+    public MeResponse me(HttpServletRequest request) {
+        return new MeResponse(RequestIdentity.user(request), ConsoleLinks.profile(consoleBaseUrl));
+    }
+
+    public record MeResponse(@JsonUnwrapped CurrentUser user, String consoleProfileUrl) {
     }
 
     /**

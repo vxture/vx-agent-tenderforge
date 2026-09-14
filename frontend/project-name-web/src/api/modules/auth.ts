@@ -16,16 +16,3 @@ export const authApi = {
   // 登出是状态迁移，走具名路由而不是 DELETE 一个叫 session 的资源（通则 B-4）。
   logout: () => apiRequest<void>('/api/auth/logout', { method: 'POST' }),
 }
-
-export const accountApi = {
-  updateProfile: (displayName: string) =>
-    apiRequest<CurrentUser>('/api/account/profile', {
-      method: 'PATCH',
-      body: { displayName },
-    }),
-  uploadAvatar: (file: File) => {
-    const formData = new FormData()
-    formData.set('file', file)
-    return apiRequest<CurrentUser>('/api/account/avatar', { method: 'POST', formData })
-  },
-}

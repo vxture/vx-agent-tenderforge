@@ -7,5 +7,5 @@ import { useAuthStore } from '@/stores/auth'
 
 export default function PortalRedirect() {
   const user = useAuthStore((state) => state.user)
-  return <Navigate to={user?.admin ? '/console/users' : '/planner/writing'} replace />
+  return <Navigate to={user?.admin ? '/console/audit-logs' : '/planner/writing'} replace />
 }

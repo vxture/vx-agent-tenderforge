@@ -212,7 +212,7 @@ describe('浏览器零 token', () => {
     vi.mocked(fetch).mockImplementation(async () => jsonResponse(200, {}))
 
     await apiRequest('/api/bids')
-    await fetchProtectedBlob('/api/account/avatar')
+    await fetchProtectedBlob('/api/bids/b-1/exports/e-1/download')
 
     const calls = vi.mocked(fetch).mock.calls
     expect(calls).toHaveLength(2)

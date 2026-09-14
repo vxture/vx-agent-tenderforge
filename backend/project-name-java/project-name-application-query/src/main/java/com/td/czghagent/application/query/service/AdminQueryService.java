@@ -6,7 +6,6 @@ package com.td.czghagent.application.query.service;
 import com.td.czghagent.domain.exception.BusinessException;
 import com.td.czghagent.domain.model.AuditLogEntry;
 import com.td.czghagent.domain.model.CurrentUser;
-import com.td.czghagent.domain.model.ManagedUser;
 import com.td.czghagent.domain.model.CursorPage;
 import com.td.czghagent.domain.model.PageCursor;
 import com.td.czghagent.domain.repository.AdminRepository;
@@ -14,7 +13,6 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Locale;
 
 @Service
 public class AdminQueryService {
@@ -23,28 +21,6 @@ public class AdminQueryService {
 
     public AdminQueryService(AdminRepository adminRepository) {
         this.adminRepository = adminRepository;
-    }
-
-    /**
-     * 账号列表：有界管理面对象，返回裸数组（产品接入通则 A-4）。
-     *
-     * <p>{@code limit} 由服务端钳制到 {@link CursorPage#MAX_LIMIT}，超过不报错也不静默丢弃语义
-     * ——调用方看到返回条数等于上限就知道还有；账号集合不会无限增长，所以不给游标。
-     */
-    public List<ManagedUser> listUsers(CurrentUser user, Integer requestedLimit,
-                                       String keyword, String roleCode, Boolean enabled) {
-        requireAdmin(user);
-        AdminRepository.UserFilter filter = new AdminRepository.UserFilter(
-                trimToNull(keyword), normalizeRoleFilter(roleCode), enabled,
-                CursorPage.clampLimit(requestedLimit)
-        );
-        return adminRepository.listUsers(filter);
-    }
-
-    public ManagedUser getUser(CurrentUser user, String userId) {
-        requireAdmin(user);
-        return adminRepository.findUserById(userId).orElseThrow(() ->
-                new BusinessException("USER_NOT_FOUND", "用户不存在", 404));
     }
 
     /**
@@ -76,18 +52,6 @@ public class AdminQueryService {
         List<AuditLogEntry> page = rows.subList(0, limit);
         AuditLogEntry last = page.get(limit - 1);
         return CursorPage.of(page, new PageCursor(last.occurredAt(), last.eventId()).encode());
-    }
-
-    private String normalizeRoleFilter(String value) {
-        String role = trimToNull(value);
-        if (role == null) {
-            return null;
-        }
-        role = role.toUpperCase(Locale.ROOT);
-        if (!"ADMIN".equals(role) && !"PLANNER".equals(role)) {
-            throw new BusinessException("USER_ROLE_INVALID", "用户角色筛选不合法", 400);
-        }
-        return role;
     }
 
     private String trimToNull(String value) {

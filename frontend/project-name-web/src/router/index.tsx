@@ -61,13 +61,12 @@ const routes: RouteObject[] = [
       },
       { path: 'planner/bids', lazy: lazyPage(() => import('@/features/tender/BidsPage')) },
       { path: 'planner/account', lazy: lazyPage(() => import('@/pages/PlannerAccount')) },
-      { path: 'console', element: <Navigate to="/console/users" replace /> },
-      { path: 'console/users', lazy: lazyPage(() => import('@/pages/AdminUsers')) },
+      { path: 'console', element: <Navigate to="/console/audit-logs" replace /> },
       {
         path: 'console/audit-logs',
         lazy: lazyPage(() => import('@/pages/AdminAuditLogs')),
       },
-      { path: 'admin/*', element: <Navigate to="/console/users" replace /> },
+      { path: 'admin/*', element: <Navigate to="/console/audit-logs" replace /> },
     ],
   },
   {

@@ -57,8 +57,8 @@ export const plannerMenuList: MenuItem[] = [
     path: '/planner/account',
     meta: {
       icon: 'circle-user-round',
-      title: '用户管理',
-      description: '个人资料与密码',
+      title: '个人资料',
+      description: '平台账号身份与控制台资料入口',
       isHide: false,
       isFull: false,
     },
@@ -66,17 +66,6 @@ export const plannerMenuList: MenuItem[] = [
 ]
 
 export const adminMenuList: MenuItem[] = [
-  {
-    name: 'Users',
-    path: '/console/users',
-    meta: {
-      icon: 'users',
-      title: '账号管理',
-      description: '系统账号与状态',
-      isHide: false,
-      isFull: false,
-    },
-  },
   {
     name: 'AuditLogs',
     path: '/console/audit-logs',
