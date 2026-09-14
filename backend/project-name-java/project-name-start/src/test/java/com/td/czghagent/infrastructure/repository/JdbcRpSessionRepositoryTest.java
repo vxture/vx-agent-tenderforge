@@ -29,7 +29,6 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 被发现用了 MySQL 专有语法。
  */
 @SpringBootTest(properties = {
-        "app.bootstrap.enabled=false",
         "app.storage.root=${java.io.tmpdir}/rp-session-${random.uuid}"
 })
 class JdbcRpSessionRepositoryTest extends PostgresBackedTest {

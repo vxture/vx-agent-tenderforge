@@ -10,9 +10,3 @@ export const useUploadAvatarMutation = () =>
 
 export const useUpdateProfileMutation = () =>
   useMutation({ mutationFn: (displayName: string) => accountApi.updateProfile(displayName) })
-
-export const useChangePasswordMutation = () =>
-  useMutation({
-    mutationFn: (input: { currentPassword: string; newPassword: string }) =>
-      accountApi.changePassword(input.currentPassword, input.newPassword),
-  })

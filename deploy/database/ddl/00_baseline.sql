@@ -783,98 +783,245 @@ CREATE INDEX IF NOT EXISTS idx_bid_source_segment_bid ON bid.bid_source_segment 
 --（bid_ai_run 与 bid_generation_snapshot 互指），任何按依赖排序建表的方案都会
 -- 在环上断掉，而断掉的表现是 psql 报「relation does not exist」——那时已经建了
 -- 一半。集中在末尾，顺序问题从根上不存在。
+--
+-- **每条都包在 duplicate_object 守卫里，基线因此可以在活库上重放。** PostgreSQL 的
+-- ADD CONSTRAINT 没有 IF NOT EXISTS：裸写时第二次施加必然失败——2026-09-15 db-init
+-- 在生产上就是倒在第一条外键上的，而空库上的首次施加（包括每一次测试）永远看不见它。
+-- 守卫按约束名判断「已施加」；同名而定义漂移不在这里判，那归结构增量（incr/）管。
+-- PostgresBackedTest 在同一个库上施加两遍，守着这件事。
 -- ==========================================================================
-ALTER TABLE bid.bid_generation_task ADD CONSTRAINT fk_bid_task_bid
-  FOREIGN KEY (bid_id) REFERENCES bid.bid_document (id);
-ALTER TABLE bid.bid_generation_task ADD CONSTRAINT fk_bid_task_snapshot
-  FOREIGN KEY (snapshot_id) REFERENCES bid.bid_generation_snapshot (id);
-ALTER TABLE bid.bid_generation_snapshot ADD CONSTRAINT fk_bid_snapshot_bid
-  FOREIGN KEY (bid_id) REFERENCES bid.bid_document (id);
-ALTER TABLE bid.bid_generation_snapshot ADD CONSTRAINT fk_bid_snapshot_task
-  FOREIGN KEY (task_id) REFERENCES bid.bid_generation_task (id);
-ALTER TABLE bid.bid_ai_run ADD CONSTRAINT fk_bid_ai_run_bid
-  FOREIGN KEY (bid_id) REFERENCES bid.bid_document (id);
-ALTER TABLE bid.bid_ai_run ADD CONSTRAINT fk_bid_ai_run_snapshot
-  FOREIGN KEY (snapshot_id) REFERENCES bid.bid_generation_snapshot (id);
-ALTER TABLE bid.bid_ai_run ADD CONSTRAINT fk_bid_ai_run_task
-  FOREIGN KEY (task_id) REFERENCES bid.bid_generation_task (id);
-ALTER TABLE bid.bid_ai_run_attempt ADD CONSTRAINT fk_bid_ai_run_attempt_run
-  FOREIGN KEY (ai_run_id) REFERENCES bid.bid_ai_run (id);
-ALTER TABLE bid.bid_asset_chunk ADD CONSTRAINT fk_bid_asset_chunk_asset
-  FOREIGN KEY (asset_id) REFERENCES bid.bid_reference_asset (id);
-ALTER TABLE bid.bid_asset_selection ADD CONSTRAINT fk_bid_selection_asset
-  FOREIGN KEY (asset_id) REFERENCES bid.bid_reference_asset (id);
-ALTER TABLE bid.bid_asset_selection ADD CONSTRAINT fk_bid_selection_bid
-  FOREIGN KEY (bid_id) REFERENCES bid.bid_document (id);
-ALTER TABLE bid.bid_outline_node ADD CONSTRAINT fk_bid_outline_bid
-  FOREIGN KEY (bid_id) REFERENCES bid.bid_document (id);
-ALTER TABLE bid.bid_outline_node ADD CONSTRAINT fk_bid_outline_parent
-  FOREIGN KEY (parent_id) REFERENCES bid.bid_outline_node (id);
-ALTER TABLE bid.bid_chapter ADD CONSTRAINT fk_bid_chapter_bid
-  FOREIGN KEY (bid_id) REFERENCES bid.bid_document (id);
-ALTER TABLE bid.bid_chapter ADD CONSTRAINT fk_bid_chapter_outline
-  FOREIGN KEY (outline_node_id) REFERENCES bid.bid_outline_node (id);
-ALTER TABLE bid.bid_generation_unit ADD CONSTRAINT fk_bid_generation_unit_ai_run
-  FOREIGN KEY (ai_run_id) REFERENCES bid.bid_ai_run (id);
-ALTER TABLE bid.bid_generation_unit ADD CONSTRAINT fk_bid_unit_bid
-  FOREIGN KEY (bid_id) REFERENCES bid.bid_document (id);
-ALTER TABLE bid.bid_generation_unit ADD CONSTRAINT fk_bid_unit_chapter
-  FOREIGN KEY (chapter_id) REFERENCES bid.bid_chapter (id);
-ALTER TABLE bid.bid_generation_unit ADD CONSTRAINT fk_bid_unit_task
-  FOREIGN KEY (task_id) REFERENCES bid.bid_generation_task (id);
-ALTER TABLE bid.bid_chapter_version ADD CONSTRAINT fk_bid_chapter_version_bid
-  FOREIGN KEY (bid_id) REFERENCES bid.bid_document (id);
-ALTER TABLE bid.bid_chapter_version ADD CONSTRAINT fk_bid_chapter_version_chapter
-  FOREIGN KEY (chapter_id) REFERENCES bid.bid_chapter (id);
-ALTER TABLE bid.bid_chapter_version ADD CONSTRAINT fk_bid_chapter_version_unit
-  FOREIGN KEY (generation_unit_id) REFERENCES bid.bid_generation_unit (id);
-ALTER TABLE bid.bid_layout_job ADD CONSTRAINT fk_bid_layout_bid
-  FOREIGN KEY (bid_id) REFERENCES bid.bid_document (id);
-ALTER TABLE bid.bid_export ADD CONSTRAINT fk_bid_export_bid
-  FOREIGN KEY (bid_id) REFERENCES bid.bid_document (id);
-ALTER TABLE bid.bid_export ADD CONSTRAINT fk_bid_export_layout
-  FOREIGN KEY (layout_job_id) REFERENCES bid.bid_layout_job (id);
-ALTER TABLE bid.bid_interpretation_version ADD CONSTRAINT fk_bid_interpretation_bid
-  FOREIGN KEY (bid_id) REFERENCES bid.bid_document (id);
-ALTER TABLE bid.bid_frozen_fact ADD CONSTRAINT fk_bid_frozen_fact_bid
-  FOREIGN KEY (bid_id) REFERENCES bid.bid_document (id);
-ALTER TABLE bid.bid_frozen_fact ADD CONSTRAINT fk_bid_frozen_fact_version
-  FOREIGN KEY (interpretation_version_id) REFERENCES bid.bid_interpretation_version (id);
-ALTER TABLE bid.bid_generation_event ADD CONSTRAINT fk_bid_event_bid
-  FOREIGN KEY (bid_id) REFERENCES bid.bid_document (id);
-ALTER TABLE bid.bid_generation_event ADD CONSTRAINT fk_bid_event_task
-  FOREIGN KEY (task_id) REFERENCES bid.bid_generation_task (id);
-ALTER TABLE bid.bid_outline_regeneration_archive ADD CONSTRAINT fk_bid_outline_archive_bid
-  FOREIGN KEY (bid_id) REFERENCES bid.bid_document (id);
-ALTER TABLE bid.bid_outline_task ADD CONSTRAINT fk_bid_outline_task_bid
-  FOREIGN KEY (bid_id) REFERENCES bid.bid_document (id);
-ALTER TABLE bid.bid_outline_stage_result ADD CONSTRAINT fk_bid_outline_stage_task
-  FOREIGN KEY (task_id) REFERENCES bid.bid_outline_task (id) ON DELETE CASCADE;
-ALTER TABLE bid.bid_requirement_conflict ADD CONSTRAINT fk_bid_conflict_bid
-  FOREIGN KEY (bid_id) REFERENCES bid.bid_document (id);
-ALTER TABLE bid.bid_requirement_item ADD CONSTRAINT fk_bid_requirement_version
-  FOREIGN KEY (interpretation_version_id) REFERENCES bid.bid_interpretation_version (id);
-ALTER TABLE bid.bid_review_issue ADD CONSTRAINT fk_bid_review_bid
-  FOREIGN KEY (bid_id) REFERENCES bid.bid_document (id);
-ALTER TABLE bid.bid_scoring_criterion ADD CONSTRAINT fk_bid_criterion_bid
-  FOREIGN KEY (bid_id) REFERENCES bid.bid_document (id);
-ALTER TABLE bid.bid_snapshot_asset_chunk ADD CONSTRAINT fk_bid_snapshot_asset_snapshot
-  FOREIGN KEY (snapshot_id) REFERENCES bid.bid_generation_snapshot (id);
-ALTER TABLE bid.bid_snapshot_branch_blueprint ADD CONSTRAINT fk_bid_snapshot_branch_blueprint_snapshot
-  FOREIGN KEY (snapshot_id) REFERENCES bid.bid_generation_snapshot (id);
-ALTER TABLE bid.bid_snapshot_fact ADD CONSTRAINT fk_bid_snapshot_fact_snapshot
-  FOREIGN KEY (snapshot_id) REFERENCES bid.bid_generation_snapshot (id);
-ALTER TABLE bid.bid_snapshot_outline ADD CONSTRAINT fk_bid_snapshot_outline_chapter
-  FOREIGN KEY (chapter_id) REFERENCES bid.bid_chapter (id);
-ALTER TABLE bid.bid_snapshot_outline ADD CONSTRAINT fk_bid_snapshot_outline_snapshot
-  FOREIGN KEY (snapshot_id) REFERENCES bid.bid_generation_snapshot (id);
-ALTER TABLE bid.bid_snapshot_requirement ADD CONSTRAINT fk_bid_snapshot_requirement
-  FOREIGN KEY (snapshot_id) REFERENCES bid.bid_generation_snapshot (id);
-ALTER TABLE bid.bid_source_file ADD CONSTRAINT fk_bid_source_bid
-  FOREIGN KEY (bid_id) REFERENCES bid.bid_document (id);
-ALTER TABLE bid.bid_source_segment ADD CONSTRAINT fk_bid_source_segment_bid
-  FOREIGN KEY (bid_id) REFERENCES bid.bid_document (id);
-ALTER TABLE bid.bid_source_segment ADD CONSTRAINT fk_bid_source_segment_source
-  FOREIGN KEY (source_id) REFERENCES bid.bid_source_file (id) ON DELETE CASCADE;
-ALTER TABLE local_authz.user_session ADD CONSTRAINT fk_user_session_user
-  FOREIGN KEY (user_id) REFERENCES local_authz.app_user (id);
+DO $$ BEGIN
+  ALTER TABLE bid.bid_generation_task ADD CONSTRAINT fk_bid_task_bid
+    FOREIGN KEY (bid_id) REFERENCES bid.bid_document (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_generation_task ADD CONSTRAINT fk_bid_task_snapshot
+    FOREIGN KEY (snapshot_id) REFERENCES bid.bid_generation_snapshot (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_generation_snapshot ADD CONSTRAINT fk_bid_snapshot_bid
+    FOREIGN KEY (bid_id) REFERENCES bid.bid_document (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_generation_snapshot ADD CONSTRAINT fk_bid_snapshot_task
+    FOREIGN KEY (task_id) REFERENCES bid.bid_generation_task (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_ai_run ADD CONSTRAINT fk_bid_ai_run_bid
+    FOREIGN KEY (bid_id) REFERENCES bid.bid_document (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_ai_run ADD CONSTRAINT fk_bid_ai_run_snapshot
+    FOREIGN KEY (snapshot_id) REFERENCES bid.bid_generation_snapshot (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_ai_run ADD CONSTRAINT fk_bid_ai_run_task
+    FOREIGN KEY (task_id) REFERENCES bid.bid_generation_task (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_ai_run_attempt ADD CONSTRAINT fk_bid_ai_run_attempt_run
+    FOREIGN KEY (ai_run_id) REFERENCES bid.bid_ai_run (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_asset_chunk ADD CONSTRAINT fk_bid_asset_chunk_asset
+    FOREIGN KEY (asset_id) REFERENCES bid.bid_reference_asset (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_asset_selection ADD CONSTRAINT fk_bid_selection_asset
+    FOREIGN KEY (asset_id) REFERENCES bid.bid_reference_asset (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_asset_selection ADD CONSTRAINT fk_bid_selection_bid
+    FOREIGN KEY (bid_id) REFERENCES bid.bid_document (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_outline_node ADD CONSTRAINT fk_bid_outline_bid
+    FOREIGN KEY (bid_id) REFERENCES bid.bid_document (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_outline_node ADD CONSTRAINT fk_bid_outline_parent
+    FOREIGN KEY (parent_id) REFERENCES bid.bid_outline_node (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_chapter ADD CONSTRAINT fk_bid_chapter_bid
+    FOREIGN KEY (bid_id) REFERENCES bid.bid_document (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_chapter ADD CONSTRAINT fk_bid_chapter_outline
+    FOREIGN KEY (outline_node_id) REFERENCES bid.bid_outline_node (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_generation_unit ADD CONSTRAINT fk_bid_generation_unit_ai_run
+    FOREIGN KEY (ai_run_id) REFERENCES bid.bid_ai_run (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_generation_unit ADD CONSTRAINT fk_bid_unit_bid
+    FOREIGN KEY (bid_id) REFERENCES bid.bid_document (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_generation_unit ADD CONSTRAINT fk_bid_unit_chapter
+    FOREIGN KEY (chapter_id) REFERENCES bid.bid_chapter (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_generation_unit ADD CONSTRAINT fk_bid_unit_task
+    FOREIGN KEY (task_id) REFERENCES bid.bid_generation_task (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_chapter_version ADD CONSTRAINT fk_bid_chapter_version_bid
+    FOREIGN KEY (bid_id) REFERENCES bid.bid_document (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_chapter_version ADD CONSTRAINT fk_bid_chapter_version_chapter
+    FOREIGN KEY (chapter_id) REFERENCES bid.bid_chapter (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_chapter_version ADD CONSTRAINT fk_bid_chapter_version_unit
+    FOREIGN KEY (generation_unit_id) REFERENCES bid.bid_generation_unit (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_layout_job ADD CONSTRAINT fk_bid_layout_bid
+    FOREIGN KEY (bid_id) REFERENCES bid.bid_document (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_export ADD CONSTRAINT fk_bid_export_bid
+    FOREIGN KEY (bid_id) REFERENCES bid.bid_document (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_export ADD CONSTRAINT fk_bid_export_layout
+    FOREIGN KEY (layout_job_id) REFERENCES bid.bid_layout_job (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_interpretation_version ADD CONSTRAINT fk_bid_interpretation_bid
+    FOREIGN KEY (bid_id) REFERENCES bid.bid_document (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_frozen_fact ADD CONSTRAINT fk_bid_frozen_fact_bid
+    FOREIGN KEY (bid_id) REFERENCES bid.bid_document (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_frozen_fact ADD CONSTRAINT fk_bid_frozen_fact_version
+    FOREIGN KEY (interpretation_version_id) REFERENCES bid.bid_interpretation_version (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_generation_event ADD CONSTRAINT fk_bid_event_bid
+    FOREIGN KEY (bid_id) REFERENCES bid.bid_document (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_generation_event ADD CONSTRAINT fk_bid_event_task
+    FOREIGN KEY (task_id) REFERENCES bid.bid_generation_task (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_outline_regeneration_archive ADD CONSTRAINT fk_bid_outline_archive_bid
+    FOREIGN KEY (bid_id) REFERENCES bid.bid_document (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_outline_task ADD CONSTRAINT fk_bid_outline_task_bid
+    FOREIGN KEY (bid_id) REFERENCES bid.bid_document (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_outline_stage_result ADD CONSTRAINT fk_bid_outline_stage_task
+    FOREIGN KEY (task_id) REFERENCES bid.bid_outline_task (id) ON DELETE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_requirement_conflict ADD CONSTRAINT fk_bid_conflict_bid
+    FOREIGN KEY (bid_id) REFERENCES bid.bid_document (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_requirement_item ADD CONSTRAINT fk_bid_requirement_version
+    FOREIGN KEY (interpretation_version_id) REFERENCES bid.bid_interpretation_version (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_review_issue ADD CONSTRAINT fk_bid_review_bid
+    FOREIGN KEY (bid_id) REFERENCES bid.bid_document (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_scoring_criterion ADD CONSTRAINT fk_bid_criterion_bid
+    FOREIGN KEY (bid_id) REFERENCES bid.bid_document (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_snapshot_asset_chunk ADD CONSTRAINT fk_bid_snapshot_asset_snapshot
+    FOREIGN KEY (snapshot_id) REFERENCES bid.bid_generation_snapshot (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_snapshot_branch_blueprint ADD CONSTRAINT fk_bid_snapshot_branch_blueprint_snapshot
+    FOREIGN KEY (snapshot_id) REFERENCES bid.bid_generation_snapshot (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_snapshot_fact ADD CONSTRAINT fk_bid_snapshot_fact_snapshot
+    FOREIGN KEY (snapshot_id) REFERENCES bid.bid_generation_snapshot (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_snapshot_outline ADD CONSTRAINT fk_bid_snapshot_outline_chapter
+    FOREIGN KEY (chapter_id) REFERENCES bid.bid_chapter (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_snapshot_outline ADD CONSTRAINT fk_bid_snapshot_outline_snapshot
+    FOREIGN KEY (snapshot_id) REFERENCES bid.bid_generation_snapshot (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_snapshot_requirement ADD CONSTRAINT fk_bid_snapshot_requirement
+    FOREIGN KEY (snapshot_id) REFERENCES bid.bid_generation_snapshot (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_source_file ADD CONSTRAINT fk_bid_source_bid
+    FOREIGN KEY (bid_id) REFERENCES bid.bid_document (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_source_segment ADD CONSTRAINT fk_bid_source_segment_bid
+    FOREIGN KEY (bid_id) REFERENCES bid.bid_document (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE bid.bid_source_segment ADD CONSTRAINT fk_bid_source_segment_source
+    FOREIGN KEY (source_id) REFERENCES bid.bid_source_file (id) ON DELETE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE local_authz.user_session ADD CONSTRAINT fk_user_session_user
+    FOREIGN KEY (user_id) REFERENCES local_authz.app_user (id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;

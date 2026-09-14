@@ -10,25 +10,33 @@
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import json
 from collections.abc import Callable, Iterator
+from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
 from pydantic import BaseModel
 
+import czghagent_ai
 from czghagent_ai.services.ai_provider import (
     AiProviderError,
     AiProviderNotConfiguredError,
     AiProviderOutputError,
+    OpenAiCompatibleProvider,
+    _operation_temperature,
 )
 from czghagent_ai.services.atlas_endpoints import (
+    AUTHORIZED_ENDPOINT_CODES,
     DEFAULT_ENDPOINT_CODE,
-    ENDPOINT_REQUIREMENTS,
+    DETERMINISTIC_ENDPOINT_CODE,
+    FAST_ENDPOINT_CODE,
+    OPERATION_ROUTES,
+    REASONING_ENDPOINT_CODE,
     endpoint_for,
-    required_endpoint_codes,
 )
 from czghagent_ai.services.atlas_provider import (
     AtlasNotEntitledError,
@@ -102,68 +110,78 @@ def _completion(content: str, **extra: Any) -> dict[str, Any]:
 # ── endpoint 映射 ──────────────────────────────────────────────────────────
 
 
-def test_every_operation_has_a_declared_endpoint_requirement() -> None:
-    """八个 operation 全部登记在案。
+def _operations_the_service_calls() -> set[str]:
+    """从源码里扫出每一处 ``execute_result("<operation>", ...)``。
 
-    漏一个的表现是它悄悄落回 chat/default，于是那一个环节用的是别人的生成参数
-    ——不会报错，只会让那一段产出变差。
+    清单不手写：上一版手写着「八个」，而服务里真实发起调用的是十个，
+    漏掉的两个静默落到兜底路由上，测试照样是绿的。
     """
-    assert set(ENDPOINT_REQUIREMENTS) == {
-        "project_overview_source_selection",
-        "project_overview_extraction",
-        "technical_scoring_extraction",
-        "outline_skeleton_planning",
-        "outline_branch_expansion",
-        "chapter_drafting",
-        "section_revision",
-        "consistency_review",
-    }
+    found: set[str] = set()
+    for path in Path(czghagent_ai.__file__).parent.rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "execute_result"
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str)
+            ):
+                found.add(node.args[0].value)
+    return found
 
 
-def test_falls_back_to_the_shared_endpoint_until_grants_exist() -> None:
-    """专属 endpoint 未授权的那段时间必须能用兜底跑。
+def test_every_operation_the_service_calls_has_a_route() -> None:
+    """两个方向都查。
 
-    那段时间一定存在（授权是运营侧的一次动作），而在它期间让每次调用都 403
-    等于把整个产品停掉。
+    漏登记一个：它静默落到 chat/default，那个环节用的是别人的生成参数——
+    不报错，只让那一段产出变差。多登记一个：operation 已经被删掉而路由还在，
+    下一个人无法从这张表判断哪些环节是活的。
     """
-    assert (
-        endpoint_for("chapter_drafting", use_dedicated_endpoints=False)
-        == DEFAULT_ENDPOINT_CODE
+    assert set(OPERATION_ROUTES) == _operations_the_service_calls()
+
+
+def test_routes_only_to_endpoints_that_are_authorized() -> None:
+    """路由到未授权的 code，对应 operation 的每一次调用都是 403 NOT_ENTITLED。"""
+    assert {route.endpoint_code for route in OPERATION_ROUTES.values()} <= (
+        AUTHORIZED_ENDPOINT_CODES
     )
-    assert (
-        endpoint_for("chapter_drafting", use_dedicated_endpoints=True)
-        == "chat/tenderforge-fast-drafting"
+
+
+def _direct_era_route(operation: str) -> str:
+    """按直连时代实测出来的策略，这个 operation 应该走哪条路由。
+
+    直接问直连 provider 本身，而不是在这里再抄一遍它的策略表——
+    抄出来的那一份，正是会和原件悄悄分叉的那一份。
+    """
+    provider = OpenAiCompatibleProvider(
+        "sk-test", "https://api.deepseek.com", "fast-model", 30, 0,
+        quality_model="quality-model",
     )
+    request: dict[str, Any] = {}
+    provider._apply_thinking_policy(request, operation, {})
+    if request.get("thinking") == {"type": "enabled"}:
+        return REASONING_ENDPOINT_CODE
+    if _operation_temperature(operation) == 0:
+        return DETERMINISTIC_ENDPOINT_CODE
+    if provider._model_for(operation) == "quality-model":
+        return DEFAULT_ENDPOINT_CODE
+    return FAST_ENDPOINT_CODE
+
+
+@pytest.mark.parametrize("operation", sorted(OPERATION_ROUTES))
+def test_routes_follow_the_strategy_measured_in_the_direct_era(operation: str) -> None:
+    """分档依据是实测过的 thinking / 温度 / 模型档位，不是按路由名字猜。
+
+    最该守住的是两对：一致性审查（开 thinking）与正文续写（温度 0.4）不能落在
+    同一条路由上；局部改写是 Quality 模型却刻意关 thinking，不能因为「要质量」
+    就被推到 reasoning——那会让推理吃掉替换正文的补全预算。
+    """
+    assert endpoint_for(operation) == _direct_era_route(operation)
 
 
 def test_unknown_operation_routes_somewhere_rather_than_failing() -> None:
-    assert (
-        endpoint_for("a_new_operation", use_dedicated_endpoints=True)
-        == DEFAULT_ENDPOINT_CODE
-    )
-
-
-def test_lists_the_endpoints_that_need_granting() -> None:
-    """给接入信用的清单：少授权一个，对应 operation 全部 403。"""
-    codes = required_endpoint_codes()
-    assert codes == sorted(set(codes)), "去重且有序，否则这份清单会被抄错"
-    assert "chat/tenderforge-quality-review" in codes
-
-
-def test_separates_the_review_endpoint_from_the_drafting_one() -> None:
-    """审查开 thinking 且温度为 0，正文温度 0.4 且不开 thinking。
-
-    并到一个 endpoint 上，要么审查失去推理深度，要么正文变得刻板重复。
-    这条断言保护的是「分档」这件事本身。
-    """
-    review = ENDPOINT_REQUIREMENTS["consistency_review"]
-    drafting = ENDPOINT_REQUIREMENTS["chapter_drafting"]
-
-    assert review.endpoint_code != drafting.endpoint_code
-    assert review.thinking is True
-    assert drafting.thinking is False
-    assert review.temperature == 0.0
-    assert drafting.temperature == 0.4
+    assert endpoint_for("a_new_operation") == DEFAULT_ENDPOINT_CODE
 
 
 # ── 请求形状 ───────────────────────────────────────────────────────────────
@@ -175,11 +193,34 @@ def test_sends_the_fields_atlas_actually_reads(caller: None) -> None:
     _run(provider)
 
     body = json.loads(seen[0].content)
-    assert body["endpointCode"] == DEFAULT_ENDPOINT_CODE
     assert body["taskId"] == "task-1"
     assert body["requestId"], "requestId 在客户端生成——它是 Atlas 请求日志里唯一的定位手段"
     assert len(body["messages"]) == 2
     assert seen[0].headers["authorization"] == "Bearer minted.jwt.value"
+
+
+@pytest.mark.parametrize(
+    ("operation", "endpoint_code"),
+    [
+        ("technical_scoring_extraction", DETERMINISTIC_ENDPOINT_CODE),
+        ("chapter_drafting", FAST_ENDPOINT_CODE),
+        ("section_revision", DEFAULT_ENDPOINT_CODE),
+        ("consistency_review", REASONING_ENDPOINT_CODE),
+    ],
+)
+def test_puts_the_routed_endpoint_on_the_wire(
+    caller: None, operation: str, endpoint_code: str
+) -> None:
+    """映射表对了不等于发出去的对了——看的是传输层上真实的字节。
+
+    四条路由各取一个 operation：客户端若忽略映射、一律发 chat/default，
+    这里至少三条会红。
+    """
+    provider, seen = _provider(_answers(_completion('{"value":"ok"}')))
+
+    _run(provider, operation)
+
+    assert json.loads(seen[0].content)["endpointCode"] == endpoint_code
 
 
 def test_sends_the_tenant_uuid_from_the_token_not_the_product_code(

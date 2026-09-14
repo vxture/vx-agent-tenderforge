@@ -9,9 +9,3 @@ export interface CurrentUser {
   avatarUrl: string | null
   admin: boolean
 }
-
-export interface LoginResult {
-  token: string
-  user: CurrentUser
-  expiresInSeconds: number
-}

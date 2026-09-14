@@ -7,7 +7,6 @@ import com.td.czghagent.application.command.service.AccountCommandService;
 import com.td.czghagent.application.query.service.AccountQueryService;
 import com.td.czghagent.domain.model.CurrentUser;
 import com.td.czghagent.domain.model.StoredFile;
-import com.td.czghagent.rest.dto.ChangePasswordRequest;
 import com.td.czghagent.rest.dto.UpdateProfileRequest;
 import com.td.czghagent.rest.security.RequestIdentity;
 import jakarta.servlet.http.HttpServletRequest;
@@ -54,15 +53,6 @@ public class AccountController {
         headers.setContentLength(file.size());
         headers.setCacheControl(CacheControl.maxAge(Duration.ofHours(24)).cachePrivate());
         return ResponseEntity.ok().headers(headers).body(file.content());
-    }
-
-    @PatchMapping("/password")
-    @org.springframework.web.bind.annotation.ResponseStatus(org.springframework.http.HttpStatus.NO_CONTENT)
-    public void changePassword(@Valid @RequestBody ChangePasswordRequest body,
-                                            HttpServletRequest request) {
-        commandService.changePassword(
-                body.currentPassword(), body.newPassword(), RequestIdentity.operation(request)
-        );
     }
 
     @PatchMapping("/profile")

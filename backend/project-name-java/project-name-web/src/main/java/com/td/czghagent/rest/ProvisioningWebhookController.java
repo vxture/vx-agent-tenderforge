@@ -6,6 +6,7 @@ package com.td.czghagent.rest;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.td.czghagent.application.command.service.ProvisioningCommandService;
+import com.td.czghagent.domain.model.ProductIdentity;
 import com.td.czghagent.domain.model.ProvisioningEvent;
 import com.td.czghagent.domain.model.TaskContext;
 import com.td.czghagent.domain.port.WebhookSignatureVerifier;
@@ -43,7 +44,7 @@ import java.util.Map;
  * </ul>
  */
 @RestController
-@RequestMapping("/api/platform/provisioning/webhook")
+@RequestMapping(ProductIdentity.PLATFORM_WEBHOOK_PATH)
 public class ProvisioningWebhookController {
 
     private static final Logger LOGGER =

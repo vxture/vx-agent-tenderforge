@@ -14,8 +14,6 @@ spring:
   # 配置可以被改错，权限不会。
 
 app:
-  bootstrap:
-    enabled: ${BOOTSTRAP_ENABLED:false}
   storage:
     root: ${PRIVATE_STORAGE_ROOT:/data/czghagent/private}
 

@@ -3,6 +3,7 @@
 // DATE: 2026-09-09
 package com.td.czghagent.infrastructure.platform;
 
+import com.td.czghagent.domain.port.S2STokenMinter;
 import com.td.czghagent.domain.model.DeployStage;
 import com.td.czghagent.domain.port.EntitlementResolver;
 import com.td.czghagent.domain.port.WebhookSignatureVerifier;
@@ -36,19 +37,22 @@ public class UsageReportingConfiguration {
     public UsageConsumeClient usageConsumeClient(
             RestClient.Builder builder,
             @Value("${app.platform.api-url:}") String apiUrl,
-            @Value("${app.platform.internal-auth-token:}") String internalAuthToken,
+            S2STokenMinter s2sTokenMinter,
             @Value("${app.deploy-stage:local}") String deployStage,
             @Value("${app.allow-mock-on-deploy:false}") boolean allowMock,
             @Value("${app.platform.mock-usage-gated:false}") boolean mockGated
     ) {
-        if (!apiUrl.isBlank() && !internalAuthToken.isBlank()) {
-            LOGGER.info("C3 用量上报使用平台接口：{}", apiUrl);
-            return new PlatformUsageConsumeClient(builder, apiUrl, internalAuthToken);
+        // 凭证是用 C1 那对 OIDC client 换来的 S2S 票，没有第二份口令要配。
+        if (!apiUrl.isBlank() && s2sTokenMinter.isConfigured()) {
+            LOGGER.info("C3 用量上报使用平台接口：{}（S2S 票 aud={}）", apiUrl,
+                    PlatformCallCredentials.AUDIENCE);
+            return new PlatformUsageConsumeClient(builder, apiUrl,
+                    new PlatformCallCredentials(s2sTokenMinter));
         }
         DeployStage stage = DeployStage.parse(deployStage);
         if (stage.isDeployed() && !allowMock) {
             throw new IllegalStateException(
-                    "部署阶段 " + stage + " 缺少 PLATFORM_API_URL / PLATFORM_INTERNAL_AUTH_TOKEN，"
+                    "部署阶段 " + stage + " 缺少 PLATFORM_API_URL 或 OIDC client 凭据（用来换 S2S 票），"
                             + "拒绝在用量不入账的情况下启动。补齐配置或显式设置"
                             + " app.allow-mock-on-deploy=true（会自报降级）");
         }
@@ -81,7 +85,7 @@ public class UsageReportingConfiguration {
         if (!verifier.isConfigured()) {
             if (stage.isDeployed() && !allowMock) {
                 throw new IllegalStateException(
-                        "部署阶段 " + stage + " 缺少 TENDERFORGE_PROVISION_WEBHOOK_SECRET，"
+                        "部署阶段 " + stage + " 缺少 PROVISION_WEBHOOK_SECRET，"
                                 + "开通/停用事件将全部被拒。补齐配置或显式设置"
                                 + " app.allow-mock-on-deploy=true");
             }

@@ -4,14 +4,12 @@
 import { useEffect, useRef, useState } from 'react'
 
 import {
-  Banner,
   Button,
   Card,
   CardContent,
   CardHeader,
   CardTitle,
   Field,
-  FieldGroup,
   FieldLabel,
   Icon,
   Input,
@@ -26,7 +24,6 @@ import { useProtectedImageUrl } from '@/hooks/useProtectedImageUrl'
 import { useAuthStore } from '@/stores/auth'
 
 import {
-  useChangePasswordMutation,
   useUpdateProfileMutation,
   useUploadAvatarMutation,
 } from './queries'
@@ -35,17 +32,10 @@ export default function AccountPage() {
   const avatarInput = useRef<HTMLInputElement>(null)
   const user = useAuthStore((state) => state.user)
   const setUser = useAuthStore((state) => state.setUser)
-  const clearAuth = useAuthStore((state) => state.clearAuth)
   const avatar = useProtectedImageUrl(user?.avatarUrl)
   const avatarMutation = useUploadAvatarMutation()
   const profileMutation = useUpdateProfileMutation()
-  const passwordMutation = useChangePasswordMutation()
   const [profileName, setProfileName] = useState(user?.displayName || '')
-  const [currentPassword, setCurrentPassword] = useState('')
-  const [newPassword, setNewPassword] = useState('')
-  const [confirmPassword, setConfirmPassword] = useState('')
-  const [showPasswords, setShowPasswords] = useState(false)
-  const [validationError, setValidationError] = useState('')
   const displayName = user?.displayName || user?.username || '当前用户'
 
   useEffect(() => {
@@ -60,31 +50,6 @@ export default function AccountPage() {
       // Mutation error is shown next to the avatar action.
     } finally {
       if (avatarInput.current) avatarInput.current.value = ''
-    }
-  }
-
-  /**
-   * 修改当前用户密码，成功后清理本地会话并要求重新登录。
-   * @preconditions - 当前密码正确，新密码长度为8至64个字符且两次输入一致
-   * @sideEffects - 调用密码修改接口并撤销当前用户全部会话
-   * @errorHandling - 表单校验和接口错误均保留在当前页面显示
-   */
-  const changePassword = async () => {
-    setValidationError('')
-    if (newPassword !== confirmPassword) {
-      setValidationError('两次输入的新密码不一致')
-      return
-    }
-    if (newPassword.length < 8 || newPassword.length > 64) {
-      setValidationError('新密码长度必须为8至64个字符')
-      return
-    }
-    try {
-      await passwordMutation.mutateAsync({ currentPassword, newPassword })
-      clearAuth()
-      window.location.href = '/login?passwordChanged=1'
-    } catch {
-      // Mutation error is rendered below the form.
     }
   }
 
@@ -105,7 +70,7 @@ export default function AccountPage() {
         <ViewHeader
           icon="user-circle"
           title="账号设置"
-          description="维护个人资料、头像与登录密码"
+          description="维护个人资料与头像"
         />
 
         <div className="grid min-h-0 gap-lg lg:grid-cols-2">
@@ -192,100 +157,8 @@ export default function AccountPage() {
               </form>
             </CardContent>
           </Card>
-
-          <Card className="border border-border" surface="base">
-            <CardHeader className="flex-row items-center justify-between">
-              <CardTitle>修改密码</CardTitle>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                className="text-muted-foreground hover:text-foreground"
-                onClick={() => setShowPasswords((current) => !current)}
-                aria-label={showPasswords ? '隐藏密码' : '显示密码'}
-                title={showPasswords ? '隐藏密码' : '显示密码'}
-              >
-                <Icon name={showPasswords ? 'eye-slash' : 'eye'} size="sm" />
-              </Button>
-            </CardHeader>
-
-            <form
-              className="flex max-w-panel-md flex-col gap-lg px-xl"
-              onSubmit={(event) => {
-                event.preventDefault()
-                void changePassword()
-              }}
-            >
-              <FieldGroup>
-                <PasswordField
-                  label="当前密码"
-                  value={currentPassword}
-                  visible={showPasswords}
-                  autoComplete="current-password"
-                  onChange={setCurrentPassword}
-                />
-                <PasswordField
-                  label="新密码"
-                  value={newPassword}
-                  visible={showPasswords}
-                  autoComplete="new-password"
-                  onChange={setNewPassword}
-                />
-                <PasswordField
-                  label="确认新密码"
-                  value={confirmPassword}
-                  visible={showPasswords}
-                  autoComplete="new-password"
-                  onChange={setConfirmPassword}
-                />
-              </FieldGroup>
-              {validationError ? (
-                <Banner tone="danger" title={validationError} />
-              ) : null}
-              <MutationError error={passwordMutation.error} />
-              <div>
-                <Button
-                  type="submit"
-                  disabled={
-                    passwordMutation.isPending ||
-                    !currentPassword ||
-                    !newPassword ||
-                    !confirmPassword
-                  }
-                >
-                  {passwordMutation.isPending ? (
-                    <Spinner size="sm" />
-                  ) : null}
-                  修改密码
-                </Button>
-              </div>
-            </form>
-          </Card>
         </div>
       </ShellPageContainer>
     </section>
-  )
-}
-
-type PasswordFieldProps = {
-  label: string
-  value: string
-  visible: boolean
-  autoComplete: string
-  onChange: (value: string) => void
-}
-
-function PasswordField({ label, value, visible, autoComplete, onChange }: PasswordFieldProps) {
-  return (
-    <Field>
-      <FieldLabel>{label}</FieldLabel>
-      <Input
-        type={visible ? 'text' : 'password'}
-        value={value}
-        autoComplete={autoComplete}
-        maxLength={128}
-        onChange={(event) => onChange(event.target.value)}
-      />
-    </Field>
   )
 }

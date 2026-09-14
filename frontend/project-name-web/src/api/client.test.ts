@@ -3,7 +3,7 @@
 // DATE: 2026-09-08
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { ApiError, apiRequest, isRejection, REJECTION_CODES } from './client'
+import { ApiError, apiRequest, fetchProtectedBlob, isRejection, REJECTION_CODES } from './client'
 
 /**
  * 前端侧的 X-1 封套契约。
@@ -39,8 +39,8 @@ const jsonResponse = (status: number, body: unknown) =>
 describe('apiRequest', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn())
-    // apiRequest 无条件读一次 localStorage 取 token，所以即使 authenticated:false
-    // 也需要 window 存在。这里给一个最小替身而不是引 jsdom：
+    // 401 分支会清 localStorage 并改写 location，所以需要 window 存在。
+    // 这里给一个最小替身而不是引 jsdom：
     // 这几条是纯解包逻辑的用例，为它们背一整个 DOM 实现只会让套件变慢，
     // 而且会把「这段代码依赖浏览器全局」这个事实藏起来。
     vi.stubGlobal('window', {
@@ -183,5 +183,41 @@ describe('拒绝码词表', () => {
     expect(isRejection(new ApiError('x', 402, 'NOT_ENTITLED', false))).toBe(true)
     expect(isRejection(new ApiError('x', 404, 'BID_NOT_FOUND', false))).toBe(false)
     expect(isRejection(new Error('boom'))).toBe(false)
+  })
+})
+
+/**
+ * 浏览器零 token（详细设计 §7.2b）。
+ *
+ * 口令通道退役前，localStorage 里的 token 会被塞进每个请求的 Authorization 头。
+ * 服务端已经不读这个头，但前端继续发它，等于把一份凭据挂在每个请求上——
+ * 而残留的旧 token 恰好还躺在很多人的浏览器里。这里故意放一个残留值：
+ * 对着空 storage 断言「不发」，旧代码也会通过。
+ */
+describe('浏览器零 token', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn())
+    vi.stubGlobal('window', {
+      localStorage: { getItem: () => 'legacy-token', removeItem: () => undefined },
+      location: { pathname: '/planner/bids', search: '', href: '' },
+    })
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it('业务请求与受保护文件读取都不带 Authorization 头', async () => {
+    vi.mocked(fetch).mockImplementation(async () => jsonResponse(200, {}))
+
+    await apiRequest('/api/bids')
+    await fetchProtectedBlob('/api/account/avatar')
+
+    const calls = vi.mocked(fetch).mock.calls
+    expect(calls).toHaveLength(2)
+    for (const [, init] of calls) {
+      expect(new Headers(init?.headers).has('Authorization')).toBe(false)
+    }
   })
 })

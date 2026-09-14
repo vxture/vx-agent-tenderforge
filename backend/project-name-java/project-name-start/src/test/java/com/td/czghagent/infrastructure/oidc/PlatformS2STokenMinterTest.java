@@ -78,6 +78,41 @@ class PlatformS2STokenMinterTest {
                 .isNull();
     }
 
+    /**
+     * 只知道工作空间时只声明工作空间：表单里<strong>没有</strong> org_id。
+     *
+     * <p>平台把送来的 org_id 原样盖进票里、不做核对；编一个进去，
+     * 票上就多了一条没人核对过的「事实」。
+     */
+    @Test
+    void mintsAWorkspaceOnlyServiceTokenWithoutInventingAnOrg() throws Exception {
+        respondWith(mintedToken(null, "tenant-uuid"), 300);
+
+        S2SToken token = minter.forWorkspace("vxture", "ws-1");
+
+        assertThat(token.mode()).isEqualTo(S2SToken.Mode.SERVICE);
+        assertThat(idp.lastTokenForm())
+                .contains("audience=vxture")
+                .contains("workspace_id=ws-1")
+                .doesNotContain("org_id")
+                .doesNotContain("subject_token");
+    }
+
+    @Test
+    void cachesWorkspaceOnlyTokensPerWorkspace() throws Exception {
+        respondWith(mintedToken(null, "t1"), 300);
+        S2SToken first = minter.forWorkspace("vxture", "ws-1");
+
+        respondWith(mintedToken(null, "t2"), 300);
+        S2SToken other = minter.forWorkspace("vxture", "ws-2");
+
+        respondWith(mintedToken(null, "t3"), 300);
+        S2SToken again = minter.forWorkspace("vxture", "ws-1");
+
+        assertThat(other.value()).isNotEqualTo(first.value());
+        assertThat(again.value()).as("同一工作空间的新鲜票照常复用").isEqualTo(first.value());
+    }
+
     // ── 缓存 ────────────────────────────────────────────────────────────────
 
     @Test

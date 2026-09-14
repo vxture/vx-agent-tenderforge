@@ -6,9 +6,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
 
 const baseUrl = process.env.TENDER_E2E_BASE_URL ?? 'http://localhost:5174'
-const username = process.env.TENDER_E2E_USERNAME
-const password = process.env.TENDER_E2E_PASSWORD
-const suppliedToken = process.env.TENDER_E2E_TOKEN ?? ''
+const suppliedCookie = process.env.TENDER_E2E_SESSION_COOKIE ?? ''
 const documentPath = process.env.TENDER_E2E_DOCUMENT
 const outputDir = resolve(process.env.TENDER_E2E_OUTPUT_DIR ?? 'test/e2e-output')
 const targetPages = Number(process.env.TENDER_E2E_TARGET_PAGES ?? '20')
@@ -17,17 +15,19 @@ const bidTitle = process.env.TENDER_E2E_TITLE
   ?? `TenderAgent full-flow QA ${new Date().toISOString()}`
 const requestTimeoutMs = Number(process.env.TENDER_E2E_REQUEST_TIMEOUT_MS ?? '900000')
 
-if ((!suppliedToken && (!username || !password)) || !documentPath) {
-  throw new Error(
-    'TENDER_E2E_TOKEN or username/password, plus TENDER_E2E_DOCUMENT, are required'
-  )
+if (!documentPath) {
+  throw new Error('TENDER_E2E_DOCUMENT is required')
 }
 
-let token = suppliedToken
+// Local password login and Bearer sessions were retired on 2026-09-15; the only
+// credential is the platform session cookie. Supply TENDER_E2E_SESSION_COOKIE
+// (`name=value`) for a deployed stack, or let signIn() walk the login loop against a
+// local stack whose identity stand-in redirects straight back to the callback.
+let sessionCookie = suppliedCookie
 
 async function request(path, options = {}) {
   const headers = new Headers(options.headers)
-  if (token) headers.set('Authorization', `Bearer ${token}`)
+  if (sessionCookie) headers.set('Cookie', sessionCookie)
   let body = options.body
   if (body !== undefined && !(body instanceof FormData)) {
     headers.set('Content-Type', 'application/json')
@@ -180,16 +180,30 @@ function assertGeneratedContent(workspace) {
   }
 }
 
+async function signIn() {
+  const begin = await fetch(`${baseUrl}/api/auth/oidc/login`, { redirect: 'manual' })
+  const location = begin.headers.get('location')
+  if (!location) throw new Error(`login loop did not redirect (HTTP ${begin.status})`)
+  const callback = await fetch(new URL(location, baseUrl), { redirect: 'manual' })
+  const cookie = callback.headers
+    .getSetCookie()
+    .map((header) => header.split(';')[0])
+    .join('; ')
+  if (!cookie) {
+    throw new Error(
+      `login callback set no session cookie (HTTP ${callback.status}); ` +
+        'a deployed stack needs TENDER_E2E_SESSION_COOKIE'
+    )
+  }
+  return cookie
+}
+
 async function main() {
-  if (!token) {
-    const login = await request('/api/auth/login', {
-      method: 'POST',
-      body: { username, password },
-    })
-    token = login.token
-    log('login', { role: login.user.roleCode })
+  if (!sessionCookie) {
+    sessionCookie = await signIn()
+    log('session', { source: 'platform login loop' })
   } else {
-    log('session', { source: 'TENDER_E2E_TOKEN' })
+    log('session', { source: 'TENDER_E2E_SESSION_COOKIE' })
   }
 
   let workspace = await request('/api/bids', {
@@ -351,7 +365,7 @@ async function main() {
   })
 
   const download = await fetch(`${baseUrl}/api/bids/${bidId}/exports/latest/download`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Cookie: sessionCookie },
     signal: AbortSignal.timeout(requestTimeoutMs),
   })
   if (!download.ok) throw new Error(`export download failed with HTTP ${download.status}`)

@@ -33,6 +33,11 @@ public class MockS2STokenMinter implements S2STokenMinter {
     }
 
     @Override
+    public S2SToken forWorkspace(String audience, String workspaceId) {
+        return token(audience, S2SToken.Mode.SERVICE, null, workspaceId);
+    }
+
+    @Override
     public void invalidate(S2SToken token) {
         // 替身不缓存，没有什么可作废的。
     }

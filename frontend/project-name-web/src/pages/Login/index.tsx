@@ -1,212 +1,55 @@
 // GENERATED_BY_AI
-// MODEL: gpt-5
-// DATE: 2026-07-31
-import { useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router'
+// MODEL: claude-opus-5
+// DATE: 2026-09-14
+import { useSearchParams } from 'react-router'
 
-import {
-  Banner,
-  Button,
-  Card,
-  CardContent,
-  CardHeader,
-  Checkbox,
-  Field,
-  FieldGroup,
-  FieldLabel,
-  Icon,
-  Input,
-  Spinner,
-} from '@vxture/design-system'
+import { ShellBrand } from '@vxture/design-system'
 
-import { authApi } from '@/api/modules/auth'
-import { useAuthStore } from '@/stores/auth'
-import { storage } from '@/utils/storage'
+import { safeReturnTo } from './returnTo'
 
-const REMEMBERED_LOGIN_KEY = 'tender-agent-remembered-login'
+import './login.css'
 
-type RememberedLogin = {
-  username: string
-  password: string
-}
+/** 平台登记的产品名（vxture-platform#263）。登录页展示它，而不是内部代号。 */
+const PRODUCT_NAME = '标书编写智能体'
 
-const readRememberedLogin = (): RememberedLogin | null => {
-  try {
-    const raw = storage.get(REMEMBERED_LOGIN_KEY)
-    if (!raw) return null
-    const parsed = JSON.parse(raw) as Partial<RememberedLogin>
-    if (
-      typeof parsed.username !== 'string' ||
-      typeof parsed.password !== 'string' ||
-      !parsed.username ||
-      !parsed.password
-    ) {
-      return null
-    }
-    return { username: parsed.username, password: parsed.password }
-  } catch {
-    return null
-  }
-}
-
-const updateRememberedLogin = (
-  rememberPassword: boolean,
-  username: string,
-  password: string
-) => {
-  try {
-    if (rememberPassword) {
-      storage.set(REMEMBERED_LOGIN_KEY, JSON.stringify({ username, password }))
-    } else {
-      storage.remove(REMEMBERED_LOGIN_KEY)
-    }
-  } catch {
-    // 本地存储不可用时不影响正常登录。
-  }
-}
-
+/**
+ * 产品登录页，照组织标准登录页（`vxtureagents/login-page.html`）实现：
+ * 产品名、一句说明、一个「登录」、一行提示，背景是缓慢漂移的线条。
+ *
+ * 只有一种登录方式：平台账号（OIDC）。原先的「本地账号登录（过渡通道）」与
+ * 「记住密码」已移除（owner 2026-09-14）——后者会把明文密码写进 localStorage。
+ *
+ * 登录是一次整页导航而不是 fetch：授权码流程要把浏览器交给身份服务、再由它送回
+ * 回调地址，fetch 拿不到回调时种下的 cookie。所以「登录」是一个链接，不是按钮。
+ */
 export default function Login() {
-  const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const setSession = useAuthStore((state) => state.setSession)
-  const [rememberedLogin] = useState(readRememberedLogin)
-  const [username, setUsername] = useState(rememberedLogin?.username ?? '')
-  const [password, setPassword] = useState(rememberedLogin?.password ?? '')
-  const [rememberPassword, setRememberPassword] = useState(Boolean(rememberedLogin))
-  const [showPassword, setShowPassword] = useState(false)
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState('')
-  const [showLocalForm, setShowLocalForm] = useState(false)
-
-  const requestedRedirect = searchParams.get('redirect')
-  const returnTo =
-    requestedRedirect?.startsWith('/') && !requestedRedirect.startsWith('/login')
-      ? requestedRedirect
-      : '/'
-
-  /**
-   * 平台登录是一次<b>整页导航</b>，不是 fetch。
-   *
-   * 授权码流程要把浏览器交给 IdP，再由 IdP 把它送回我们的回调地址；
-   * 用 fetch 发起会被同源策略挡住，而且拿不到回调时种下的 cookie。
-   * 所以这里换的是 window.location，不是路由跳转。
-   */
-  const signInWithPlatform = () => {
-    window.location.href = `/api/auth/oidc/login?returnTo=${encodeURIComponent(returnTo)}`
-  }
-
-  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    const normalizedUsername = username.trim()
-    if (!normalizedUsername || !password) return
-    setSubmitting(true)
-    setError('')
-    try {
-      const result = await authApi.login(normalizedUsername, password)
-      setSession(result.token, result.user)
-      updateRememberedLogin(rememberPassword, normalizedUsername, password)
-      const fallback = result.user.admin ? '/console/users' : '/planner/writing'
-      navigate(returnTo === '/' ? fallback : returnTo, { replace: true })
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : '登录失败，请重试')
-    } finally {
-      setSubmitting(false)
-    }
-  }
+  const returnTo = safeReturnTo(searchParams.get('redirect'))
+  const loginHref = `/api/auth/oidc/login?returnTo=${encodeURIComponent(returnTo)}`
 
   return (
-    <main className="flex min-h-dvh items-center justify-center bg-background px-page-inset py-3xl">
-      <Card className="w-full max-w-panel-md border border-border" surface="strong">
-        <CardHeader className="flex-row items-center gap-sm border-b border-border pb-lg">
-          <span className="flex size-control-xl items-center justify-center rounded-md bg-primary text-primary-foreground">
-            <Icon name="file-text" size="md" />
-          </span>
-          <h1 className="vx-brand-name">TenderAgent</h1>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-col gap-md">
-            <Button size="lg" className="w-full" onClick={signInWithPlatform}>
-              <Icon name="sign-in" size="sm" />
-              使用平台账号登录
-            </Button>
-            {/*
-              本地口令入口是过渡通道，不是并列的第二种登录方式。
-              标注出来而不是让它看起来同等重要：平台身份接通并验证后，
-              连同 app_user 一起退役。
-            */}
-            {showLocalForm ? null : (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="w-full text-muted-foreground"
-                onClick={() => setShowLocalForm(true)}
-              >
-                使用本地账号登录（过渡通道）
-              </Button>
-            )}
-          </div>
-          {showLocalForm ? (
-          <form autoComplete="off" onSubmit={submit} className="mt-lg border-t border-border pt-lg">
-            <FieldGroup>
-              <Field>
-                <FieldLabel htmlFor="login-username">账号</FieldLabel>
-                <Input
-                  id="login-username"
-                  name="username"
-              autoFocus
-              autoComplete="off"
-              value={username}
-              onChange={(event) => setUsername(event.target.value)}
-            />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="login-password">密码</FieldLabel>
-                <span className="relative block">
-                  <Input
-                    id="login-password"
-                    name="password"
-                type={showPassword ? 'text' : 'password'}
-                autoComplete="new-password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                    className="pr-control-xl"
-              />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-md"
-                    className="absolute inset-y-none right-none"
-                onClick={() => setShowPassword((current) => !current)}
-                aria-label={showPassword ? '隐藏密码' : '显示密码'}
-                title={showPassword ? '隐藏密码' : '显示密码'}
-              >
-                    <Icon name={showPassword ? 'eye-slash' : 'eye'} size="sm" />
-                  </Button>
-                </span>
-              </Field>
-              <label className="flex w-fit items-center gap-xs text-body-sm text-muted-foreground">
-                <Checkbox
-                  checked={rememberPassword}
-                  disabled={submitting}
-                  onCheckedChange={(checked) => {
-                    const enabled = checked === true
-                    setRememberPassword(enabled)
-                    if (!enabled) updateRememberedLogin(false, '', '')
-                  }}
-                />
-                <span>记住密码</span>
-              </label>
-              {error ? <Banner tone="danger" title={error} /> : null}
-              <Button type="submit" size="lg" className="w-full" disabled={submitting}>
-                {submitting ? <Spinner size="sm" /> : <Icon name="sign-in" size="sm" />}
-                登录
-              </Button>
-            </FieldGroup>
-          </form>
-          ) : null}
-        </CardContent>
-      </Card>
+    <main className="vx-gate">
+      <div className="vx-gate__flow" aria-hidden="true">
+        <svg viewBox="0 0 1600 1000" preserveAspectRatio="none">
+          <path d="M-80 690 C220 430,360 790,650 570 S1080 300,1680 480" />
+          <path d="M-100 760 C220 500,390 850,690 620 S1130 360,1700 540" />
+          <path d="M-120 830 C230 570,420 900,720 675 S1180 420,1710 600" />
+          <path d="M-60 600 C240 360,390 680,610 500 S1070 240,1640 410" />
+        </svg>
+      </div>
+      <div className="vx-gate__wash" aria-hidden="true" />
+
+      <section className="vx-gate__panel">
+        <ShellBrand href="/" label={PRODUCT_NAME} className="vx-gate__brand" />
+
+        <p className="vx-gate__message">请登录以验证您的订阅并访问产品。</p>
+
+        <a className="vx-gate__action" href={loginHref}>
+          登录
+        </a>
+
+        <p className="vx-gate__hint">登录后将自动返回当前产品</p>
+      </section>
     </main>
   )
 }

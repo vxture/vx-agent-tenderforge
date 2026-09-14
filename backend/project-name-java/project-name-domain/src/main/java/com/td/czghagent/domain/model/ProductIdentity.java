@@ -29,6 +29,28 @@ public final class ProductIdentity {
      */
     public static final String PLATFORM_AUDIENCE = "vxture";
 
+    /**
+     * C3 下发（provisioning webhook）的<strong>对外</strong>接收路径。
+     *
+     * <p><strong>通则规定所有产品同一个路径</strong>，变的只有域名——本产品的完整地址是
+     * {@code https://tenderforge.vxture.com/api/webhooks/vxture}。三段各答一问：
+     * {@code api} 说明这是机器接口、不与前端路由抢地址；{@code webhooks} 说明入站、
+     * 外部来源、必须验签；{@code vxture} 说明谁发的，将来接第二家时
+     * {@code /api/webhooks/<对方>} 自然并列。<strong>版本不进路径</strong>——
+     * URL 在平台侧按产品登记一次，把版本写进路径等于每次信封升级都要逐个产品改登记。
+     *
+     * <p><strong>它是常量而不是五处字面量，是因为这个路径曾经在本仓错过一次。</strong>
+     * 它同时出现在控制器映射、会话豁免名单、集成测试、部署文档与 {@code .env.example}
+     * 里；改了其中一处而漏掉会话豁免名单，表现是平台 POST 过来被登录过滤器挡掉，
+     * 而平台那边只看见一个非 2xx、重试十次、然后放弃。
+     * {@code scripts/guardrails/check_webhook_path.py} 守着这几处与本常量一致。
+     *
+     * <p>早期本仓取的是 {@code /provisioning/webhook}——那不是规范，是从 vxtpl
+     * 抄来的。vxtpl 与 yucer 的路由注释都写着「product_200 section 4」，
+     * 而那一节<strong>通篇没有规定过路径</strong>，两边各自造了一个又互相印证。
+     */
+    public static final String PLATFORM_WEBHOOK_PATH = "/api/webhooks/vxture";
+
     private ProductIdentity() {
     }
 }

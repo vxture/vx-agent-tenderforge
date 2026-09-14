@@ -141,8 +141,17 @@ jobs:
           cat > /tmp/remote-ddl.sh <<'REMOTE_SCRIPT'
           set -euo pipefail
           cd "$REPO_DIR"
-          # shellcheck disable=SC1091
-          set -a; . ./.env; set +a
+          # .env 是 compose 的配置，不是 shell 脚本，不 source 它：source 会把未加引号的
+          # 空格值当命令执行（2026-09-15 撞过：OIDC_SCOPES 让本脚本以 127 退出），也等于
+          # 允许配置文件执行任意命令。只按键读这里真正要的值；护栏
+          # check_db_init_env_reader.py 断言脚本用到的每个配置变量都经这里读取。
+          env_value() { bash deploy/database/env-value.sh ./.env "$1"; }
+          DEPLOY_STAGE="$(env_value DEPLOY_STAGE)"
+          POSTGRES_ROOT_PASSWORD="$(env_value POSTGRES_ROOT_PASSWORD)"
+          DATABASE_PASSWORD="$(env_value DATABASE_PASSWORD)"
+          : "${DEPLOY_STAGE:?.env 里 DEPLOY_STAGE 为空}"
+          : "${POSTGRES_ROOT_PASSWORD:?.env 里 POSTGRES_ROOT_PASSWORD 为空}"
+          : "${DATABASE_PASSWORD:?.env 里 DATABASE_PASSWORD 为空}"
           container="vx-${PRODUCT_CODE}-postgres-db-${DEPLOY_STAGE}"
           docker exec -i \
             -e PGPASSWORD="$POSTGRES_ROOT_PASSWORD" \
