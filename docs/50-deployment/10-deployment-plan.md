@@ -31,7 +31,7 @@
 `DOCUMENT_SERVICE_ENABLED` `DOCUMENT_SERVICE_TIMEOUT_SECONDS` `MOCK_BUNDLED`
 `MOCK_STATUS` `MOCK_TIER` `MOCK_USAGE_GATED` `OIDC_CLIENT_ID` `OIDC_CLIENT_SECRET`
 `OIDC_ISSUER` `OIDC_POST_LOGOUT_REDIRECT_URI` `OIDC_REDIRECT_URI` `OIDC_RP_ENABLED`
-`OIDC_SCOPES` `PLATFORM_API_URL` `PLATFORM_INTERNAL_AUTH_TOKEN`
+`OIDC_SCOPES` `PLATFORM_API_URL`
 `RP_SESSION_SECURE_COOKIE` `RP_SESSION_TTL` `TEMPORAL_ADDRESS` `TEMPORAL_DB_PASSWORD`
 `TEMPORAL_ENABLED` `PROVISION_WEBHOOK_SECRET`
 `PROVISION_WEBHOOK_SECRET_NEXT` `UPLOAD_MAX_FILE_SIZE`
@@ -153,7 +153,7 @@ Insights → Dependency graph → Dependabot 手动跑一次 "Check for updates"
 `AI_SERVICE_INTERNAL_TOKEN` `BOOTSTRAP_ADMIN_PASSWORD` `BOOTSTRAP_PLANNER_PASSWORD`
 
 **b. 平台线提供（见 §4）**
-`OIDC_*` `PLATFORM_API_URL` `PLATFORM_INTERNAL_AUTH_TOKEN`
+`OIDC_*` `PLATFORM_API_URL`
 `PROVISION_WEBHOOK_SECRET(_NEXT)` `ATLAS_API_URL` `CONSOLE_BASE_URL`
 
 **c. 部署形态（运维决定）**
@@ -174,7 +174,7 @@ Insights → Dependency graph → Dependabot 手动跑一次 "Check for updates"
 | 依赖 | 缺了会怎样 |
 | --- | --- |
 | `tenderforge` 产品登记 + OIDC client 对 | 登录不可用；**所有 S2S 调用铸不出票**（一对凭据同时解锁两者） |
-| `PLATFORM_API_URL` + 内部令牌 | C2 权益与 C3 用量上报落到替身，部署态拒绝启动 |
+| `PLATFORM_API_URL` + OIDC client（用来换 S2S 票） | C2 权益与 C3 用量上报落到替身，部署态拒绝启动 |
 | `PROVISION_WEBHOOK_SECRET` | 开通/停用事件全部被拒；未配密钥时接收端一律拒绝 |
 | Atlas `ATLAS_API_URL` + **endpoint 授权** | 缺授权时每次调用 `403 NOT_ENTITLED`，与令牌是否有效无关 |
 | 工作空间覆盖 | 铸币校验的是**调用方**是否覆盖该工作空间 |

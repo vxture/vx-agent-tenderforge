@@ -75,6 +75,13 @@ public class PlatformS2STokenMinter implements S2STokenMinter {
     }
 
     @Override
+    public S2SToken forWorkspace(String audience, String workspaceId) {
+        MultiValueMap<String, String> form = baseForm(audience);
+        form.add("workspace_id", workspaceId);
+        return mint("ws|" + audience + "|" + workspaceId, audience, S2SToken.Mode.SERVICE, form);
+    }
+
+    @Override
     public void invalidate(S2SToken token) {
         cache.values().removeIf(cached -> cached.value().equals(token.value()));
     }

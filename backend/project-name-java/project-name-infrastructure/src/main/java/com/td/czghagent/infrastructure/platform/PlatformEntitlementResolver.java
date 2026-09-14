@@ -7,10 +7,12 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.td.czghagent.domain.model.Entitlement;
 import com.td.czghagent.domain.model.ProductIdentity;
 import com.td.czghagent.domain.model.QuotaPool;
+import com.td.czghagent.domain.model.S2SToken;
 import com.td.czghagent.domain.port.EntitlementResolver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientResponseException;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -25,12 +27,9 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * 从平台读权益（{@code GET /platform/entitlements}）。
  *
- * <p><strong>凭证类别，已标记</strong>：{@code x-vxture-internal-auth} 是共享口令，
- * 而通则明确「不要登记共享口令式凭证，新产品不生在退役凭证上」——但它没有点名
- * {@code /platform/*} 与 {@code /usage/*} 这两条通道的替代物。
- * 已在给平台线的接入信里提出这个问题；在答复到达之前保留它，
- * 因为这是生产实际跑的东西，而<strong>在产品仓里发明一个替代方案</strong>
- * 正是通则第十坑点名禁止的。
+ * <p>凭证是一张为该工作空间铸的 S2S 票（见 {@link PlatformCallCredentials}）。
+ * 平台按<strong>票上的</strong>工作空间作答，查询串里声明的那个会被丢弃——
+ * 两者本来就是同一个值，查询串照旧带上，是给平台日志与对账看的。
  */
 public class PlatformEntitlementResolver implements EntitlementResolver {
 
@@ -47,14 +46,14 @@ public class PlatformEntitlementResolver implements EntitlementResolver {
 
     private final RestClient client;
     private final String baseUrl;
-    private final String internalAuthToken;
+    private final PlatformCallCredentials credentials;
     private final Map<String, Cached> cache = new ConcurrentHashMap<>();
 
     public PlatformEntitlementResolver(RestClient.Builder builder, String baseUrl,
-                                       String internalAuthToken) {
+                                       PlatformCallCredentials credentials) {
         this.client = builder.build();
         this.baseUrl = baseUrl.replaceAll("/+$", "");
-        this.internalAuthToken = internalAuthToken;
+        this.credentials = credentials;
     }
 
     @Override
@@ -94,14 +93,37 @@ public class PlatformEntitlementResolver implements EntitlementResolver {
                 + "?workspace_id=" + encode(workspaceId)
                 + "&product=" + encode(ProductIdentity.PRODUCT_CODE);
         try {
-            JsonNode body = client.get().uri(url)
-                    .header("x-vxture-internal-auth", internalAuthToken)
-                    .retrieve()
-                    .body(JsonNode.class);
-            return parse(workspaceId, body);
+            return parse(workspaceId, get(url, workspaceId, true));
         } catch (RuntimeException exception) {
+            // 也包括铸不出票：平台答 invalid_target 意味着本产品在该工作空间
+            // 没有有效的订阅或开通，那本来就是「没有权益」。
             LOGGER.warn("Entitlement lookup failed for workspace {}", workspaceId, exception);
             return Entitlement.none(workspaceId, ProductIdentity.PRODUCT_CODE);
+        }
+    }
+
+    /**
+     * 带票发一次；票被拒（401）就作废并<strong>重铸一次</strong>。
+     *
+     * <p>只重试一次：票在平台侧已不被接受时，新票能立刻恢复；新票仍被拒说明
+     * 问题不在票上，再试只会把一次失败放大成一串。
+     */
+    private JsonNode get(String url, String workspaceId, boolean mayRetry) {
+        S2SToken token = credentials.mint(workspaceId);
+        try {
+            return client.get().uri(url)
+                    .headers(headers -> PlatformCallCredentials.apply(headers, token))
+                    .retrieve()
+                    .body(JsonNode.class);
+        } catch (RestClientResponseException rejected) {
+            if (rejected.getStatusCode().value() != 401) {
+                throw rejected;
+            }
+            credentials.invalidate(token);
+            if (!mayRetry) {
+                throw rejected;
+            }
+            return get(url, workspaceId, false);
         }
     }
 
