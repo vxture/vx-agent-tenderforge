@@ -124,10 +124,10 @@ Compose 项目名是 `tenderforge`（`docker-compose.yml` 顶层 `name:`），�
 
 | 目录 | 职责 |
 | --- | --- |
-| `api/client.ts` | Bearer Token、统一响应解包、401 清会话、受保护文件下载 |
+| `api/client.ts` | 同源会话 cookie（浏览器零 token）、统一响应解包、401 清会话、受保护文件下载 |
 | `api/modules/` | `auth`、`admin`、`tender` 后端契约 |
 | `features/tender/` | 标书、素材和五个工作区页面 |
-| `features/account/` | 显示名称、头像、密码 |
+| `features/account/` | 显示名称、头像 |
 | `features/admin/` | 用户与审计管理 |
 | `router/` | 路由、登录和角色守卫、错误边界 |
 | `stores/` | Zustand 会话和少量全局 UI 状态 |
@@ -403,8 +403,8 @@ Compose 中 `api` 只提交工作流，`worker` 注册四个队列并执行 Acti
 
 ## 7. Java 对外 API
 
-接口形状遵循《产品接入通则》的 MUST 条款。除登录、运行时探针和 OpenAPI 外均需
-`Authorization: Bearer <token>`。
+接口形状遵循《产品接入通则》的 MUST 条款。除登录回路、平台回调、运行时探针和 OpenAPI 外，
+均需有效的平台会话 cookie（§7.2b）；`Authorization` 头不被读取。
 
 **成功响应直接返回载荷本体**，没有外层信封（A-4）。三种形状按「有没有服务端解析出来的
 结果要回显」来选，不按资源类型选：
@@ -436,16 +436,14 @@ Compose 中 `api` 只提交工作流，`worker` 注册四个队列并执行 Acti
 
 | 方法 | 路径 | 作用 |
 | --- | --- | --- |
-| `POST` | `/api/auth/login` | 用户名密码登录并创建有过期时间的会话 |
 | `GET` | `/api/auth/me` | 返回当前用户 |
 | `GET` | `/api/auth/oidc/login` | 发起平台登录，`302` 跳 IdP；`returnTo` 已白名单化 |
 | `GET` | `/api/auth/oidc/callback` | IdP 回调，种下不透明会话 cookie 并 `302` 回站内 |
 | `POST` | `/api/auth/oidc/backchannel-logout` | 平台反向登出通知；验签后撤销该 subject 的全部会话 |
-| `POST` | `/api/auth/logout` | **唯一的登出入口**，撤销请求携带的任何一种会话，返回 `204` |
+| `POST` | `/api/auth/logout` | **唯一的登出入口**，撤销当前平台会话并清 cookie，返回 `204` |
 | `GET` | `/api/status` | 平台接入自证：四条通道的真实状态；只报状态不报值 |
 | `POST` | `/api/account/avatar` | 上传、处理并替换当前用户头像 |
 | `GET` | `/api/account/avatar` | 鉴权读取当前用户头像 |
-| `PATCH` | `/api/account/password` | 校验旧密码并修改密码，记录审计 |
 | `PATCH` | `/api/account/profile` | 修改显示名称 |
 | `GET/POST` | `/api/admin/users` | 按 `limit` 钳制的筛选（裸数组）/ 创建用户 |
 | `GET/PATCH` | `/api/admin/users/{userId}` | 查询 / 乐观锁部分更新 |
@@ -499,10 +497,12 @@ Compose 中 `api` 只提交工作流，`worker` 注册四个队列并执行 Acti
 `SameSite=Lax` 而不是 `Strict`：登录回调是从 IdP 域发起的顶层导航，
 Strict 会让浏览器不带上刚种下的 cookie，表现为「登录成功后仍然未登录」。
 
-**两条身份通道并存（过渡态）**：RP 会话（cookie）优先，本地口令会话（Bearer）其次。
-顺序不是偏好——反过来会让一个残留的旧 Bearer 盖掉刚建立的平台身份。
-前端登录页把平台登录做成主入口，本地口令折叠为标注了「过渡通道」的次要入口。
-平台身份验证通过后，本地那条连同 `app_user` 一起退役。
+**只有一条身份通道。** 本地口令登录（`POST /api/auth/login`）与 Bearer 会话 2026-09-15
+退役：平台登录已在生产闭环验证，而登录页早已不提供口令入口——接口却仍然活着，
+任何知道 `admin` 口令的人都能绕过平台身份，C2 权益与 C3 计量随之失效，界面上毫无异样。
+鉴权过滤器**不读** `Authorization` 头，库里残留的 `user_session` 行因此全部失效。
+`LocalPasswordChannelRetiredIntegrationTest` 用库里真实有效的旧凭据守着它回不来。
+`app_user` 表、用户管理页与账户页的改名/头像暂留，整体退役另行进行。
 
 **是否已登录由服务端裁定**，不由 localStorage 里有没有字符串裁定：RP 会话装在
 HttpOnly cookie 里，浏览器读不到它。
@@ -717,7 +717,7 @@ Atlas 强制要求 `taskId`，缺失即 400，于是主流程全部失败而手�
 - 业务文件只存于 `FileStorage` 对应的私有目录（`${DATA_DIR}/private`，绑定挂载到容器
   `/app/data/private`）；数据库对象键不返回浏览器。
 - 上传限制默认单文件 50 MB、请求 55 MB。
-- 头像和下载必须经过 Bearer 鉴权，Nginx 不直接暴露私有目录。
+- 头像和下载必须经过会话鉴权，Nginx 不直接暴露私有目录。
 
 Java 同时保留两条导出能力：当前生产排版通过 Python `/document/render` 完成复杂样式和 QA；
 Java `BidDocumentExporter` 的本地实现用于文档服务关闭时的开发/兼容路径。二者都必须执行
@@ -893,15 +893,16 @@ Java `BidDocumentExporter` 的本地实现用于文档服务关闭时的开发/�
 
 ## 11. 安全、隔离与审计
 
-- 密码通过 `PasswordHasher` 存储，不保存明文；登录返回随机 Bearer Token，数据库保存
-  Token 哈希，默认会话 12 小时。
-- `AuthenticationFilter` 放行登录、健康、OpenAPI 和错误页；其他 API 必须解析有效会话。
+- 身份只来自平台 IdP（§7.2b）。会话是服务端 `rp_session`，浏览器只持不透明 HttpOnly
+  cookie，库里只存它的哈希，默认时长 `RP_SESSION_TTL`（12 小时）。
+- `AuthenticationFilter` 放行登录回路、平台回调、健康、OpenAPI 和错误页；其他 API 必须解析
+  有效的平台会话。
 - `/api/admin/**` 强制 `ADMIN`；具体用例仍检查角色。标书与素材仓储查询必须同时带
   `owner_id`，越权统一返回 403/404 语义，不泄露对象键。
 - Java 与 Python 使用常量时间比较内部 Token；模型 API Key 只从 `AI_MODEL_API_KEY` 环境变量读取。
 - `/health` 只表示进程存活，`/ready` 还会确认 `AI_MODEL_API_KEY` 非空；API 和 Worker 仅依赖
   ready 的 AI 容器启动。Key 缺失时不会向外部模型发起请求。
-- 登录、注销、密码/资料、管理员账号操作和关键业务写入记录审计。错误响应和日志使用
+- 登录、注销、资料、管理员账号操作和关键业务写入记录审计。错误响应和日志使用
   `traceId` 关联，不记录密钥或完整敏感正文。
 - `BLIND` 模式的提示词限制身份性内容；最终仍需人工按招标文件复核。
 
@@ -914,7 +915,6 @@ Java `BidDocumentExporter` 的本地实现用于文档服务关闭时的开发/�
 | `MYSQL_PASSWORD`、`MYSQL_ROOT_PASSWORD`、`TEMPORAL_DB_PASSWORD` | 业务、root、Temporal 数据库密码 |
 | `AI_SERVICE_INTERNAL_TOKEN` | Java -> Python 内部认证，两个服务必须一致 |
 | `AI_MODEL_API_KEY` | 模型 API Key，由 `.env` 注入 `ai` 容器，不设默认值 |
-| `BOOTSTRAP_PLANNER_PASSWORD`、`BOOTSTRAP_ADMIN_PASSWORD` | 引导账号密码，仅首次/显式引导使用 |
 | `GITHUB_PACKAGES_TOKEN` | 仅在构建 Web 镜像时使用，必须具备 `read:packages`；通过 BuildKit secret 注入，不进入运行容器或镜像层 |
 
 ### 12.2 运行变量
@@ -925,7 +925,6 @@ Java `BidDocumentExporter` 的本地实现用于文档服务关闭时的开发/�
 | `DEPLOY_STAGE` | `local` | 部署阶段。为 `production` 时任何 mock 实现必须拒绝启动，让降级由守卫拦住而不是靠人记得改配置 |
 | `APP_PUBLISH_HOST` / `APP_PUBLISH_PORT` | Compose 默认 `127.0.0.1` / `4050` | 产品对外入口。**端口取号唯一源是组织端口登记表**（L3 #5，子块 4050–4059，prod 4050 / beta 4051）；这里出现的只是回退默认值，必须与登记表逐字一致。本地 Vite 开发使用 `5174` |
 | `TEMPORAL_UI_HOST` / `TEMPORAL_UI_PORT` | `127.0.0.1` / `8233` | Temporal UI 运维入口，不开放公网 |
-| `AUTH_SESSION_HOURS` | `12` | 会话时长 |
 | `CORS_ALLOWED_ORIGINS` | `https://tenderforge.vxture.com` | Java CORS 白名单，逗号分隔。必须与对外域名逐字一致，否则浏览器直接被 CORS 挡住 |
 | `AI_PROVIDER_NAME` | Compose 回退 `DIRECT_DEEPSEEK` | AI 审计标识；百炼托管 DeepSeek 使用 `DASHSCOPE_DEEPSEEK` |
 | `AI_MODEL_BASE_URL` | 提供方决定 | OpenAI-compatible 根地址，不包含 `/chat/completions` |

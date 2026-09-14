@@ -4,7 +4,6 @@
 package com.td.czghagent.rest.security;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.td.czghagent.application.query.service.AuthQueryService;
 import com.td.czghagent.domain.model.CurrentUser;
 import com.td.czghagent.domain.model.PlatformCallerContext;
 import com.td.czghagent.domain.model.ProductIdentity;
@@ -25,14 +24,11 @@ import java.io.IOException;
 @Order(Ordered.HIGHEST_PRECEDENCE + 10)
 public class AuthenticationFilter extends OncePerRequestFilter {
 
-    private final AuthQueryService authQueryService;
     private final PlatformSessionResolver platformSessions;
     private final ObjectMapper objectMapper;
 
-    public AuthenticationFilter(AuthQueryService authQueryService,
-                                PlatformSessionResolver platformSessions,
+    public AuthenticationFilter(PlatformSessionResolver platformSessions,
                                 ObjectMapper objectMapper) {
-        this.authQueryService = authQueryService;
         this.platformSessions = platformSessions;
         this.objectMapper = objectMapper;
     }
@@ -41,12 +37,13 @@ public class AuthenticationFilter extends OncePerRequestFilter {
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getRequestURI();
         return "OPTIONS".equals(request.getMethod())
-                || "/api/auth/login".equals(path)
                 // 登录回路本身不能要求先登录。这三条是 C1 的入口、回调与
                 // 平台反向登出通知，调用它们的时候按定义还没有会话。
                 || "/api/auth/oidc/login".equals(path)
                 || "/api/auth/oidc/callback".equals(path)
                 || "/api/auth/oidc/backchannel-logout".equals(path)
+                // 本地口令登录 /api/auth/login 已退役，刻意不在这张名单里：
+                // 放行它等于重新打开一条绕过平台身份的入口。
                 // 平台下发的开通/停用事件。调用方是平台，按定义没有会话；
                 // 它的鉴权全部来自 HMAC 验签，而验签在控制器里是第一件事。
                 // 取常量而不是再写一遍字面量：这一处与控制器映射分叉时，
@@ -65,12 +62,11 @@ public class AuthenticationFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
-        // 两条身份通道并存：平台 RP 会话（cookie）优先，本地口令会话（Bearer）其次。
-        // 顺序不是偏好——RP 会话是目标形态，本地那条是待退役的过渡通道，
-        // 反过来会让一个残留的旧 Bearer 盖掉刚建立的平台身份。
+        // 身份只有一条通道：平台 RP 会话（HttpOnly cookie）。本地口令的 Bearer 通道
+        // 2026-09-15 退役——Authorization 头在这里不被读取，库里残留的 user_session
+        // 行因此全部失效，不需要逐条清理。
         String cookieValue = RpSessionCookie.read(request);
         CurrentUser user = null;
-        String token = null;
         String platformAccessToken = null;
         if (cookieValue != null) {
             com.td.czghagent.domain.model.RpSession session =
@@ -81,10 +77,6 @@ public class AuthenticationFilter extends OncePerRequestFilter {
             }
         }
         if (user == null) {
-            token = bearerToken(request);
-            user = token == null ? null : authQueryService.resolve(token).orElse(null);
-        }
-        if (user == null) {
             writeUnauthorized(request, response);
             return;
         }
@@ -93,10 +85,7 @@ public class AuthenticationFilter extends OncePerRequestFilter {
             return;
         }
         request.setAttribute(RequestIdentity.USER, user);
-        request.setAttribute(RequestIdentity.TOKEN, token);
         // 出站调用点埋在十几层业务函数底下，而只有这里知道这次请求替谁在跑。
-        // 本地口令登录的用户没有平台票，platformAccessToken 为空——
-        // 那时铸币退回 service 模式，而过渡租户会让它铸不出来。这是实情，不是缺陷。
         try {
             PlatformCallerContext.run(user.tenant(), platformAccessToken, () -> {
                 try {
@@ -125,15 +114,6 @@ public class AuthenticationFilter extends OncePerRequestFilter {
             }
             throw (ServletException) cause;
         }
-    }
-
-    private String bearerToken(HttpServletRequest request) {
-        String header = request.getHeader("Authorization");
-        if (header == null || !header.startsWith("Bearer ")) {
-            return null;
-        }
-        String token = header.substring(7).trim();
-        return token.isBlank() ? null : token;
     }
 
     private boolean hasRoleAccess(String path, CurrentUser user) {

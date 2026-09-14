@@ -12,7 +12,6 @@ import com.td.czghagent.domain.model.StoredFile;
 import com.td.czghagent.domain.model.UserAccount;
 import com.td.czghagent.domain.port.FileStorage;
 import com.td.czghagent.domain.port.ImageProcessor;
-import com.td.czghagent.domain.port.PasswordHasher;
 import com.td.czghagent.domain.repository.AuditRepository;
 import com.td.czghagent.domain.repository.AuthRepository;
 import org.springframework.stereotype.Service;
@@ -29,18 +28,15 @@ public class AccountCommandService {
 
     private final AuthRepository authRepository;
     private final AuditRepository auditRepository;
-    private final PasswordHasher passwordHasher;
     private final ImageProcessor imageProcessor;
     private final FileStorage fileStorage;
 
     public AccountCommandService(AuthRepository authRepository,
                                  AuditRepository auditRepository,
-                                 PasswordHasher passwordHasher,
                                  ImageProcessor imageProcessor,
                                  FileStorage fileStorage) {
         this.authRepository = authRepository;
         this.auditRepository = auditRepository;
-        this.passwordHasher = passwordHasher;
         this.imageProcessor = imageProcessor;
         this.fileStorage = fileStorage;
     }
@@ -74,27 +70,6 @@ public class AccountCommandService {
         return requireAccount(account.id()).toCurrentUser();
     }
 
-    /**
-     * <p><b>Preconditions:</b>当前密码正确，新密码长度为8至64个字符且与当前密码不同。</p>
-     * <p><b>Side Effects:</b>更新BCrypt密码哈希、撤销用户全部会话并写审计。</p>
-     * <p><b>Error Semantics:</b>当前密码错误返回ACCOUNT_PASSWORD_INVALID。</p>
-     */
-    @Transactional
-    public void changePassword(String currentPassword, String newPassword, OperationContext context) {
-        UserAccount account = requireAccount(context.user().id());
-        if (!passwordHasher.matches(currentPassword, account.passwordHash())) {
-            throw new BusinessException("ACCOUNT_PASSWORD_INVALID", "当前密码不正确", 400);
-        }
-        validateNewPassword(newPassword);
-        if (passwordHasher.matches(newPassword, account.passwordHash())) {
-            throw new BusinessException("ACCOUNT_PASSWORD_UNCHANGED", "新密码不能与当前密码相同", 400);
-        }
-        authRepository.updatePassword(account.id(), passwordHasher.hash(newPassword));
-        authRepository.deleteSessionsByUserId(account.id());
-        auditRepository.append(AuditEvent.byUser(context, "ACCOUNT_PASSWORD_CHANGE",
-                "USER", account.id(), AuditEvent.SUCCESS, "用户修改个人密码并撤销全部会话"));
-    }
-
     @Transactional
     public CurrentUser updateProfile(String displayName, OperationContext context) {
         String normalized = displayName == null ? "" : displayName.trim();
@@ -111,14 +86,6 @@ public class AccountCommandService {
     private UserAccount requireAccount(String userId) {
         return authRepository.findById(userId)
                 .orElseThrow(() -> new BusinessException("USER_NOT_FOUND", "用户不存在", 404));
-    }
-
-    private void validateNewPassword(String password) {
-        if (password == null || password.length() < 8 || password.length() > 64) {
-            throw new BusinessException(
-                    "ACCOUNT_PASSWORD_FORMAT_INVALID", "新密码长度必须为8至64个字符", 400
-            );
-        }
     }
 
     private void cleanupAvatarAfterTransaction(String oldObjectKey, String newObjectKey) {

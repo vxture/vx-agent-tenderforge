@@ -34,7 +34,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 以及各种处置最终落成什么状态码。这三件事都只在真实请求上才成立或不成立。
  */
 @SpringBootTest(properties = {
-        "app.bootstrap.enabled=false",
         "app.platform.usage-flush-enabled=false",
         "app.platform.provision-webhook-secret=" + ProvisioningWebhookIntegrationTest.SECRET,
         "app.storage.root=${java.io.tmpdir}/provisioning-${random.uuid}"

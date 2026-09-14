@@ -10,7 +10,6 @@ import jakarta.servlet.http.HttpServletRequest;
 public final class RequestIdentity {
 
     public static final String USER = RequestIdentity.class.getName() + ".user";
-    public static final String TOKEN = RequestIdentity.class.getName() + ".token";
     public static final String TRACE_ID = RequestIdentity.class.getName() + ".traceId";
     public static final String TASK_ID = RequestIdentity.class.getName() + ".taskId";
 
@@ -29,10 +28,6 @@ public final class RequestIdentity {
 
     public static CurrentUser user(HttpServletRequest request) {
         return (CurrentUser) request.getAttribute(USER);
-    }
-
-    public static String token(HttpServletRequest request) {
-        return (String) request.getAttribute(TOKEN);
     }
 
     public static String traceId(HttpServletRequest request) {

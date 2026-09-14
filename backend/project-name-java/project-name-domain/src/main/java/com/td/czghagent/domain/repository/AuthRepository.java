@@ -5,7 +5,6 @@ package com.td.czghagent.domain.repository;
 
 import com.td.czghagent.domain.model.UserAccount;
 
-import java.time.LocalDateTime;
 import java.util.Optional;
 
 public interface AuthRepository {
@@ -13,8 +12,6 @@ public interface AuthRepository {
     Optional<UserAccount> findByUsername(String username);
 
     Optional<UserAccount> findById(String userId);
-
-    Optional<UserAccount> findBySessionTokenHash(String tokenHash, LocalDateTime now);
 
     long countUsers();
 
@@ -27,17 +24,7 @@ public interface AuthRepository {
 
     void updateProfile(String userId, String displayName);
 
-    void updatePassword(String userId, String passwordHash);
-
     long countEnabledAdmins();
 
-    void insertSession(String id, String userId, String tokenHash, LocalDateTime expiresAt);
-
-    void touchSession(String tokenHash, LocalDateTime seenAt);
-
-    void deleteSession(String tokenHash);
-
     void deleteSessionsByUserId(String userId);
-
-    void deleteExpiredSessions(LocalDateTime now);
 }

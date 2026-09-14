@@ -26,9 +26,9 @@ docker compose ps
 - Java 健康检查：容器内 `http://api:8081/actuator/health`
 - Python 健康检查：容器内 `http://ai:8000/health`
 
-首次启动使用 `.env` 中的 `BOOTSTRAP_PLANNER_PASSWORD` 和
-`BOOTSTRAP_ADMIN_PASSWORD` 创建或更新本地 `planner`、`admin` 账号。正式环境必须替换
-示例密码和 `AI_SERVICE_INTERNAL_TOKEN`。
+登录只走平台身份（`/api/auth/oidc/login`）。本地 compose 未配置 `OIDC_*` 时使用身份替身，
+点「登录」会直接回到本站、以 `mock-` 开头的身份进入；本地口令账号已于 2026-09-15 退役。
+正式环境必须替换示例 `AI_SERVICE_INTERNAL_TOKEN`。
 
 业务数据与私有文件不在命名卷里，而是**绑定挂载**到 `${DATA_DIR}`（默认
 `/srv/md0/tenderforge/data`）下的 `postgres/` 与 `private/`。因此 `docker compose down -v`
