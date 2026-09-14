@@ -3,6 +3,7 @@
 // DATE: 2026-09-09
 package com.td.czghagent.infrastructure.platform;
 
+import com.td.czghagent.domain.port.S2STokenMinter;
 import com.td.czghagent.domain.model.DeployStage;
 import com.td.czghagent.domain.port.EntitlementResolver;
 import org.slf4j.Logger;
@@ -28,21 +29,24 @@ public class EntitlementResolverConfiguration {
     public EntitlementResolver entitlementResolver(
             RestClient.Builder builder,
             @Value("${app.platform.api-url:}") String apiUrl,
-            @Value("${app.platform.internal-auth-token:}") String internalAuthToken,
+            S2STokenMinter s2sTokenMinter,
             @Value("${app.deploy-stage:local}") String deployStage,
             @Value("${app.allow-mock-on-deploy:false}") boolean allowMock,
             @Value("${app.platform.mock-tier:}") String mockTier,
             @Value("${app.platform.mock-status:}") String mockStatus,
             @Value("${app.platform.mock-bundled:false}") boolean mockBundled
     ) {
-        if (!apiUrl.isBlank() && !internalAuthToken.isBlank()) {
-            LOGGER.info("C2 权益使用平台接口：{}", apiUrl);
-            return new PlatformEntitlementResolver(builder, apiUrl, internalAuthToken);
+        // 凭证是用 C1 那对 OIDC client 换来的 S2S 票，没有第二份口令要配。
+        if (!apiUrl.isBlank() && s2sTokenMinter.isConfigured()) {
+            LOGGER.info("C2 权益使用平台接口：{}（S2S 票 aud={}）", apiUrl,
+                    PlatformCallCredentials.AUDIENCE);
+            return new PlatformEntitlementResolver(builder, apiUrl,
+                    new PlatformCallCredentials(s2sTokenMinter));
         }
         DeployStage stage = DeployStage.parse(deployStage);
         if (stage.isDeployed() && !allowMock) {
             throw new IllegalStateException(
-                    "部署阶段 " + stage + " 缺少 PLATFORM_API_URL / PLATFORM_INTERNAL_AUTH_TOKEN，"
+                    "部署阶段 " + stage + " 缺少 PLATFORM_API_URL 或 OIDC client 凭据（用来换 S2S 票），"
                             + "拒绝以编造的权益启动。补齐配置或显式设置"
                             + " app.allow-mock-on-deploy=true（会自报降级）");
         }

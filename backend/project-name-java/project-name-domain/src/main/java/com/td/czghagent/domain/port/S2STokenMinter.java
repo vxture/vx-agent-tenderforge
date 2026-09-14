@@ -44,6 +44,15 @@ public interface S2STokenMinter {
      */
     void invalidate(S2SToken token);
 
+    /**
+     * 无用户在场、调用方也只知道工作空间：只声明 {@code workspace_id}。
+     *
+     * <p>平台 service 模式里 {@code org_id} 是可选的，租户由平台从工作空间解析。
+     * 权益读取与用量冲洗手上只有工作空间——为了凑出一个 {@link TenantScope}
+     * 去编一个组织 id，会把一个平台没核对过的值盖进票里。
+     */
+    S2SToken forWorkspace(String audience, String workspaceId);
+
     /** 是否具备铸币能力。{@code /api/status} 用它如实回答这条通道配没配。 */
     boolean isConfigured();
 }

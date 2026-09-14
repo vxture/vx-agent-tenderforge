@@ -98,7 +98,6 @@ app:
   # 就说得出真话，而不是等实现落地后再补一个「其实一直没配」的发现。
   platform:
     api-url: ${PLATFORM_API_URL:}
-    internal-auth-token: ${PLATFORM_INTERNAL_AUTH_TOKEN:}
     provision-webhook-secret: ${PROVISION_WEBHOOK_SECRET:}
     provision-webhook-secret-next: ${PROVISION_WEBHOOK_SECRET_NEXT:}
     console-url: ${CONSOLE_BASE_URL:https://console.vxture.com}

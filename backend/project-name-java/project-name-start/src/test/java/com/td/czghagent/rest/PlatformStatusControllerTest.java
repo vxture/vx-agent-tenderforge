@@ -302,6 +302,11 @@ class PlatformStatusControllerTest {
         }
 
         @Override
+        public S2SToken forWorkspace(String audience, String workspaceId) {
+            throw new UnsupportedOperationException("本用例不铸票");
+        }
+
+        @Override
         public void invalidate(S2SToken token) {
         }
 

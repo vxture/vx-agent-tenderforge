@@ -356,6 +356,11 @@ class AiServiceHttpClientTest {
             return mint(audience);
         }
 
+        @Override
+        public S2SToken forWorkspace(String audience, String workspaceId) {
+            return mint(audience);
+        }
+
         private S2SToken mint(String audience) {
             minted++;
             return new S2SToken("minted-token", audience, S2SToken.Mode.SERVICE,
