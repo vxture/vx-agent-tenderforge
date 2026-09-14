@@ -200,8 +200,11 @@ Insights → Dependency graph → Dependabot 手动跑一次 "Check for updates"
   而落空不报错**：未匹配的路径落到 SPA catch-all，平台拿回 index.html 和 HTTP 200，
   投递被判为送达。第 3 步也不是可选的——留着两条路，下一个人无法从代码判断
   线上登记的是哪一个。
-- 需要授权的 Atlas endpoint：见 `atlas_endpoints.required_endpoint_codes()`；
-  授权到位前保持 `ATLAS_USE_DEDICATED_ENDPOINTS=false`，全部走 `chat/default`
+- ~~需要授权的 Atlas endpoint~~ —— 2026-09-14 已授权四条通用路由
+  `chat/deterministic` / `chat/fast` / `chat/default` / `chat/reasoning`，
+  operation 到路由的对应见 `atlas_endpoints.OPERATION_ROUTES`。
+  降级开关 `ATLAS_USE_DEDICATED_ENDPOINTS` 同日退役：它只为「等授权」那段时期存在。
+  宿主机 `.env` 里残留的这一行已无效（compose 白名单不再列它），可删
 
 ---
 

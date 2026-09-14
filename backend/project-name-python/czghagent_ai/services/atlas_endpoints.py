@@ -1,110 +1,109 @@
 # GENERATED_BY_AI
 # MODEL: claude-opus-5
-# DATE: 2026-09-09
+# DATE: 2026-09-14
 """operation 到 Atlas endpointCode 的<b>唯一映射点</b>。
 
 Atlas 的 ``POST /v1/chat`` 请求体只有
 ``{endpointCode, messages, tenantId, taskId, requestId}``——没有 temperature、
-没有 max_tokens、没有 response_format、没有 thinking 开关。这不是遗漏：
-Atlas 的路由优先级是 ``modelCode > endpointCode > taskProfile``，而 endpointCode
-的定义就是「运营侧配置好的具名路由目标」。生成参数属于那个配置，不属于调用方。
+没有 max_tokens、没有 thinking 开关。生成参数属于 endpoint 的配置，不属于调用方；
+产品这一侧能决定的只有「这一次调用走哪条路由」。
 
-于是本产品原来散在代码里的模型档位和生成参数，变成了对 Atlas 线的一份
-<b>配置请求</b>——下面每一行都写清楚了那个 endpoint 必须被配成什么。
-把参数塞进请求体是另一条路，但通则明确禁止在产品仓里发明被调方的接口形状；
-一个 Atlas 不认识的字段最好的结果是被忽略（参数悄悄失效），
-最坏的结果是每一次调用 400。
+**路由是运营授权给本产品的四条通用路由**（owner 2026-09-14）：
+``chat/deterministic`` / ``chat/fast`` / ``chat/default`` / ``chat/reasoning``。
+2026-09-11 请求六个专属 endpoint 的联络函就此被取代，见 ``docs/80-liaison``。
 
-**尚未确认的一件事**：这些 endpointCode 还没有被 Atlas 线登记和授权。
-在授权到位之前，每一次调用都会是 ``403 NOT_ENTITLED``，与令牌是否有效无关。
-``chat/default`` 是 Atlas 参考实现里的通用兜底，先用它保证链路可通。
+产品命名任务，运营决定每条路由挂哪个模型——改指向不需要发版。所以这里
+<b>只写任务到路由的对应</b>：不写模型名，也不开环境变量覆盖。一份可以被覆盖的
+映射就是第二个来源，而线上跑的是哪一份，从代码里再也看不出来。
+
+**分档依据是直连时代逐条实测出来的策略**（详细设计 §8.1），不是按路由名字猜。
+按下面的顺序取第一条命中的：
+
+1. 当时开 thinking 的 → ``chat/reasoning``
+2. 当时温度为 0 的 → ``chat/deterministic``
+3. 当时走 Quality 模型、关 thinking 的 → ``chat/default``
+4. 其余（Fast 模型、关 thinking、温度大于 0）→ ``chat/fast``
+
+顺序有含义：一致性审查温度也是 0，但它首先是一件没有推理做不了的事。
+这条规则由测试从直连 provider 的策略表反推并逐条比对——两边任何一边改了而另一边
+没跟上，测试会红。
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-#: Atlas 参考实现给出的全局稳定兜底 endpoint。
-#: 没有专属 endpoint 时全部落到它上面——链路能通，但所有 operation 共用
-#: 一套生成参数，也就是<b>失去了按任务分档</b>这件事本身。
+DETERMINISTIC_ENDPOINT_CODE = "chat/deterministic"
+FAST_ENDPOINT_CODE = "chat/fast"
 DEFAULT_ENDPOINT_CODE = "chat/default"
+REASONING_ENDPOINT_CODE = "chat/reasoning"
+
+#: 运营授权给本产品的全部路由。映射里出现这之外的 code，
+#: 对应 operation 的每一次调用都是 ``403 NOT_ENTITLED``，与令牌是否有效无关。
+AUTHORIZED_ENDPOINT_CODES = frozenset(
+    {
+        DETERMINISTIC_ENDPOINT_CODE,
+        FAST_ENDPOINT_CODE,
+        DEFAULT_ENDPOINT_CODE,
+        REASONING_ENDPOINT_CODE,
+    }
+)
 
 
 @dataclass(frozen=True)
-class EndpointRequirement:
-    """一个 endpoint 必须被配置成什么样。
-
-    这些数字原来是本产品直连时自己发的请求参数，逐条实测调出来的。
-    迁到 Atlas 之后它们必须在 endpoint 配置里复现，否则同一份提示词会产出
-    不同质量的结果——而那不会报错，只会让标书变差。
-    """
-
+class OperationRoute:
     endpoint_code: str
-    tier: str
-    temperature: float
-    max_tokens: int | None
-    thinking: bool
     note: str
 
 
-#: 逐 operation 的 endpoint 需求。
-#:
-#: 分两档不是为了省钱而已：``consistency_review`` 开 thinking 且温度为 0，
-#: 而 ``chapter_drafting`` 温度 0.4 且不开 thinking——把它们并到一个 endpoint 上，
-#: 要么审查失去推理深度，要么正文变得刻板重复。
-ENDPOINT_REQUIREMENTS: dict[str, EndpointRequirement] = {
-    "project_overview_source_selection": EndpointRequirement(
-        "chat/tenderforge-fast-deterministic", "fast", 0.0, 4096, False,
-        "从整份招标文件里挑证据片段，只返回 id 列表，任何随机性都是噪声",
+#: 逐 operation 的路由。**键集合必须等于服务里真实发起调用的 operation 全集**
+#: ——测试从源码里扫出每一处 ``execute_result("<operation>", ...)`` 来比对。
+#: 这份表曾经漏过两个活的 operation（策略规划与分支蓝图），它们静默落到了兜底
+#: 路由上，而当时的测试手写着「八个全部登记」，于是一起放行了。
+OPERATION_ROUTES: dict[str, OperationRoute] = {
+    # ── chat/deterministic：事实搬运，任何随机性都是噪声 ─────────────────
+    "project_overview_source_selection": OperationRoute(
+        DETERMINISTIC_ENDPOINT_CODE, "从整份招标文件里挑证据片段，只返回 id 列表"
     ),
-    "project_overview_extraction": EndpointRequirement(
-        "chat/tenderforge-fast-deterministic", "fast", 0.0, 8192, False,
-        "抽取项目概述，事实搬运，不允许发挥",
+    "project_overview_extraction": OperationRoute(
+        DETERMINISTIC_ENDPOINT_CODE, "抽取项目概述，不允许发挥"
     ),
-    "technical_scoring_extraction": EndpointRequirement(
-        "chat/tenderforge-fast-deterministic", "fast", 0.0, 8192, False,
-        "评分条款排序，改写分值会直接毁掉标书",
+    "technical_scoring_extraction": OperationRoute(
+        DETERMINISTIC_ENDPOINT_CODE, "评分条款排序，改一个分值标书直接作废"
     ),
-    "outline_skeleton_planning": EndpointRequirement(
-        "chat/tenderforge-quality-planning", "quality", 0.15, 16384, False,
-        "一二级目录骨架；16384 是实测下限，更小会截断",
+    # ── chat/fast：量大、关 thinking ──────────────────────────────────────
+    "outline_branch_expansion": OperationRoute(
+        FAST_ENDPOINT_CODE, "三级目录分批展开，一份大标书十几批；结构已由骨架定下"
     ),
-    "outline_branch_expansion": EndpointRequirement(
-        "chat/tenderforge-fast-planning", "fast", 0.2, 8192, False,
-        "三级目录展开，量大，走 fast 档",
+    "chapter_drafting": OperationRoute(
+        FAST_ENDPOINT_CODE, "正文续写，调用次数占全流程绝大多数，单价决定一份标书的成本"
     ),
-    "chapter_drafting": EndpointRequirement(
-        "chat/tenderforge-fast-drafting", "fast", 0.4, None, False,
-        "正文续写；上限用提供方默认值，正文长度不该被产品这一侧钉死",
+    # ── chat/default：要质量，但刻意不开 thinking ─────────────────────────
+    "outline_skeleton_planning": OperationRoute(
+        DEFAULT_ENDPOINT_CODE, "一二级骨架一次定生死；要一次吐出上万 token，推理会挤占补全预算"
     ),
-    "section_revision": EndpointRequirement(
-        "chat/tenderforge-quality-revision", "quality", 0.2, None, False,
-        "受约束改写；刻意不开 thinking——补全预算要留给替换正文本身",
+    "section_revision": OperationRoute(
+        DEFAULT_ENDPOINT_CODE, "受约束改写；补全预算要留给替换正文本身"
     ),
-    "consistency_review": EndpointRequirement(
-        "chat/tenderforge-quality-review", "quality", 0.0, None, True,
-        "全文一致性审查，唯一开 thinking 的 operation",
+    # ── chat/reasoning：没有推理做不了 ────────────────────────────────────
+    "bid_strategy_planning": OperationRoute(
+        REASONING_ENDPOINT_CODE, "给每条评分响应编 SP-00N——目录与评分表之间唯一的可追溯连接"
+    ),
+    "branch_blueprint_planning": OperationRoute(
+        REASONING_ENDPOINT_CODE, "决定同一分支下各章各写什么、不写什么，防相邻章节大面积重复"
+    ),
+    "consistency_review": OperationRoute(
+        REASONING_ENDPOINT_CODE, "全文找矛盾、评分点缺口与编造的承诺和资质"
     ),
 }
 
 
-def endpoint_for(operation: str, *, use_dedicated_endpoints: bool) -> str:
+def endpoint_for(operation: str) -> str:
     """这次调用该路由到哪个 endpoint。
 
-    ``use_dedicated_endpoints`` 为假时全部落到 ``chat/default``。这是给
-    「Atlas 通了但专属 endpoint 还没授权」那段时间用的开关——那段时间一定存在，
-    而在它期间让每次调用都 403 等于把整个产品停掉。
+    未登记的 operation 落到 ``chat/default`` 而不是抛异常：线上多出一个 operation
+    时让它能跑，比让那个环节整体失败要好。漏登记这件事由测试在合并前拦下，
+    不靠运行时报错。
     """
-    if not use_dedicated_endpoints:
-        return DEFAULT_ENDPOINT_CODE
-    requirement = ENDPOINT_REQUIREMENTS.get(operation)
-    return requirement.endpoint_code if requirement else DEFAULT_ENDPOINT_CODE
-
-
-def required_endpoint_codes() -> list[str]:
-    """需要 Atlas 线授权的全部 endpoint，去重后按字典序。
-
-    这个列表是给接入信用的：授权缺一个，对应的那几个 operation 全部 403，
-    而产品这一侧看到的只是「某个环节坏了」。
-    """
-    return sorted({item.endpoint_code for item in ENDPOINT_REQUIREMENTS.values()})
+    route = OPERATION_ROUTES.get(operation)
+    return route.endpoint_code if route else DEFAULT_ENDPOINT_CODE

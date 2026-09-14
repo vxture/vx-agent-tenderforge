@@ -570,8 +570,10 @@ Token 和尝试次数。结构修复无论最终成功或失败，都累计修�
 | `project_overview_source_selection` | Fast | 关闭 | `0` | `4096` | `project-overview-source-selection-v1` |
 | `project_overview_extraction` | Fast | 关闭 | `0` | `8192` | `interpretation-project-overview-v4` |
 | `technical_scoring_extraction` | Fast | 关闭 | `0` | `8192` | `interpretation-technical-scoring-v4` |
-| `outline_skeleton_planning` | Fast | 关闭 | `0.15` | `16384` | `outline-skeleton-v2` |
+| `bid_strategy_planning` | Quality | 开启 | `0.1` | 提供方默认 | `bid-strategy-v2` |
+| `outline_skeleton_planning` | Quality | 关闭 | `0.15` | `16384` | `outline-skeleton-v2` |
 | `outline_branch_expansion` | Fast | 关闭 | `0.2` | `8192` | `outline-expansion-v2` |
+| `branch_blueprint_planning` | Quality | 开启 | `0.1` | 提供方默认 | `branch-blueprint-v1` |
 | `chapter_drafting` | Fast | 关闭 | `0.4` | 提供方默认 | `chapter-content-v3` |
 | `section_revision` | Quality | 关闭 | `0.2` | 提供方默认 | `revision-content-v3` |
 | `consistency_review` | Quality | 开启 | `0` | 提供方默认 | `review-v2` |
@@ -658,8 +660,24 @@ Python 根据 `AI_MODEL_REQUEST_DIALECT` 转换思考开关：`deepseek` 发送
 **请求体只有** `{endpointCode, messages, tenantId, taskId, requestId}`。没有 temperature、
 没有 max_tokens、没有 response_format、没有 thinking 开关——这不是遗漏，Atlas 的路由
 优先级是 `modelCode > endpointCode > taskProfile`，生成参数属于 endpoint 的配置。
-于是 §8.1 那张表变成了对 Atlas 线的一份**配置请求**，逐条记在
-`atlas_endpoints.py` 里；`required_endpoint_codes()` 列出需要授权的全部 endpoint。
+产品这一侧能决定的只有「走哪条路由」。运营 2026-09-14 授权了四条通用路由，
+operation 到路由的对应**只写在** `atlas_endpoints.OPERATION_ROUTES` 一处，
+不写模型名、不开环境变量覆盖——路由挂哪个模型由运营改指向，不需要发版。
+
+分档依据是 §8.1 实测出来的策略，取第一条命中的：开 thinking → `chat/reasoning`；
+温度 0 → `chat/deterministic`；Quality 模型关 thinking → `chat/default`；其余 → `chat/fast`。
+
+| endpointCode | operation |
+| --- | --- |
+| `chat/deterministic` | `project_overview_source_selection` · `project_overview_extraction` · `technical_scoring_extraction` |
+| `chat/fast` | `outline_branch_expansion` · `chapter_drafting` |
+| `chat/default` | `outline_skeleton_planning` · `section_revision` |
+| `chat/reasoning` | `bid_strategy_planning` · `branch_blueprint_planning` · `consistency_review` |
+
+两条测试守着这张表：键集合必须等于源码里扫出来的全部 `execute_result("<operation>")`
+（此前手写清单漏过策略规划与分支蓝图，二者静默落到兜底路由）；每一行必须等于从
+直连 provider 策略表反推出的路由。各路由必须满足的模型下限（上下文、输出长度、
+thinking）记在联络函 `docs/80-liaison/30-2609142131`。
 
 `tenantId` 取自票里的 claim，**不是产品码**。送产品码看起来能跑：Atlas 只校验它非空，
 而产品授权那条路径在租户断言之前就返回了。一旦授权缺失或 endpoint 被改指，控制流
@@ -678,9 +696,9 @@ Atlas 强制要求 `taskId`，缺失即 400，于是主流程全部失败而手�
 **三条尚未闭合的依赖，都在平台侧：**
 
 1. `ATLAS_API_URL` 与平台凭据（铸不出票就调不了 Atlas）。
-2. Atlas 的 endpoint 授权。缺一个，对应 operation 全部 `403 NOT_ENTITLED`，
-   与令牌是否有效无关。授权到位前保持 `ATLAS_USE_DEDICATED_ENDPOINTS=false`，
-   全部走 `chat/default`——链路能通，但所有 operation 共用一套生成参数。
+2. ~~Atlas 的 endpoint 授权~~ —— 2026-09-14 四条通用路由已授权，降级开关
+   `ATLAS_USE_DEDICATED_ENDPOINTS` 同日退役。仍需运营核对的是各路由所挂模型
+   满足联络函 30 里的下限；不满足没有错误码，只让标书变差或偶发截断。
 3. **平台身份**。铸票要真实 workspace，而本地口令登录的租户是 `local:<用户id>`，
    平台那边不存在。也就是说 **Atlas 迁移在 C1 切换之前无法真正生效**——
    这两件事是耦合的，不是可以分别排期的。

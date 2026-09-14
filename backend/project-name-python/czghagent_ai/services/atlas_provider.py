@@ -115,13 +115,11 @@ class AtlasProvider:
         *,
         timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS,
         max_retries: int = 1,
-        use_dedicated_endpoints: bool = False,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._timeout = httpx.Timeout(timeout_seconds, connect=30.0)
         self._max_retries = max(0, min(max_retries, 3))
-        self._use_dedicated_endpoints = use_dedicated_endpoints
         # 传输层做成可注入的依赖缝：测试要看到<b>真实发出去的字节</b>——
         # 请求体的字段名、tenantId 是不是 UUID、票有没有挂在 Authorization 上——
         # 而打桩到方法级别的测试恰好看不见这些。
@@ -217,9 +215,7 @@ class AtlasProvider:
 
         schema = response_model.model_json_schema(by_alias=True)
         body: dict[str, Any] = {
-            "endpointCode": endpoint_for(
-                operation, use_dedicated_endpoints=self._use_dedicated_endpoints
-            ),
+            "endpointCode": endpoint_for(operation),
             "messages": [
                 {"role": "system", "content": _operation_prompt(operation)},
                 {
