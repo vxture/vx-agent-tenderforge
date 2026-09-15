@@ -9,12 +9,18 @@ import com.td.czghagent.domain.model.ConsoleLinks;
 import com.td.czghagent.domain.model.CurrentUser;
 import com.td.czghagent.rest.security.RequestIdentity;
 import com.td.czghagent.rest.security.RpSessionCookie;
+import com.td.czghagent.rest.security.SignedOutMarker;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.net.URI;
 
 /**
  * 会话的两个非跳转端点：我是谁、登出。
@@ -75,14 +81,35 @@ public class AuthController {
      */
     @PostMapping("/logout")
     public LogoutResponse logout(HttpServletRequest request, HttpServletResponse response) {
+        return new LogoutResponse(endSession(request, response));
+    }
+
+    /**
+     * 同一个登出，由真实的 {@code <form method="post">} 提交。
+     *
+     * <p>门禁页上的「退出登录」是表单而不是脚本点击：这几页各自只有一个出路，出路不能依赖脚本
+     * 是否已经跑起来（门禁页规范）。表单拿不到 JSON，所以这一支直接 302 到平台登出端点；
+     * 没有登出地址时回根路径——那里读到已退出便条，显示确认页。
+     */
+    @PostMapping(path = "/logout", consumes = MediaType.APPLICATION_FORM_URLENCODED_VALUE)
+    public ResponseEntity<Void> logoutByForm(HttpServletRequest request, HttpServletResponse response) {
+        String logoutUrl = endSession(request, response);
+        return ResponseEntity.status(HttpStatus.FOUND)
+                .location(URI.create(logoutUrl == null ? "/" : logoutUrl))
+                .build();
+    }
+
+    private String endSession(HttpServletRequest request, HttpServletResponse response) {
+        // 两支都种：页头账号菜单走 fetch，门禁页走表单，回到根路径时都该看到确认页。
+        SignedOutMarker.write(response, secureCookie);
         String cookieValue = RpSessionCookie.read(request);
         if (cookieValue == null) {
-            return new LogoutResponse(oidcLoginService.endSessionUrl());
+            return oidcLoginService.endSessionUrl();
         }
         String logoutUrl = oidcLoginService.logout(cookieValue, RequestIdentity.user(request),
                 RequestIdentity.traceId(request), request.getRemoteAddr());
         RpSessionCookie.clear(response, secureCookie);
-        return new LogoutResponse(logoutUrl);
+        return logoutUrl;
     }
 
     public record LogoutResponse(String logoutUrl) {
