@@ -15,6 +15,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -103,7 +104,7 @@ class BufferedUsageRecorderTest {
             }
 
             @Override
-            public void markFlushed(List<String> keys, LocalDateTime at) {
+            public void markFlushed(Map<String, String> platformEventIds, LocalDateTime at) {
             }
 
             @Override
@@ -149,7 +150,7 @@ class BufferedUsageRecorderTest {
         }
 
         @Override
-        public void markFlushed(List<String> keys, LocalDateTime at) {
+        public void markFlushed(Map<String, String> platformEventIds, LocalDateTime at) {
         }
 
         @Override
