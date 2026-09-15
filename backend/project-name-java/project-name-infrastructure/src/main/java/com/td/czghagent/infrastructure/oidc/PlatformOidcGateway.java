@@ -86,6 +86,26 @@ public class PlatformOidcGateway implements OidcGateway {
         return logoutTokenVerifier.verifyAndExtractSubject(logoutToken);
     }
 
+    /**
+     * 回跳地址没配、或发现文档不公布登出端点，都返回 {@code null}——调用方退回站内登录页。
+     * 不拼一个缺参数的地址：没有 {@code post_logout_redirect_uri} 时平台会把人留在账户中心，
+     * 那正是这个方法要消除的结果。
+     */
+    @Override
+    public String endSessionUrl() {
+        String postLogout = properties.postLogoutRedirectUri();
+        if (postLogout == null || postLogout.isBlank()) {
+            return null;
+        }
+        String endpoint = discovery.document().endSessionEndpoint();
+        if (endpoint == null || endpoint.isBlank()) {
+            return null;
+        }
+        return endpoint + (endpoint.contains("?") ? "&" : "?")
+                + "client_id=" + encode(properties.clientId())
+                + "&post_logout_redirect_uri=" + encode(postLogout);
+    }
+
     @Override
     public long sessionSeconds() {
         return properties.sessionSeconds();

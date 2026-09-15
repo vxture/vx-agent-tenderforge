@@ -14,5 +14,9 @@ export const authApi = {
    */
   me: () => apiRequest<CurrentUser>('/api/auth/me', { onUnauthorized: 'ignore' }),
   // 登出是状态迁移，走具名路由而不是 DELETE 一个叫 session 的资源（通则 B-4）。
-  logout: () => apiRequest<void>('/api/auth/logout', { method: 'POST' }),
+  // 回显平台登出端点地址，浏览器要顶层导航过去才能结束账户中心会话（通则 C1）。
+  logout: () => apiRequest<LogoutResult>('/api/auth/logout', { method: 'POST' }),
 }
+
+/** `logoutUrl` 为 null：替身身份、配置不全或身份服务不可达，退回站内登录页。 */
+export type LogoutResult = { logoutUrl: string | null }

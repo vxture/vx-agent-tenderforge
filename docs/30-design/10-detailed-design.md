@@ -438,8 +438,8 @@ Compose 中 `api` 只提交工作流，`worker` 注册四个队列并执行 Acti
 | `GET` | `/api/auth/me` | 返回当前用户（平台身份），同层附控制台资料页地址 `consoleProfileUrl` |
 | `GET` | `/api/auth/oidc/login` | 发起平台登录，`302` 跳 IdP；`returnTo` 已白名单化 |
 | `GET` | `/api/auth/oidc/callback` | IdP 回调，种下不透明会话 cookie 并 `302` 回站内 |
-| `POST` | `/api/auth/oidc/backchannel-logout` | 平台反向登出通知；验签后撤销该 subject 的全部会话 |
-| `POST` | `/api/auth/logout` | **唯一的登出入口**，撤销当前平台会话并清 cookie，返回 `204` |
+| `POST` | `/api/auth/oidc/backchannel-logout` | 平台反向登出通知；验签后撤销该 subject 的全部会话。**目前收不到**：通则 2026-09-15 修订写明运营台登记不了后台登出（`slo_participation=none`），需要时找平台运维补登记 |
+| `POST` | `/api/auth/logout` | **唯一的登出入口**，撤销当前平台会话并清 cookie，返回 `{ logoutUrl }`：平台登出端点 + `client_id` + `post_logout_redirect_uri`，前端顶层导航过去结束账户中心会话；替身、配置不全或身份服务不可达时为 `null`，退回 `/login` |
 | `GET` | `/api/status` | 平台接入自证：四条通道的真实状态；只报状态不报值 |
 | `GET` | `/api/admin/audit-logs` | 按关键字、动作、结果和时间查询审计，键集游标翻页 |
 

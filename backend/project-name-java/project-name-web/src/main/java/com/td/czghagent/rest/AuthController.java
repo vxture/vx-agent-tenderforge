@@ -62,21 +62,29 @@ public class AuthController {
     /**
      * 登出——<strong>唯一的登出入口</strong>。
      *
-     * <p>它撤销这次请求携带的平台 RP 会话并清掉 cookie。本地口令会话已随 Bearer 通道退役。
+     * <p>它撤销这次请求携带的平台 RP 会话、清掉 cookie，并回显平台登出端点地址
+     * {@code logoutUrl}。浏览器必须顶层导航过去，账户中心的会话才会结束、
+     * 人才会回到登记的 {@code post_logout_redirect_uri}（通则 C1）；
+     * 只删本地会话时，再点登录会被静默 SSO 直接送回来，换不了账号。
+     * {@code logoutUrl} 为 {@code null} 时（替身身份、配置不全、身份服务不可达）退回站内登录页。
+     *
+     * <p>本地 cookie 已经没了也照样回显地址：本地会话过期不代表账户中心会话也结束了。
      *
      * <p><strong>此前是 {@code DELETE /api/auth/session}</strong>。会话失效是一次状态迁移，
      * 不是「从目录移除一个叫 session 的资源」（B-4）。
-     *
-     * <p>返回 204：没有载荷要回显，就不要造一个空对象来占位。
      */
     @PostMapping("/logout")
-    @org.springframework.web.bind.annotation.ResponseStatus(org.springframework.http.HttpStatus.NO_CONTENT)
-    public void logout(HttpServletRequest request, HttpServletResponse response) {
+    public LogoutResponse logout(HttpServletRequest request, HttpServletResponse response) {
         String cookieValue = RpSessionCookie.read(request);
-        if (cookieValue != null) {
-            oidcLoginService.logout(cookieValue, RequestIdentity.user(request),
-                    RequestIdentity.traceId(request), request.getRemoteAddr());
-            RpSessionCookie.clear(response, secureCookie);
+        if (cookieValue == null) {
+            return new LogoutResponse(oidcLoginService.endSessionUrl());
         }
+        String logoutUrl = oidcLoginService.logout(cookieValue, RequestIdentity.user(request),
+                RequestIdentity.traceId(request), request.getRemoteAddr());
+        RpSessionCookie.clear(response, secureCookie);
+        return new LogoutResponse(logoutUrl);
+    }
+
+    public record LogoutResponse(String logoutUrl) {
     }
 }

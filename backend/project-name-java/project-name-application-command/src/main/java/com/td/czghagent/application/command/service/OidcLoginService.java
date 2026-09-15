@@ -151,8 +151,15 @@ public class OidcLoginService {
                 refreshed.accessToken(), nextRefresh, accessExpiresAt, session.expiresAt());
     }
 
+    /**
+     * 登出：撤销本地会话，并返回平台登出端点地址，由浏览器跳过去结束账户中心会话。
+     *
+     * <p><b>Side Effects:</b> 删除该 cookie 对应的会话、写一条登出审计。
+     * <b>Error Semantics:</b> 不抛身份服务的故障——本地会话已经撤销，
+     * 拿不到登出地址时返回 {@code null}，调用方退回站内登录页。
+     */
     @Transactional
-    public void logout(String cookieValue, CurrentUser user, String traceId, String ipAddress) {
+    public String logout(String cookieValue, CurrentUser user, String traceId, String ipAddress) {
         if (cookieValue != null) {
             sessions.deleteByTokenHash(SessionToken.hash(cookieValue));
         }
@@ -160,6 +167,22 @@ public class OidcLoginService {
             auditRepository.append(AuditEvent.byUser(
                     new OperationContext(user, traceId, ipAddress),
                     "AUTH_LOGOUT", "USER", user.id(), AuditEvent.SUCCESS, "平台身份退出登录"));
+        }
+        return endSessionUrl();
+    }
+
+    /**
+     * 平台登出端点地址；身份服务不可达时返回 {@code null}。
+     *
+     * <p>吞掉的只有这一步：用户点的是「退出」，本地会话已经撤销——让一次发现文档的
+     * 超时把退出变成报错，会让人以为自己还登录着。
+     */
+    public String endSessionUrl() {
+        try {
+            return gateway.endSessionUrl();
+        } catch (BusinessException exception) {
+            LOGGER.warn("Platform end_session URL unavailable: {}", exception.getMessage());
+            return null;
         }
     }
 
