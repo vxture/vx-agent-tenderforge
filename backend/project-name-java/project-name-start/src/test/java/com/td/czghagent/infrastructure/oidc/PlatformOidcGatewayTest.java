@@ -78,6 +78,41 @@ class PlatformOidcGatewayTest {
         assertThat(url).contains("nonce=no+nce").doesNotContain("nonce=no nce");
     }
 
+    // ── 登出地址 ────────────────────────────────────────────────────────────
+
+    /**
+     * 发现文档里的登出端点 + {@code client_id} + 编码后的回跳地址。
+     *
+     * <p>回跳地址必须与平台登记值同源同路径才会被放行；这里编码错一个字符，
+     * 平台就把人留在账户中心，而我们这边没有任何报错。
+     */
+    @Test
+    void buildsTheEndSessionUrlFromDiscoveryWithTheRegisteredReturnAddress() throws Exception {
+        OidcGateway withReturn = gatewayWithPostLogout("https://tenderforge.vxture.com/");
+
+        assertThat(withReturn.endSessionUrl()).isEqualTo(idp.issuer() + "/logout"
+                + "?client_id=tenderforge"
+                + "&post_logout_redirect_uri=https%3A%2F%2Ftenderforge.vxture.com%2F");
+    }
+
+    /** 没配回跳地址就不拼地址：缺了它，平台会把人留在账户中心。 */
+    @Test
+    void givesNoEndSessionUrlWhenNoReturnAddressIsConfigured() {
+        assertThat(gateway.endSessionUrl()).isNull();
+    }
+
+    private OidcGateway gatewayWithPostLogout(String postLogoutRedirectUri) {
+        OidcProperties properties = new OidcProperties(
+                idp.issuer(), "tenderforge", "secret",
+                "http://127.0.0.1/api/auth/oidc/callback", postLogoutRedirectUri, "openid profile",
+                true, 43200, "local");
+        OidcDiscovery discovery = new OidcDiscovery(RestClient.builder(), properties);
+        IdTokenVerifier idTokenVerifier = new IdTokenVerifier(properties, discovery);
+        return new PlatformOidcGateway(properties, discovery,
+                new OidcTokenClient(RestClient.builder(), properties, discovery),
+                idTokenVerifier, new LogoutTokenVerifier(idTokenVerifier));
+    }
+
     // ── 声明的来源 ──────────────────────────────────────────────────────────
 
     @Test

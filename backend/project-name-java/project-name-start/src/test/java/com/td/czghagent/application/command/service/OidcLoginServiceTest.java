@@ -223,12 +223,42 @@ class OidcLoginServiceTest {
                 LocalDateTime.now().plusSeconds(seconds), LocalDateTime.now().plusHours(12));
     }
 
+    // ── 登出 ────────────────────────────────────────────────────────────────
+
+    /**
+     * 登出要把人送去平台登出端点。
+     *
+     * <p>只删本地会话时界面看起来一切正常——直到用户想换个账号：再点登录，
+     * 账户中心的会话还在，静默 SSO 把他原样送了回来。
+     */
+    @Test
+    void logoutHandsBackThePlatformEndSessionUrl() {
+        gateway.endSessionUrl = "https://accounts.example/oidc/end_session?client_id=tenderforge";
+
+        String logoutUrl = service.logout("cookie-1", null, "trace-1", "127.0.0.1");
+
+        assertThat(logoutUrl).isEqualTo("https://accounts.example/oidc/end_session?client_id=tenderforge");
+    }
+
+    /** 身份服务不可达时，退出仍然成功：本地会话已撤销，只是没有登出地址可去。 */
+    @Test
+    void logoutStillSucceedsWhenTheIdentityServiceIsUnreachable() {
+        gateway.endSessionFailure = new BusinessException(
+                "AUTH_ISSUER_UNREACHABLE", "身份服务不可达", 503, true, null);
+
+        String logoutUrl = service.logout("cookie-1", null, "trace-1", "127.0.0.1");
+
+        assertThat(logoutUrl).isNull();
+    }
+
     // ── 替身 ────────────────────────────────────────────────────────────────
 
     private static final class StubGateway implements OidcGateway {
         private String lastExpectedNonce;
         private int refreshCalls;
         private Tokens nextRefresh = new Tokens("a", "r", null, 3600);
+        private String endSessionUrl;
+        private BusinessException endSessionFailure;
 
         @Override
         public String authorizationUrl(String state, String nonce, String codeChallenge) {
@@ -257,6 +287,14 @@ class OidcLoginServiceTest {
         @Override
         public String subjectOfLogoutToken(String logoutToken) {
             throw new UnsupportedOperationException("本用例不涉及反向登出");
+        }
+
+        @Override
+        public String endSessionUrl() {
+            if (endSessionFailure != null) {
+                throw endSessionFailure;
+            }
+            return endSessionUrl;
         }
 
         @Override

@@ -83,6 +83,12 @@ public class MockOidcGateway implements OidcGateway {
                 "AUTH_LOGOUT_TOKEN_INVALID", "替身身份服务不接受登出通知", 401, false, null);
     }
 
+    /** 替身背后没有账户中心会话可结束，登出后回站内登录页即可。 */
+    @Override
+    public String endSessionUrl() {
+        return null;
+    }
+
     @Override
     public long sessionSeconds() {
         return properties.sessionSeconds();
