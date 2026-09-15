@@ -55,9 +55,20 @@ mvn clean package
 mvn -pl project-name-start spring-boot:run
 ```
 
-必须使用 JDK 25。数据库迁移位于
-`project-name-start/src/main/resources/sql/V1__*.sql` 至 `V23__*.sql`；即使早期迁移含旧
-产品表，也不得删除、改名或改写，存量数据库升级依赖完整校验链。新增变更只能追加迁移。
+必须使用 JDK 25。
+
+数据库结构的唯一权威是 `deploy/database/ddl/`，应用启动时**不做**任何迁移（Flyway 已于 2026-09-10 退役，
+见详细设计 §13b TD-001）。施加顺序固定为：
+
+1. `00_baseline.sql` —— 基线，建库即有，只增不改；
+2. `incr/NNNN_*.sql` —— 编号增量，按文件名排序依次施加，**每个文件必须可重放**（`IF NOT EXISTS` 一类写法）；
+3. `97_service_role.sql` —— 服务角色与授权；
+4. `98_column_locks.sql` —— 列级 UPDATE 白名单，增量加的列要在这里授权，否则服务角色写入即 permission denied。
+
+生产由 `db-init` 工作流施加（手打 `confirm=yes`、`expected_sha` 必须等于运行的提交、生产环境审批），
+先于依赖新结构的发版。集成测试（`PostgresBackedTest`）按同一顺序施加同一份文件**两遍**，
+第二遍即 db-init 在活库上重放的情形；以受限角色 `tenderforge_svc` 连库，列锁缺授权会在测试里就红。
+新增结构变化只追加新的 `incr/` 文件，不改已有文件。
 
 ### Python
 

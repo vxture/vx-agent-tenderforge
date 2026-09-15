@@ -24,8 +24,8 @@ from czghagent_ai.services.technical_scoring import (
     render_technical_scoring_markdown,
     selection_errors,
 )
+from czghagent_ai.strategy_models import BidStrategyResponse
 from czghagent_ai.tender_models import (
-    BidStrategyResponse,
     BranchBlueprint,
     BranchBlueprintRequest,
     ChapterContentResponse,

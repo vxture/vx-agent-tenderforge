@@ -17,6 +17,7 @@ from czghagent_ai.tender_models import (
     OutlineNode,
     OutlineResponse,
     OutlineSkeletonNode,
+    OutlineSkeletonPlan,
     OutlineSkeletonResponse,
 )
 
@@ -524,8 +525,10 @@ def merged_outline_errors(
 
 def aggregate_outline_result(
     data: OutlineResponse,
+    # 只读诊断与尝试次数。分阶段装配传进来的是带批次划分的 OutlineSkeletonPlan，不是模型原始的骨架响应。
     results: Sequence[
         AiStructuredResult[OutlineSkeletonResponse]
+        | AiStructuredResult[OutlineSkeletonPlan]
         | AiStructuredResult[OutlineExpansionResponse]
     ],
 ) -> AiStructuredResult[OutlineResponse]:

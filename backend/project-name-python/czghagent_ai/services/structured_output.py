@@ -26,6 +26,10 @@ SemanticValidator = Callable[[ResponseModel], list[str]]
 class AiStructuredOutputError(AiProviderOutputError):
     """A model response that remains invalid after one object-level correction."""
 
+    # 基类允许 None（传输层失败时可能还没数到第几次）；到了结构化输出这一层，
+    # 至少已经拿到过一次模型响应，构造参数就要求 int。
+    attempts: int
+
     def __init__(
         self,
         message: str,
