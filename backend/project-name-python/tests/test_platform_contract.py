@@ -117,7 +117,7 @@ def test_task_id_is_absent_by_default_rather_than_invented() -> None:
 def test_task_id_middleware_normalizes_what_the_caller_sent() -> None:
     captured: list[str | None] = []
 
-    @app.get("/__task_probe")  # type: ignore[misc]
+    @app.get("/__task_probe")
     async def probe() -> dict[str, str]:
         captured.append(current_task_id())
         return {"ok": "1"}

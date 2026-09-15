@@ -400,6 +400,18 @@ Compose 中 `api` 只提交工作流，`worker` 注册四个队列并执行 Acti
 `AUTO_REVIEW_INVALID_REFERENCE_SKIPPED` 事件，不进入自动修订，也不会使整份正文任务失败。
 真实存在但正文为空的章节使用 `BID_AUTO_REVIEW_CHAPTER_MISSING` 阻断，和无效模型引用分开处理。
 
+**工作流里的失败必须是 `ApplicationFailure`**（2026-09-15）。正文生成的单元失败按类型分流：
+`AI_OUTPUT_INVALID`、`AI_PROVIDER_ERROR`、`BID_CHAPTER_QUALITY_BLOCKED` 视为可修复，全部 lane 跑完后
+只重跑失败单元一次；其余类型立即失败、不进修复。修复后仍失败时抛不可重试的
+`ApplicationFailure`（类型 `BID_CONTENT_UNITS_UNRESOLVED`，消息汇总前三个失败），先调 `fail` 写回任务再结束工作流。
+此前这里抛的是 `IllegalStateException`——Temporal 不把非 `TemporalFailure` 的异常当工作流失败，
+只让工作流任务无限重放，任务永远停在「生成中」；`BidContentGenerationWorkflowTest` 在时间跳跃环境里挂住才暴露出来。
+
+四个工作流写回任务的失败原因经 `WorkflowFailures.rootMessage` 取最深一层 `ApplicationFailure` 的
+**原文**（`getOriginalMessage`），而不是 `getMessage()` 的格式化文本 `message='…', type='…', nonRetryable=…`。
+`BidContentGenerationWorkflowTest` 与 `BidStageWorkflowsTest` 用 `temporal-testing` 的时间跳跃环境真跑工作流，
+断言写回的原因原文全等，整类限时 60 秒——回退到抛普通异常时表现为红，而不是把构建挂住。
+
 ## 7. Java 对外 API
 
 接口形状遵循《产品接入通则》的 MUST 条款。除登录回路、平台回调、运行时探针和 OpenAPI 外，
@@ -1244,10 +1256,10 @@ git diff --check
 | --- | --- | --- |
 | 页面/交互 | `frontend/.../features`、`router` | `types`、API module、前端测试、本文章节 4 |
 | REST 契约 | Java `project-name-web/rest` | 前端 API/types、应用服务、本文章节 7 |
-| 业务状态/冻结 | Domain `BidProductionRules`、Command service | Flyway、前端步骤、本文章节 5/10 |
+| 业务状态/冻结 | Domain `BidProductionRules`、Command service | DDL 增量、前端步骤、本文章节 5/10 |
 | AI JSON 契约 | Domain `TenderAiGateway`、Python `*_models.py` | HTTP adapter、Pydantic、两端测试、章节 8 |
 | 长任务 | `application-command/workflow` | Task Queue、幂等、Compose worker、章节 6/13 |
-| 表结构 | `project-name-start/resources/sql` 新 V23+ | JDBC 仓储、领域模型、章节 10 |
+| 表结构 | `deploy/database/ddl/incr/` 新增编号文件（可重放） | `98_column_locks.sql` 授权、JDBC 仓储、领域模型、发版前 db-init、章节 10 |
 | 文件/排版 | Infrastructure exporter、Python `document_*` | QA、私有存储、章节 9 |
 | 部署变量 | `docker-compose.yml`、`.env.example` | Java/Python config、README、章节 12 |
 

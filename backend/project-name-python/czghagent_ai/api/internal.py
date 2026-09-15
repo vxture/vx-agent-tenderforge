@@ -22,8 +22,8 @@ from czghagent_ai.services.ai_provider import (
     AiProviderError,
     AiProviderNotConfiguredError,
     AiProviderTimeoutError,
+    ConfigurableTenderAiProvider,
     OpenAiCompatibleProvider,
-    TenderAiProvider,
 )
 from czghagent_ai.services.atlas_endpoints import AUTHORIZED_ENDPOINT_CODES
 from czghagent_ai.services.atlas_provider import (
@@ -94,7 +94,7 @@ def describe_model_exit() -> str:
     return f"模型出口：直连 {settings.ai_model_base_url}（本地；推理消耗不入平台的账）"
 
 
-def create_ai_provider() -> TenderAiProvider:
+def create_ai_provider() -> ConfigurableTenderAiProvider:
     """选出本次进程使用的模型出口。
 
     配了 ``ATLAS_API_URL`` 就走 Atlas——它是通则规定的<b>唯一</b>模型出口。

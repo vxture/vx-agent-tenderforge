@@ -144,6 +144,15 @@ class TenderAiProvider(Protocol):
     ) -> AiProviderResult | dict[str, Any]: ...
 
 
+class ConfigurableTenderAiProvider(TenderAiProvider, Protocol):
+    """进程真正选用的模型出口：除了调用，还能不发请求地自检配置（``/ready`` 用它）。
+
+    自检不放进 ``TenderAiProvider``：服务只需要 ``run``，测试替身也只实现 ``run``。
+    """
+
+    def validate_configuration(self) -> None: ...
+
+
 class OpenAiCompatibleProvider:
     _retryable_statuses = {408, 429, 500, 502, 503, 504}
 

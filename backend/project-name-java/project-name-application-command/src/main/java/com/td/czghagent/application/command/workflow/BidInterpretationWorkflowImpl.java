@@ -31,16 +31,8 @@ public class BidInterpretationWorkflowImpl implements BidInterpretationWorkflow 
             activities.generateTechnicalScoring(sourceId, bidId, ownerId, traceId, ipAddress);
             activities.complete(sourceId, bidId, ownerId, traceId, ipAddress);
         } catch (RuntimeException exception) {
-            activities.fail(sourceId, bidId, ownerId, traceId, ipAddress, rootMessage(exception));
+            activities.fail(sourceId, bidId, ownerId, traceId, ipAddress, WorkflowFailures.rootMessage(exception, "招标文件解读失败"));
             throw exception;
         }
-    }
-
-    private String rootMessage(RuntimeException exception) {
-        Throwable current = exception;
-        while (current.getCause() != null) {
-            current = current.getCause();
-        }
-        return current.getMessage() == null ? "招标文件解读失败" : current.getMessage();
     }
 }

@@ -19,18 +19,18 @@ last_updated: 2026-08-14
 - `project-name-application-command`：写用例、事务、审计、AI/Temporal 编排。
 - `project-name-application-query`：会话、账户、管理员和标书读模型。
 - `project-name-infrastructure`：JDBC、文件、密码、HTTP 客户端和端口实现。
-- `project-name-web`：Controller、DTO、认证过滤器、`ApiResponse` 和异常映射。
-- `project-name-start`：Spring Boot 入口、配置、引导数据、Flyway 和集成测试。
+- `project-name-web`：Controller、DTO、认证过滤器和异常映射（失败统一 `ErrorEnvelope`，成功直接返回载荷，见通则 X-1 / A-4）。
+- `project-name-start`：Spring Boot 入口、配置与全部测试（集成测试经 Testcontainers 跑真 PostgreSQL）。
 
 Controller 只处理 HTTP 输入、身份上下文和响应。事务放在应用服务；不变量放在 Domain；SQL、
 文件和远程调用放在 Infrastructure。不要让 Domain 引用 Spring、JDBC、Servlet 或 JSON 实现。
 
 ## 当前基础设施
 
-- JDK 25、Spring Boot 3.5.6、Maven 多模块。
-- MySQL 8.4；开发默认 H2 MySQL mode。
-- Flyway `classpath:sql`，V1-V22 是不可修改的升级链，新变更追加 V23+。
-- Temporal Java SDK 1.27；任务需确定性、幂等、可恢复。
+- JDK 25、Spring Boot 3.5.16、Maven 多模块。
+- PostgreSQL 18，唯一驱动；本地与测试都跑真 PostgreSQL（`PostgresBackedTest`），不用嵌入式替身。
+- 结构权威是 `deploy/database/ddl/`：基线 → `incr/` 编号增量（可重放）→ `97` 角色 → `98` 列锁；`db-init` 工作流施加，应用启动不迁移。
+- Temporal Java SDK 1.38.0；任务需确定性、幂等、可恢复。工作流里失败要抛 `ApplicationFailure`——抛普通异常只会让工作流任务无限重放，工作流永不结束。
 - Java 通过内部 Token 调用 FastAPI，不直接调用浏览器或暴露私有对象键。
 
 ## 编码要求

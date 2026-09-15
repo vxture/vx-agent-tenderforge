@@ -72,7 +72,7 @@ public class BidContentGenerationWorkflowImpl implements BidContentGenerationWor
             }
             finalizationActivities.complete(taskId, bidId, ownerId, snapshotId, snapshotHash);
         } catch (RuntimeException exception) {
-            activities.fail(taskId, bidId, rootMessage(exception));
+            activities.fail(taskId, bidId, WorkflowFailures.rootMessage(exception, "正文生成失败"));
             throw exception;
         }
     }
@@ -117,7 +117,11 @@ public class BidContentGenerationWorkflowImpl implements BidContentGenerationWor
                     taskId, bidId, ownerId, snapshotId, snapshotHash));
         }
         if (!unresolved.isEmpty()) {
-            throw new IllegalStateException(failureSummary(unresolved));
+            // 必须是 ApplicationFailure：工作流里抛普通异常（此前是 IllegalStateException）不会让工作流失败，
+            // 只会让这一次工作流任务失败，Temporal 无限重放——任务停在「生成中」永不结束。
+            // 2026-09-15 由 BidContentGenerationWorkflowTest 在时间跳跃环境里挂住发现。
+            throw ApplicationFailure.newNonRetryableFailure(
+                    failureSummary(unresolved), "BID_CONTENT_UNITS_UNRESOLVED");
         }
     }
 
@@ -152,7 +156,7 @@ public class BidContentGenerationWorkflowImpl implements BidContentGenerationWor
                 if (!RECOVERABLE_UNIT_FAILURE_TYPES.contains(type)) {
                     throw exception;
                 }
-                failures.add(new UnitFailure(unitId, type, rootMessage(exception)));
+                failures.add(new UnitFailure(unitId, type, WorkflowFailures.rootMessage(exception, "正文生成失败")));
             }
         }));
         return List.copyOf(failures);
@@ -179,14 +183,6 @@ public class BidContentGenerationWorkflowImpl implements BidContentGenerationWor
     private void generateUnit(String taskId, String bidId, String ownerId,
                               String snapshotId, String snapshotHash, String unitId) {
         activities.generateUnit(taskId, bidId, ownerId, snapshotId, snapshotHash, unitId);
-    }
-
-    private String rootMessage(RuntimeException exception) {
-        Throwable current = exception;
-        while (current.getCause() != null) {
-            current = current.getCause();
-        }
-        return current.getMessage() == null ? "正文生成失败" : current.getMessage();
     }
 
     private record UnitFailure(String unitId, String type, String message) {

@@ -25,8 +25,8 @@ from czghagent_ai.services.outline_strategy import (
     skeleton_density_errors,
 )
 from czghagent_ai.services.structured_output import AiStructuredExecutor, AiStructuredResult
+from czghagent_ai.strategy_models import BidStrategyResponse
 from czghagent_ai.tender_models import (
-    BidStrategyResponse,
     OutlineBranchTargetContract,
     OutlineExpansionResponse,
     OutlineRequest,
