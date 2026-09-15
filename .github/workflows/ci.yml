@@ -236,6 +236,13 @@ jobs:
       - name: Webhook path guardrail (C3 下发 · 六处一致)
         run: python scripts/guardrails/check_webhook_path.py
 
+      # 通则 C3 下发：webhook 是提示，丢一条投递的代价只能是延迟。本产品靠构造满足——
+      # 开通表只读 last_seq、开通时不做业务动作、门控只经 C2 且缓存 ≤ 45 秒。
+      # 打破任何一条的改动都很自然、都不会让测试变红，只会让平台 10 次重投用尽后的
+      # 那条投递从延迟变成永久缺失。要打破，先写启动时与定期对账（平台接口见 #342）。
+      - name: Provisioning record-only guardrail (C3 下发 · 丢投递只是延迟)
+        run: python scripts/guardrails/check_provisioning_record_only.py
+
       - name: Python lint (ruff)
         working-directory: backend/project-name-python
         run: |
