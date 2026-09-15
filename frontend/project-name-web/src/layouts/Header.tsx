@@ -19,6 +19,7 @@ import {
 } from '@vxture/design-system'
 
 import { authApi } from '@/api/modules/auth'
+import { BRAND_MARK_SRC } from '@/app/lib/brand-assets'
 import { accessState, subscriptionBadgeLabel } from '@/features/entitlement/access'
 import { useEntitlementQuery } from '@/features/entitlement/queries'
 import { useAuthStore } from '@/stores/auth'
@@ -175,7 +176,7 @@ export default function LayoutHeader() {
       leading={
         <ShellBrand
           href="/"
-          logoSrc="/assets/brand/vxture-logo-icon.svg"
+          logoSrc={BRAND_MARK_SRC}
           logoAlt=""
           label="TenderAgent"
           tag="智能标书编制"

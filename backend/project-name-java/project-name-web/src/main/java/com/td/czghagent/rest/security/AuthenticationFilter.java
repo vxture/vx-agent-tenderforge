@@ -77,6 +77,12 @@ public class AuthenticationFilter extends OncePerRequestFilter {
             }
         }
         if (user == null) {
+            // 登出不要求会话仍然有效：会话已过期的标签页点「退出登录」，要的是走完退出
+            // （清 cookie、种已退出便条、去平台登出端点），不是一个 401。控制器本来就处理没有身份的情况。
+            if (isLogout(request)) {
+                filterChain.doFilter(request, response);
+                return;
+            }
             writeUnauthorized(request, response);
             return;
         }
@@ -114,6 +120,10 @@ public class AuthenticationFilter extends OncePerRequestFilter {
             }
             throw (ServletException) cause;
         }
+    }
+
+    private static boolean isLogout(HttpServletRequest request) {
+        return "POST".equals(request.getMethod()) && "/api/auth/logout".equals(request.getRequestURI());
     }
 
     private boolean hasRoleAccess(String path, CurrentUser user) {
