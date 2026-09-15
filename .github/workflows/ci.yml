@@ -248,6 +248,11 @@ jobs:
       - name: Provisioning record-only guardrail (C3 下发 · 丢投递只是延迟)
         run: python scripts/guardrails/check_provisioning_record_only.py
 
+      # 结构权威是 deploy/database/ddl + db-init，Flyway 2026-09-10 已退役。指引没跟上时，照着 AGENTS.md
+      # 或仓内 AI 技能做事的人会写出一个没有任何东西施加的 Flyway 迁移文件——本地测试照样绿，生产上那张表不存在。
+      - name: Retired migration guidance guardrail (no Flyway instructions in guidance files)
+        run: python scripts/guardrails/check_retired_migration_guidance.py
+
       - name: Python lint (ruff)
         working-directory: backend/project-name-python
         run: |
