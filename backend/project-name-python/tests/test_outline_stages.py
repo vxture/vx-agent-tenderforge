@@ -11,23 +11,20 @@ Java 客户端也备着，唯独实现没了——而单元测试测不到这种
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
 
-sys.path.insert(0, str(Path(__file__).parent))
+import czghagent_ai.api.internal as internal
+from czghagent_ai.app import app
+from czghagent_ai.services.tender_ai import TenderAiService
 
-from test_tender_ai import (  # noqa: E402
+# tests 是包：按包路径导入替身，mypy 才能把它和 pytest 收集到的认成同一个模块。
+from tests.test_tender_ai import (
     AdaptiveOutlineProvider,
     branch_blueprint_response,
 )
-
-import czghagent_ai.api.internal as internal  # noqa: E402
-from czghagent_ai.app import app  # noqa: E402
-from czghagent_ai.services.tender_ai import TenderAiService  # noqa: E402
 
 HEADERS = {"X-Internal-Token": "local-development-token"}
 OUTLINE: dict[str, Any] = {
@@ -65,7 +62,8 @@ def client() -> Any:
 def _stage(client: Any, path: str, body: dict[str, Any]) -> dict[str, Any]:
     response = client.post(f"/internal/tender{path}", headers=HEADERS, json=body)
     assert response.status_code == 200, f"{path} -> {response.status_code} {response.text[:200]}"
-    return response.json()
+    payload: dict[str, Any] = response.json()
+    return payload
 
 
 # ── 四个阶段串起来 ─────────────────────────────────────────────────────────
@@ -181,13 +179,13 @@ def test_assembly_never_calls_the_model(client: Any) -> None:
         })["data"]
         for index, batch in enumerate(skeleton["batches"], 1)
     ]
-    before = len(internal.tender_ai_service._client.calls)
+    before = len(cast(_Provider, internal.tender_ai_service._client).calls)
 
     _stage(client, "/outline/assemble", {
         "outline": OUTLINE, "skeleton": skeleton, "expansions": expansions,
     })
 
-    assert len(internal.tender_ai_service._client.calls) == before
+    assert len(cast(_Provider, internal.tender_ai_service._client).calls) == before
 
 
 # ── 技术域蓝图 ─────────────────────────────────────────────────────────────
