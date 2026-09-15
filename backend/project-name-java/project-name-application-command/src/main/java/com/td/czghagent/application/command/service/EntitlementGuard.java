@@ -50,17 +50,27 @@ public class EntitlementGuard {
         this.resolver = resolver;
     }
 
+    /** 权益没问到（平台暂时不可达）时的拒绝码。本产品局部码，带模块前缀（通则 X-1）。 */
+    static final String ENTITLEMENT_UNAVAILABLE = "ENTITLEMENT_UNAVAILABLE";
+
     /**
-     * 要求当前工作空间拥有这项能力，否则以 403 {@code NOT_ENTITLED} 拒绝。
+     * 要求当前工作空间拥有这项能力，否则拒绝。
      *
-     * <p>{@code retryable=false}：订阅是运营与用户的动作，原样重发永远是同一个拒绝。
-     * 转化深链不进错误封套（X-1 的形状是固定的），前端从 {@code GET /api/entitlement}
-     * 取 {@code subscribeUrl}，并且只在用户显式点击时打开。
+     * <p>平台答了「没有」：403 {@code NOT_ENTITLED}、{@code retryable=false}——订阅是运营与用户的
+     * 动作，原样重发永远是同一个拒绝。转化深链不进错误封套（X-1 的形状是固定的），前端从
+     * {@code GET /api/entitlement} 取 {@code subscribeUrl}，并且只在用户显式点击时打开。
+     *
+     * <p>没问到：同样拒绝（fail-closed），但是 503 {@code ENTITLEMENT_UNAVAILABLE}、
+     * {@code retryable=true}——稍后重试才是正确出路，对付了钱的人说「尚未订阅」是说错话。
      */
     public void require(OperationContext context, BidCapability capability) {
         Entitlement entitlement = resolver.resolve(workspaceOf(context));
         if (BidCapability.of(entitlement).contains(capability)) {
             return;
+        }
+        if (entitlement.unavailable()) {
+            throw new BusinessException(ENTITLEMENT_UNAVAILABLE,
+                    "暂时无法确认当前工作空间的订阅状态，请稍后重试", 503, true, null);
         }
         throw rejection(entitlement, capability);
     }

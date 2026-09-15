@@ -56,6 +56,11 @@ public class MockEntitlementResolver implements EntitlementResolver {
         if ("none".equalsIgnoreCase(tier)) {
             return Entitlement.none(workspaceId, ProductIdentity.PRODUCT_CODE);
         }
+        // "unavailable" 走「平台答不上来」：门控拒绝，但界面说暂时无法确认，而不是说没订阅。
+        // 这一屏只在平台出事时出现，本地走不到它就会带着 bug 上线。
+        if ("unavailable".equalsIgnoreCase(tier)) {
+            return Entitlement.unavailable(workspaceId, ProductIdentity.PRODUCT_CODE);
+        }
         if (LAPSED.contains(status.toLowerCase(Locale.ROOT))) {
             // 失效：保留 status（界面据此渲染「续费」而不是「首购」），但没有 tier。
             return new Entitlement(

@@ -6,4 +6,6 @@ import type { EntitlementView } from '@/types/entitlement'
 
 export const entitlementApi = {
   current: () => apiRequest<EntitlementView>('/api/entitlement'),
+  /** 先驱逐本工作空间的服务端权益缓存再问平台。「我已完成订阅」用它。 */
+  refresh: () => apiRequest<EntitlementView>('/api/entitlement/refresh', { method: 'POST' }),
 }

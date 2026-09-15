@@ -19,6 +19,8 @@ import {
 } from '@vxture/design-system'
 
 import { authApi } from '@/api/modules/auth'
+import { accessState, subscriptionBadgeLabel } from '@/features/entitlement/access'
+import { useEntitlementQuery } from '@/features/entitlement/queries'
 import { useAuthStore } from '@/stores/auth'
 import { useGlobalStore } from '@/stores/global'
 import { platformAvatarSrc } from '@/utils/avatar'
@@ -100,8 +102,15 @@ function AccountPanel() {
   const user = useAuthStore((state) => state.user)
   const clearAuth = useAuthStore((state) => state.clearAuth)
   const { density, fontSize, mode, setDensity, setFontSize, setMode } = useTheme()
+  const entitlement = useEntitlementQuery()
   const displayName = user?.displayName || user?.username || '当前用户'
   const roleLabel = user?.admin ? '管理员' : '标书编制人员'
+  // 订阅徽标与闸门读同一份权益缓存；还没取到时不显示，免得先闪一下「暂不可知」。
+  const badges = [{ key: 'role', label: roleLabel }]
+  if (!entitlement.isPending) {
+    const access = entitlement.isError ? ({ kind: 'unavailable' } as const) : accessState(entitlement.data)
+    badges.push({ key: 'subscription', label: subscriptionBadgeLabel(access) })
+  }
 
   return (
     <ShellUserMenu
@@ -114,7 +123,7 @@ function AccountPanel() {
         avatarFallback: displayName.slice(0, 1),
         meta: `${roleLabel}账户`,
         statusTag: { label: '已登录', verified: true },
-        badges: [{ key: 'role', label: roleLabel }],
+        badges,
       }}
       openLabel="打开账号菜单"
       settings={

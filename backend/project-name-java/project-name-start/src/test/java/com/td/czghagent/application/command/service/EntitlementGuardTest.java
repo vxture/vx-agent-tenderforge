@@ -74,6 +74,20 @@ class EntitlementGuardTest {
         assertThat(refused.getMessage()).contains("platinum");
     }
 
+    /**
+     * 没问到权益时照样拒绝（fail-closed），但不能说成「尚未订阅」——那是对付了钱的人说错话。
+     * 码与可重试性要让调用方知道「稍后再试」才是出路。
+     */
+    @Test
+    void anUnreachablePlatformIsRefusedAsRetryableNotAsUnsubscribed() {
+        BusinessException refused = refusal(new MockEntitlementResolver("unavailable", "", false));
+
+        assertThat(refused.getErrorCode()).isEqualTo(EntitlementGuard.ENTITLEMENT_UNAVAILABLE);
+        assertThat(refused.getHttpStatus()).isEqualTo(503);
+        assertThat(refused.isRetryable()).isTrue();
+        assertThat(refused.getMessage()).doesNotContain("尚未订阅");
+    }
+
     /** 捆绑覆盖只开数据面，不开界面命令（通则门控公式，BidCapability 注释）。 */
     @Test
     void bundledCoverageWithoutADirectPurchaseDoesNotOpenCommands() {

@@ -98,6 +98,16 @@ class MockEntitlementResolverTest {
         assertThat(bundled.bundled()).isTrue();
     }
 
+    /** 「平台答不上来」这一屏也要能在本地走到：它只在平台出事时出现，最容易带着 bug 上线。 */
+    @Test
+    void canPlayAnUnreachablePlatform() {
+        Entitlement unavailable = new MockEntitlementResolver("unavailable", "", false).resolve("ws-1");
+
+        assertThat(unavailable.unavailable()).isTrue();
+        assertThat(unavailable.allowsProductSurface()).as("没问到也不放行").isFalse();
+        assertThat(BidCapability.of(unavailable)).isEmpty();
+    }
+
     /**
      * 替身必须<strong>自报家门</strong>。
      *

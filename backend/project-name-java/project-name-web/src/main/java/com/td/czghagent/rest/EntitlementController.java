@@ -13,6 +13,7 @@ import com.td.czghagent.rest.security.RequestIdentity;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -46,11 +47,32 @@ public class EntitlementController {
 
     @GetMapping
     public Map<String, Object> current(HttpServletRequest request) {
-        CurrentUser user = RequestIdentity.user(request);
-        String workspaceId = user == null || user.tenant() == null
-                ? null : user.tenant().workspaceId();
-        Entitlement entitlement = resolver.resolve(workspaceId);
+        String workspaceId = workspaceOf(request);
+        return view(workspaceId, resolver.resolve(workspaceId));
+    }
 
+    /**
+     * 用户在 console 完成订阅后回到这里点「我已完成订阅」。
+     *
+     * <p>先驱逐<strong>自己工作空间</strong>的缓存再问：否则最长 45 秒里拿回的还是订阅前那份
+     * 「尚未订阅」——平台的 {@code subscription_changed} 通知本该驱逐它，但通知可能晚到或丢失，
+     * 而用户正盯着这 45 秒。只驱逐自己的，不接受工作空间参数。
+     */
+    @PostMapping("/refresh")
+    public Map<String, Object> refresh(HttpServletRequest request) {
+        String workspaceId = workspaceOf(request);
+        if (workspaceId != null) {
+            resolver.invalidate(workspaceId);
+        }
+        return view(workspaceId, resolver.resolve(workspaceId));
+    }
+
+    private static String workspaceOf(HttpServletRequest request) {
+        CurrentUser user = RequestIdentity.user(request);
+        return user == null || user.tenant() == null ? null : user.tenant().workspaceId();
+    }
+
+    private Map<String, Object> view(String workspaceId, Entitlement entitlement) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("product", ProductIdentity.PRODUCT_CODE);
         body.put("workspaceId", workspaceId);
@@ -73,6 +95,8 @@ public class EntitlementController {
         body.put("subscribeUrl", SubscribeDeeplink.of(
                 consoleBaseUrl, ProductIdentity.PRODUCT_CODE,
                 SubscribeDeeplink.intentFor(entitlement)));
+        // 「没问到」与「没订阅」在门控上相同，对人说的话不同：前者请用户稍后再试。
+        body.put("unavailable", entitlement.unavailable());
         body.put("degraded", resolver.isMock());
         return body;
     }

@@ -10,6 +10,7 @@ import com.td.czghagent.domain.exception.BusinessException;
 import com.td.czghagent.domain.model.Entitlement;
 import com.td.czghagent.domain.model.S2SToken;
 import com.td.czghagent.domain.port.EntitlementResolver;
+import com.td.czghagent.infrastructure.oidc.PlatformS2STokenMinter;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -128,23 +129,51 @@ class PlatformEntitlementResolverTest {
         Entitlement entitlement = resolver.resolve("ws-1");
 
         assertThat(entitlement.allowsProductSurface()).isFalse();
+        assertThat(entitlement.unavailable())
+                .as("票一直被拒是没问到，不是「没订阅」").isTrue();
         assertThat(requestCount.get())
                 .as("新票仍被拒说明问题不在票上，不连环重试").isEqualTo(2);
     }
 
     /**
-     * 铸不出票（例如本产品在该工作空间没有订阅或开通，平台答 invalid_target）
-     * 就是没有权益，而且不必去问平台。
+     * 平台明确说本产品在该工作空间没有开通（换票答 invalid_target）——这是答案：没有权益，
+     * 而且不必去问平台。
      */
     @Test
     void failsClosedWithoutCallingThePlatformWhenNoTokenCanBeMinted() {
-        minter.failure = new BusinessException("S2S_EXCHANGE_FAILED",
+        minter.failure = new BusinessException(PlatformS2STokenMinter.TARGET_NOT_PROVISIONED,
                 "平台尚未在当前工作空间为本产品开通 vxture 的调用权限", 502, false, null);
 
         Entitlement entitlement = resolver.resolve("ws-1");
 
         assertThat(entitlement.allowsProductSurface()).isFalse();
+        assertThat(entitlement.unavailable()).as("平台答了：没有开通").isFalse();
         assertThat(requestCount.get()).isZero();
+    }
+
+    /** 换票端点暂时答不上来（5xx、限流、配置错误）不是「没开通」，是没问到。 */
+    @Test
+    void aMintFailureOtherThanNotProvisionedIsUnavailableNotUnsubscribed() {
+        minter.failure = new BusinessException("S2S_EXCHANGE_FAILED", "换票被拒绝", 502, true, null);
+
+        Entitlement entitlement = resolver.resolve("ws-1");
+
+        assertThat(entitlement.allowsProductSurface()).isFalse();
+        assertThat(entitlement.unavailable()).isTrue();
+    }
+
+    /** 没问到的结果不进缓存：平台恢复后下一次请求就拿到真答案，不必干等 45 秒。 */
+    @Test
+    void doesNotCacheAnAnswerItNeverGot() {
+        responseStatus.set(500);
+        responseBody.set("{\"message\":\"boom\"}");
+        assertThat(resolver.resolve("ws-1").unavailable()).isTrue();
+
+        responseStatus.set(200);
+        responseBody.set("{\"tier\":\"pro\"}");
+
+        assertThat(resolver.resolve("ws-1").tier()).isEqualTo("pro");
+        assertThat(requestCount.get()).isEqualTo(2);
     }
 
     // ── 缓存与失效链 ────────────────────────────────────────────────────────

@@ -7,6 +7,7 @@ import { createBrowserRouter, Navigate } from 'react-router'
 
 import { ShellBootScreen } from '@vxture/design-system'
 
+import { SubscriptionGate } from '@/features/entitlement/SubscriptionGate'
 import { MainLayout } from '@/layouts'
 import Forbidden from '@/pages/Forbidden'
 import Login from '@/pages/Login'
@@ -32,7 +33,9 @@ const lazyProtectedPage = (loader: () => Promise<PageModule>) => async () => {
   return {
     Component: () => (
       <AuthGuard>
-        <Page />
+        <SubscriptionGate standalone>
+          <Page />
+        </SubscriptionGate>
       </AuthGuard>
     ),
   }

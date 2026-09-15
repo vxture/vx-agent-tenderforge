@@ -531,3 +531,30 @@ test('entitlement rejections render a subscribe notice that only opens on click'
   assert.match(notice, /onClick=\{\(\) => window\.open\(subscribeUrl, '_blank', 'noopener,noreferrer'\)\}/)
   assert.doesNotMatch(notice, /window\.location|location\.(href|assign|replace)|useNavigate|<Navigate/)
 })
+
+/**
+ * 订阅闸门：已登录不等于能用。产品内容区与全屏标书页都经 SubscriptionGate，只有个人资料页不挡。
+ *
+ * 漏包一处的症状是未订阅的人进得去、每个按钮 403——2026-09-15 生产上正是登录后直接进了智能体。
+ * 全屏标书页逐条核对挂载方式：新加一个全屏页却用了 lazyPage，就绕过了闸门。
+ */
+test('product surfaces sit behind the subscription gate and the gate never redirects on its own', () => {
+  const layout = source('src/layouts/MainLayout.tsx')
+  assert.match(layout, /<SubscriptionGate>\s*<Outlet \/>\s*<\/SubscriptionGate>/)
+  assert.match(layout, /const UNGATED_PATHS = \['\/planner\/account'\]/)
+
+  const router = source('src/router/index.tsx')
+  assert.match(
+    router,
+    /<AuthGuard>\s*<SubscriptionGate standalone>\s*<Page \/>\s*<\/SubscriptionGate>\s*<\/AuthGuard>/
+  )
+  const standalone = [...router.matchAll(/path: '(\/planner\/bids\/[^']+)',[\s\S]*?lazy: (\w+)\(/g)]
+  assert.ok(standalone.length >= 6, '全屏标书页的挂载方式没认出来，判据要重新写')
+  for (const [, path, loader] of standalone) {
+    assert.equal(loader, 'lazyProtectedPage', `${path} 绕过了订阅闸门`)
+  }
+
+  const gate = source('src/features/entitlement/SubscriptionGate.tsx')
+  assert.match(gate, /window\.open\(subscribeUrl, '_blank', 'noopener,noreferrer'\)/)
+  assert.doesNotMatch(gate, /window\.location|location\.(href|assign|replace)|useNavigate|<Navigate/)
+})

@@ -215,6 +215,9 @@ class PlatformS2STokenMinterTest {
         BusinessException error = catchBusinessException(
                 () -> minter.onBehalfOf("atlas", "user-access-token"));
 
+        assertThat(error.getErrorCode())
+                .as("权益读取据此区分「平台答了：没有开通」与「没问到」，不能与其他换票失败共用一个码")
+                .isEqualTo(PlatformS2STokenMinter.TARGET_NOT_PROVISIONED);
         assertThat(error.getMessage()).contains("尚未").contains("atlas");
         assertThat(error.isRetryable())
                 .as("开通是运营动作，等待改变不了任何事").isFalse();
