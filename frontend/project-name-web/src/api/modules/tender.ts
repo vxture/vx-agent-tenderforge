@@ -2,6 +2,7 @@
 // MODEL: gpt-5
 // DATE: 2026-08-02
 import { apiRequest, downloadFile } from '@/api/client'
+import type { CursorPage, PageRequest } from '@/types/page'
 import type {
   AssetCategory,
   BidChapterDetail,
@@ -19,7 +20,6 @@ import type {
   SectionRevisionCandidate,
   SectionRevisionMode,
 } from '@/types/tender'
-import type { CursorPage, PageRequest } from '@/types/page'
 
 /** 拼查询串：空值不带，没有参数时不留一个孤零零的 `?`。 */
 const queryString = (values: Record<string, string | number | null | undefined>) => {
