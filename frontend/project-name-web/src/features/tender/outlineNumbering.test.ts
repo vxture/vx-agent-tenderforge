@@ -8,11 +8,14 @@ import { outlineNode as node } from '@/test/fixtures/tender'
 import { buildOutlineLabels } from './outlineNumbering'
 
 describe('buildOutlineLabels', () => {
-  it('三级目录分别编成「第一章」「一、」「（一）」', () => {
+  it.each([
+    ['标题不带编号', '技术方案', '总体设计', '架构说明'],
+    ['标题里模型或用户写过旧编号，去掉而不是叠成「第一章 第三章」', ' 第三章 技术方案 ', '2、总体设计', '（5）架构说明'],
+  ])('三级目录分别编成「第一章」「一、」「（一）」——%s', (_case, rootTitle, sectionTitle, leafTitle) => {
     const labels = buildOutlineLabels([
-      node('r1', null, 1, 0, '技术方案'),
-      node('s1', 'r1', 2, 0, '总体设计'),
-      node('l1', 's1', 3, 0, '架构说明'),
+      node('r1', null, 1, 0, rootTitle),
+      node('s1', 'r1', 2, 0, sectionTitle),
+      node('l1', 's1', 3, 0, leafTitle),
     ])
 
     expect(labels.get('r1')).toBe('第一章 技术方案')
