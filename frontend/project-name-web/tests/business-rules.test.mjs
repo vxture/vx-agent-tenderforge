@@ -409,8 +409,9 @@ test('TenderAgent branding uses Funnel Display', () => {
   assert.match(source('src/main.tsx'), /@vxture\/design-system\/styles\/globals\.css/)
   assert.match(source('src/main.tsx'), /@vxture\/design-system\/styles\/brands\/vxture\.css/)
   assert.doesNotMatch(source('src/styles/globals.css'), /Funnel Display Variable/)
-  // 登录页照组织标准展示平台登记的产品名（owner 2026-09-14）；页头仍是 TenderAgent 字标。
-  assert.match(source('src/pages/Login/index.tsx'), /标书编写智能体/)
+  // 门禁页的产品标识带展示平台登记的产品名（门禁页规范，取自词典）；页头仍是 TenderAgent 字标。
+  assert.match(source('src/app/lib/messages.ts'), /brandName: '标书编写智能体'/)
+  assert.match(source('src/app/components/gate-frame.tsx'), /<ProductIdentity name=\{SHELL_TEXT\.brandName\} \/>/)
   assert.match(source('src/layouts/Header.tsx'), /TenderAgent/)
 })
 
@@ -421,7 +422,9 @@ test('global header exposes branded search, three real tools and the account pan
   const logo = source('public/assets/brand/vxture-logo-icon.svg')
 
   assert.match(logo, /aria-label="Vxture"/)
-  assert.match(header, /logoSrc="\/assets\/brand\/vxture-logo-icon\.svg"/)
+  // 图片路径只在 brand-assets.ts 里（门禁页规范）：页头取常量，常量指向这个文件。
+  assert.match(header, /logoSrc=\{BRAND_MARK_SRC\}/)
+  assert.match(source('src/app/lib/brand-assets.ts'), /BRAND_MARK_SRC = '\/assets\/brand\/vxture-logo-icon\.svg'/)
   assert.match(header, /<ShellSearchBox/)
   assert.match(header, /getMenuListByPortal/)
   assert.match(header, /<ShellIconGroup label="页面工具">/)
@@ -533,20 +536,22 @@ test('entitlement rejections render a subscribe notice that only opens on click'
 })
 
 /**
- * 订阅闸门：已登录不等于能用。产品内容区与全屏标书页都经 SubscriptionGate，只有个人资料页不挡。
+ * 订阅闸门：已登录不等于能用。整个布局与全屏标书页都经 SubscriptionGate，只有个人资料页不挡。
  *
  * 漏包一处的症状是未订阅的人进得去、每个按钮 403——2026-09-15 生产上正是登录后直接进了智能体。
  * 全屏标书页逐条核对挂载方式：新加一个全屏页却用了 lazyPage，就绕过了闸门。
+ * 闸门包在布局外面而不是内容区里：「当前工作区未订阅」是门禁页，不渲染产品外壳（门禁页规范）。
  */
 test('product surfaces sit behind the subscription gate and the gate never redirects on its own', () => {
   const layout = source('src/layouts/MainLayout.tsx')
-  assert.match(layout, /<SubscriptionGate>\s*<Outlet \/>\s*<\/SubscriptionGate>/)
+  assert.match(layout, /<SubscriptionGate>\{shell\}<\/SubscriptionGate>/)
+  assert.doesNotMatch(layout, /<SubscriptionGate>\s*<Outlet \/>/)
   assert.match(layout, /const UNGATED_PATHS = \['\/planner\/account'\]/)
 
   const router = source('src/router/index.tsx')
   assert.match(
     router,
-    /<AuthGuard>\s*<SubscriptionGate standalone>\s*<Page \/>\s*<\/SubscriptionGate>\s*<\/AuthGuard>/
+    /<AuthGuard>\s*<SubscriptionGate>\s*<Page \/>\s*<\/SubscriptionGate>\s*<\/AuthGuard>/
   )
   const standalone = [...router.matchAll(/path: '(\/planner\/bids\/[^']+)',[\s\S]*?lazy: (\w+)\(/g)]
   assert.ok(standalone.length >= 6, '全屏标书页的挂载方式没认出来，判据要重新写')
@@ -554,7 +559,13 @@ test('product surfaces sit behind the subscription gate and the gate never redir
     assert.equal(loader, 'lazyProtectedPage', `${path} 绕过了订阅闸门`)
   }
 
+  // 订阅深链只在显式点击时新开窗口（通则 C2）：门禁页的主动作是 target=_blank 的链接，闸门与页面都不自己跳。
   const gate = source('src/features/entitlement/SubscriptionGate.tsx')
-  assert.match(gate, /window\.open\(subscribeUrl, '_blank', 'noopener,noreferrer'\)/)
-  assert.doesNotMatch(gate, /window\.location|location\.(href|assign|replace)|useNavigate|<Navigate/)
+  const page = source('src/app/components/no-subscription.tsx')
+  const actions = source('src/app/components/gate-actions.tsx')
+  assert.match(page, /<GatePrimary href=\{subscribeHref\} external>/)
+  assert.match(actions, /external \? \{ target: '_blank', rel: 'noopener noreferrer' \}/)
+  for (const file of [gate, page]) {
+    assert.doesNotMatch(file, /window\.location|location\.(href|assign|replace)|useNavigate|<Navigate|window\.open/)
+  }
 })
