@@ -184,10 +184,17 @@ class PythonBidDocumentExporterTest {
         assertThat(rendered.qaSummary()).isEqualTo("文档服务未返回QA摘要");
     }
 
+    /**
+     * 头里的值坏了但仍是合法的 HTTP 头：页数不是数字、摘要不是 base64。
+     *
+     * <p>坏值必须是 ASCII。第一版写的是中文，本地 Windows 上过、CI 的 Linux 上整个响应在读头之前就失败了——
+     * HTTP 头本来就不承载非 ASCII，文档服务也从不这样发（摘要正是为此才 base64）。那样的输入验到的是
+     * HTTP 层，而不是这里的降级。
+     */
     @Test
     void malformedQualityHeadersDegradeInsteadOfThrowing() {
-        responseHeaders.put("X-Actual-Pages", "一百二十");
-        responseHeaders.put("X-QA-Summary-Base64", "***不是base64***");
+        responseHeaders.put("X-Actual-Pages", "one-hundred-twenty");
+        responseHeaders.put("X-QA-Summary-Base64", "***not-base64***");
 
         BidDocumentExporter.RenderedDocument rendered = exporter(30).render(bid, outline, chapters, List.of());
 
