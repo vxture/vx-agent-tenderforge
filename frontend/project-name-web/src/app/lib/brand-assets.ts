@@ -22,6 +22,7 @@ export const BRAND_WORDMARK = 'ruyin.work'
  *
  * 用 SVG，因为产品在四种尺寸下渲染它。同一个标识另以 `/logo.png`（512px、透明底）发布，
  * 供吃不了 SVG 的消费方（平台端会取）——产品自己不读 PNG，所以两个文件必须一起重新生成，
- * PNG 由 SVG 的同一套几何渲染，而不是描出来。
+ * PNG 由 SVG 的同一套几何渲染，而不是描出来。两个文件都由 `scripts/render-logo.mjs` 一次写出，
+ * 构图参考图在 `docs/30-design/assets/brand/`；换标识改脚本再跑，不要手改这两个文件。
  */
 export const PRODUCT_MARK_SRC = '/logo.svg'

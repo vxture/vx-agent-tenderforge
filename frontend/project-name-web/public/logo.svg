@@ -1,25 +1,26 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-labelledby="tenderforge-logo-title">
   <title id="tenderforge-logo-title">TenderForge</title>
   <!--
-    产品标识：一个 T，两笔在交汇处相接。
+    产品标识：一支钢笔的笔尖，斜放，笔尖朝左下。
 
-    为什么是 T。它是 TenderForge 的首字母，而且这个字母的两笔正好画出这个产品做的事：
-    横是招标文件摆出来的要求，竖是写出来的应答——应答从要求的正中长出来，一路往下写。
+    为什么是笔尖。这个产品做的事就是写标书（标书编写智能体），笔尖是「写」最直接的样子。
+    构图取自 owner 给定的参考图 Icons8「Pen」（Parakeet Partial Filled），参考原图在
+    docs/30-design/assets/brand/；这里是按那个构图重画的几何，不是描图。
 
-    为什么两个色、在哪里换。颜色在交汇处换，不在线段端点换：浅色是到达的（要求），
-    深色是离开的（应答），交汇点由深色盖住。配色沿用 Vxture 家族：#1E51FF 是品牌主色，
-    #698CFF 是它与公司标识浅色 #B5C7FF 的中点——推出来的，不是挑的；公司浅色本身在页头
-    16px 下的细线上几乎看不见（参照实现 vx-agent-yucer 的 logo.svg 里记过同一个结论）。
+    为什么两个色、各给谁。笔箍是大块实心，给浅色 #698CFF；笔身描边、气孔、缝是细线与小点，给深色
+    #1E51FF。大面积能承载浅色，细线不能——yucer 的 logo.svg 记过同一个结论：浅色细线在页头 16px 下几乎看不见。
+    配色沿用 Vxture 家族：#1E51FF 是品牌主色，#698CFF 是它与公司标识浅色 #B5C7FF 的中点。
     直接写十六进制而不是 currentColor：标识文件会被单独取走，背后没有样式表。
 
-    几何。直笔、圆头圆角，笔宽 34（256 网格），与 yucer 同一套。绘制范围横 47..209、
-    纵 53..203，按构造居中于画布，而不是按眼睛。
+    几何。组内是竖直摆放的笔尖，一个矩阵把它转 45° 并放上画布：旋转后的包围盒居中，气孔正落在画布中心，
+    所以居中是按构造的，而不是按眼睛。绘制范围（含笔宽）172 单位。
 
-    这是占位设计，合并前先给 owner 看过（门禁页规范：标识是品牌资产）。
-    logo.png（512，透明底）由同一套几何渲染，两个文件要一起重新生成。
+    不要手改这个文件：它与 logo.png 由 scripts/render-logo.mjs 从同一组数一起生成，改那里再跑一遍。
   -->
-  <g fill="none" stroke-width="34" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M64 70 L192 70" stroke="#698CFF" />
-    <path d="M128 70 L128 186" stroke="#1E51FF" />
+  <g transform="matrix(0.6572 0.6572 -0.6572 0.6572 123.2021 132.7979)">
+    <rect x="-44" y="-100" width="88" height="42" rx="10" fill="#698CFF" />
+    <path d="M-32 -42 C-34 18 -16 74 0 108 C16 74 34 18 32 -42 Z" fill="none" stroke="#1E51FF" stroke-width="22" stroke-linejoin="round" />
+    <path d="M0 6.7 L0 96" fill="none" stroke="#1E51FF" stroke-width="10" stroke-linecap="round" />
+    <circle cx="0" cy="-7.3" r="14" fill="#1E51FF" />
   </g>
 </svg>
