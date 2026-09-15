@@ -386,7 +386,10 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --quiet --disable-pip-version-check -r requirements.txt
-          python -m pytest -q
+          # mypy（strict）和 ruff 一样在 pyproject 里配着却从没进过 CI，接进来时积了 13 条。
+          # 放在这一步而不是 static-checks：它要解析 fastapi / pydantic 等真实依赖才判得准。
+          python -m mypy czghagent_ai tests
+          python -m pytest -q --cov --cov-report=json:coverage.json
 
       - name: Frontend tests
         working-directory: frontend/project-name-web
@@ -399,23 +402,43 @@ jobs:
           set -euo pipefail
           pnpm config set "//npm.pkg.github.com/:_authToken" "$NODE_AUTH_TOKEN"
           pnpm install --frozen-lockfile
-          pnpm test
+          # 参数接在脚本末尾的 vitest run 上；报告格式见 vitest.config.ts（text-summary + json-summary）。
+          pnpm test --coverage
 
       # 覆盖率是趋势指标，不是闸门——本轮的经验是「覆盖率涨了不等于验过了」，
-      # 卡一个百分比只会鼓励写出能覆盖但不成立的测试。这里只报告。
-      - name: Report Java coverage
+      # 卡一个百分比只会鼓励写出能覆盖但不成立的测试。这里只报告，三套各一行写进作业摘要。
+      - name: Report coverage (Java / Python / frontend)
         if: always()
         shell: bash
         run: |
           set -euo pipefail
-          report=backend/project-name-java/project-name-coverage/target/site/jacoco-aggregate/jacoco.xml
-          test -f "$report" || { echo "（没有生成聚合覆盖率报告）"; exit 0; }
-          python - "$report" <<'PY'
-          import sys, xml.etree.ElementTree as ET
-          root = ET.parse(sys.argv[1]).getroot()
-          counters = {c.get('type'): (int(c.get('missed')), int(c.get('covered')))
-                      for c in root.findall('counter')}
-          for name in ('INSTRUCTION', 'BRANCH'):
-              missed, covered = counters[name]
-              print(f"{name}: {100 * covered / (missed + covered):.1f}%")
+          python - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          import json, os, xml.etree.ElementTree as ET
+
+          def pct(covered, total):
+              return f"{100 * covered / total:.1f}%" if total else "—"
+
+          print("| 套件 | 行 / 指令 | 分支 |")
+          print("| --- | --- | --- |")
+          java = "backend/project-name-java/project-name-coverage/target/site/jacoco-aggregate/jacoco.xml"
+          if os.path.exists(java):
+              counters = {c.get("type"): (int(c.get("missed")), int(c.get("covered")))
+                          for c in ET.parse(java).getroot().findall("counter")}
+              (im, ic), (bm, bc) = counters["INSTRUCTION"], counters["BRANCH"]
+              print(f"| Java（指令） | {pct(ic, im + ic)} | {pct(bc, bm + bc)} |")
+          else:
+              print("| Java | 没有生成报告 | |")
+          python_report = "backend/project-name-python/coverage.json"
+          if os.path.exists(python_report):
+              totals = json.load(open(python_report, encoding="utf-8"))["totals"]
+              print(f"| Python | {pct(totals['covered_lines'], totals['num_statements'])}"
+                    f" | {pct(totals['covered_branches'], totals['num_branches'])} |")
+          else:
+              print("| Python | 没有生成报告 | |")
+          web_report = "frontend/project-name-web/coverage/coverage-summary.json"
+          if os.path.exists(web_report):
+              total = json.load(open(web_report, encoding="utf-8"))["total"]
+              print(f"| 前端 | {total['lines']['pct']:.1f}% | {total['branches']['pct']:.1f}% |")
+          else:
+              print("| 前端 | 没有生成报告 | |")
           PY
