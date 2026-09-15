@@ -274,6 +274,9 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
                 """);
         String bidId = created.path("bid").path("id").asText();
         assertThat(created.path("bid").path("workflowStep").asText()).isEqualTo("INTERPRETATION");
+        assertThat(created.path("bid").path("createdAt").asText())
+                .as("出参时间带时区偏移（通则：时间一律 ISO-8601 带时区）——这条断言证明 Jackson 配置真的接上了")
+                .matches(".*T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?([+-]\\d{2}:\\d{2}|Z)$");
         mockMvc.perform(get("/api/bids").cookie(session(owner)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(1));

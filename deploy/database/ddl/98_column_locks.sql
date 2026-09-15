@@ -34,8 +34,9 @@ REVOKE UPDATE ON local_authz.user_session FROM tenderforge_svc;
 
 -- --- local_usage ---
 REVOKE UPDATE ON local_usage.platform_usage_event FROM tenderforge_svc;
-GRANT UPDATE (attempts, claim_token, claimed_at, flushed_at, last_error)
+GRANT UPDATE (attempts, claim_token, claimed_at, flushed_at, last_error, platform_event_id)
   ON local_usage.platform_usage_event TO tenderforge_svc;
+-- platform_event_id 由 incr/0002 加上：本文件排在增量之后施加，活库上这条 GRANT 才找得到列。
 
 -- --- bid ---
 REVOKE UPDATE ON bid.audit_log FROM tenderforge_svc;

@@ -16,6 +16,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -202,10 +203,30 @@ class UsageBufferIntegrationTest extends PostgresBackedTest {
     void stopsHandingOutARowOnceItIsFlushed() {
         buffer.buffer(event("key-1"), NOW);
         buffer.claim("token-a", 10, NOW, NOW.minusMinutes(5));
-        buffer.markFlushed(List.of("key-1"), NOW.plusSeconds(1));
+        buffer.markFlushed(Map.of("key-1", "evt-1"), NOW.plusSeconds(1));
 
         assertThat(buffer.claim("token-b", 10, NOW.plusHours(1), NOW))
                 .as("已冲洗的行不再进入任何认领").isEmpty();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT platform_event_id FROM platform_usage_event WHERE idempotency_key = 'key-1'",
+                String.class))
+                .as("平台给的事件 id 落在这一行旁边，两侧才能逐条对账；列漏授权会在这里报 permission denied")
+                .isEqualTo("evt-1");
+    }
+
+    /** 替身或旧版平台不返回事件 id：照样标记为已冲洗，事件 id 留空而不是编一个。 */
+    @Test
+    void flushesARowEvenWhenThePlatformGaveNoEventId() {
+        buffer.buffer(event("key-2"), NOW);
+        buffer.claim("token-a", 10, NOW, NOW.minusMinutes(5));
+        Map<String, String> noEventId = new java.util.HashMap<>();
+        noEventId.put("key-2", null);
+        buffer.markFlushed(noEventId, NOW.plusSeconds(1));
+
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT flushed_at, platform_event_id FROM platform_usage_event WHERE idempotency_key = 'key-2'"))
+                .containsEntry("platform_event_id", null)
+                .extractingByKey("flushed_at").isNotNull();
     }
 
     /** 归还后立刻可以被重新认领，不必等租约走完。 */
@@ -224,7 +245,7 @@ class UsageBufferIntegrationTest extends PostgresBackedTest {
     /** 空列表不该发出任何语句——一条没有占位符的 IN () 在多数库上是语法错误。 */
     @Test
     void doesNothingWhenHandedAnEmptyBatch() {
-        buffer.markFlushed(List.of(), NOW);
+        buffer.markFlushed(Map.of(), NOW);
         buffer.release(List.of(), "unused");
 
         assertThat(claimAll()).isEmpty();
@@ -242,8 +263,8 @@ class UsageBufferIntegrationTest extends PostgresBackedTest {
         buffer.buffer(event("flushed-old"), NOW.minusDays(30));
         buffer.buffer(event("flushed-recent"), NOW.minusDays(1));
         buffer.buffer(event("never-flushed"), NOW.minusDays(30));
-        buffer.markFlushed(List.of("flushed-old"), NOW.minusDays(30));
-        buffer.markFlushed(List.of("flushed-recent"), NOW.minusDays(1));
+        buffer.markFlushed(Map.of("flushed-old", "evt-old"), NOW.minusDays(30));
+        buffer.markFlushed(Map.of("flushed-recent", "evt-recent"), NOW.minusDays(1));
 
         assertThat(buffer.purgeFlushedBefore(NOW.minusDays(14))).isEqualTo(1);
         assertThat(jdbcTemplate.queryForList(

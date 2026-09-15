@@ -10,7 +10,9 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 用量缓冲区的 JDBC 实现。
@@ -102,17 +104,20 @@ public class JdbcUsageBufferRepository implements UsageBufferRepository {
     }
 
     @Override
-    public void markFlushed(List<String> idempotencyKeys, LocalDateTime flushedAt) {
-        if (idempotencyKeys.isEmpty()) {
+    public void markFlushed(Map<String, String> platformEventIds, LocalDateTime flushedAt) {
+        if (platformEventIds.isEmpty()) {
             return;
         }
+        // 每行各带自己的平台事件 id，所以是逐行批量更新，不是一条 IN (...)。
         // claim_token 一并清空：它是认领的凭据，冲洗完就不该再有人能按它读到这行。
-        inChunks(idempotencyKeys, chunk -> jdbcTemplate.update("""
+        List<Object[]> rows = new ArrayList<>();
+        platformEventIds.forEach((key, eventId) -> rows.add(new Object[]{flushedAt, eventId, key}));
+        jdbcTemplate.batchUpdate("""
                 UPDATE platform_usage_event
-                SET flushed_at = ?, claim_token = NULL, claimed_at = NULL, last_error = NULL
-                WHERE idempotency_key IN (%s)
-                """.formatted(placeholders(chunk.size())),
-                prepend(flushedAt, chunk)));
+                SET flushed_at = ?, platform_event_id = ?,
+                    claim_token = NULL, claimed_at = NULL, last_error = NULL
+                WHERE idempotency_key = ?
+                """, rows);
     }
 
     @Override

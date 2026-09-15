@@ -15,7 +15,9 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -81,6 +83,29 @@ class UsageFlushJobTest {
 
         assertThat(summary.replayed()).isEqualTo(1);
         assertThat(summary.recorded()).isEqualTo(1);
+    }
+
+    /**
+     * 记下平台给每一行的事件 id——重放时是原始事件的那个。
+     *
+     * <p>丢掉它不报错：缓冲区照样清空，只是对账时两侧只能拿幂等键去模糊对，
+     * 而平台侧查一条事件要的正是这个 id（通则 C3 上行）。
+     */
+    @Test
+    void keepsThePlatformEventIdOfEveryRecordedRowIncludingReplays() {
+        buffer.rows.add(row("fresh", "ws-1"));
+        buffer.rows.add(row("again", "ws-1"));
+        buffer.rows.add(row("down", "ws-1"));
+
+        job(usage -> switch (usage.idempotencyKey()) {
+            case "fresh" -> new UsageConsumeClient.Outcome(200, false, false, "evt-new", null);
+            case "again" -> new UsageConsumeClient.Outcome(200, false, true, "evt-original", null);
+            default -> new UsageConsumeClient.Outcome(503, false, false, null, "upstream down");
+        }).flushOnce();
+
+        assertThat(buffer.eventIds)
+                .as("没记下的行没有事件 id，也不该出现在这里")
+                .containsExactly(Map.entry("fresh", "evt-new"), Map.entry("again", "evt-original"));
     }
 
     // ── 非 200 留在缓冲区 ───────────────────────────────────────────────────
@@ -227,6 +252,7 @@ class UsageFlushJobTest {
     private static final class FakeBuffer implements UsageBufferRepository {
         private final List<BufferedUsage> rows = new ArrayList<>();
         private final List<String> flushed = new ArrayList<>();
+        private final Map<String, String> eventIds = new LinkedHashMap<>();
         private final List<String> released = new ArrayList<>();
         private final List<String> claimTokens = new ArrayList<>();
         private String lastReleaseReason;
@@ -249,8 +275,9 @@ class UsageFlushJobTest {
         }
 
         @Override
-        public void markFlushed(List<String> keys, LocalDateTime at) {
-            flushed.addAll(keys);
+        public void markFlushed(Map<String, String> platformEventIds, LocalDateTime at) {
+            flushed.addAll(platformEventIds.keySet());
+            eventIds.putAll(platformEventIds);
         }
 
         @Override
