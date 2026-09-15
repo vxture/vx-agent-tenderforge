@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-labelledby="tenderforge-logo-title">
+  <title id="tenderforge-logo-title">TenderForge</title>
+  <!--
+    产品标识：一个 T，两笔在交汇处相接。
+
+    为什么是 T。它是 TenderForge 的首字母，而且这个字母的两笔正好画出这个产品做的事：
+    横是招标文件摆出来的要求，竖是写出来的应答——应答从要求的正中长出来，一路往下写。
+
+    为什么两个色、在哪里换。颜色在交汇处换，不在线段端点换：浅色是到达的（要求），
+    深色是离开的（应答），交汇点由深色盖住。配色沿用 Vxture 家族：#1E51FF 是品牌主色，
+    #698CFF 是它与公司标识浅色 #B5C7FF 的中点——推出来的，不是挑的；公司浅色本身在页头
+    16px 下的细线上几乎看不见（参照实现 vx-agent-yucer 的 logo.svg 里记过同一个结论）。
+    直接写十六进制而不是 currentColor：标识文件会被单独取走，背后没有样式表。
+
+    几何。直笔、圆头圆角，笔宽 34（256 网格），与 yucer 同一套。绘制范围横 47..209、
+    纵 53..203，按构造居中于画布，而不是按眼睛。
+
+    这是占位设计，合并前先给 owner 看过（门禁页规范：标识是品牌资产）。
+    logo.png（512，透明底）由同一套几何渲染，两个文件要一起重新生成。
+  -->
+  <g fill="none" stroke-width="34" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M64 70 L192 70" stroke="#698CFF" />
+    <path d="M128 70 L128 186" stroke="#1E51FF" />
+  </g>
+</svg>

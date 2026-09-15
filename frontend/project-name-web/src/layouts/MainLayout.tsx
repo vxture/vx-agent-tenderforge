@@ -14,7 +14,8 @@ import LayoutMenu from './Menu'
 /**
  * 不经订阅闸门的页面。个人资料归平台账号，与是否订阅本产品无关。
  *
- * 闸门包在内容区而不是整个布局外面：没订阅的人仍然看得到页头——退出登录与个人资料在那里。
+ * 闸门包在整个布局外面：「当前工作区未订阅」是门禁页，不渲染产品外壳（门禁页规范）——
+ * 没有可导航的东西。退出登录在门禁页自己的动作块里。
  */
 const UNGATED_PATHS = ['/planner/account']
 
@@ -32,7 +33,7 @@ export default function MainLayout() {
   const sidebarMode =
     showPortalNavigation && isLg ? (isCollapsed ? 'collapsed' : 'expanded') : 'hidden'
 
-  return (
+  const shell = (
     <div id="tenderagent-app-shell" className="h-dvh min-h-0">
       <ShellViewport
         className="h-full"
@@ -51,16 +52,12 @@ export default function MainLayout() {
             </div>
           ) : null}
           <div className="min-h-0 min-w-0 flex-1">
-            {UNGATED_PATHS.includes(location.pathname) ? (
-              <Outlet />
-            ) : (
-              <SubscriptionGate>
-                <Outlet />
-              </SubscriptionGate>
-            )}
+            <Outlet />
           </div>
         </div>
       </ShellViewport>
     </div>
   )
+
+  return UNGATED_PATHS.includes(location.pathname) ? shell : <SubscriptionGate>{shell}</SubscriptionGate>
 }

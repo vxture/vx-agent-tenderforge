@@ -26,12 +26,12 @@ describe('logoutAndLeave', () => {
     expect(clearAuth).toHaveBeenCalledOnce()
   })
 
-  it('没有登出地址时回站内登录页', async () => {
+  it('没有登出地址时回根路径——那里读到已退出便条显示确认页，而不是回以「登录」', async () => {
     const go = vi.fn()
 
     await logoutAndLeave({ logout: async () => ({ logoutUrl: null }), clearAuth: vi.fn(), go })
 
-    expect(go).toHaveBeenCalledExactlyOnceWith('/login')
+    expect(go).toHaveBeenCalledExactlyOnceWith('/')
   })
 
   it('登出请求失败时仍清掉本地资料并离开', async () => {
@@ -44,6 +44,6 @@ describe('logoutAndLeave', () => {
     ).rejects.toBe(failure)
 
     expect(clearAuth).toHaveBeenCalledOnce()
-    expect(go).toHaveBeenCalledExactlyOnceWith('/login')
+    expect(go).toHaveBeenCalledExactlyOnceWith('/')
   })
 })
