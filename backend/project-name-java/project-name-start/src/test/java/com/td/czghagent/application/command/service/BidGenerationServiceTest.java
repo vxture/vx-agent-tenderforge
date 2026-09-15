@@ -251,18 +251,39 @@ class BidGenerationServiceTest {
         verify(aiExecutionService, never()).revise(anyString(), anyString(), anyString(), anyString(), any());
     }
 
-    /** 超出预算 15% 以上标为超预算，比例按预算算——排版前据此判断哪几段写长了。 */
+    /**
+     * 超出预算 15% 以上标为超预算，比例按预算算——排版前据此判断哪几段写长了。
+     *
+     * <p>预算取在边界两侧，而不是远远低于字数：第一版用 10 字预算对 24 字草稿，门槛放宽到 50%
+     * 照样判超预算，反证实测验不出门槛（S6 绿）。这里的超预算一例只超过 15% 一点、远不到 50%。
+     */
     @Test
-    void aDraftMoreThanFifteenPercentOverBudgetIsMarkedOverBudget() {
-        claimable("u1", 10);
+    void aDraftJustOverFifteenPercentOfBudgetIsMarkedOverBudget() {
+        int visible = BidContentQualityGuard.visibleCharacterCount(CLEAN_HTML);
+        int budget = (int) Math.floor(visible / 1.15);
+        // 判据先验会不会动：预算必须落在「超过 15%、不到 50%」之间。
+        assertThat(visible).isGreaterThan((int) (budget * 1.15)).isLessThan((int) (budget * 1.5));
+        claimable("u1", budget);
         when(gateway.draftChapter(draftRequest)).thenReturn(response(CLEAN_HTML));
 
         service.generateUnit(TASK, BID, OWNER, "snap-1", SNAPSHOT_HASH, "u1");
 
-        int visible = BidContentQualityGuard.visibleCharacterCount(CLEAN_HTML);
         GeneratedCommit commit = committed();
         assertThat(commit.value().budgetStatus()).isEqualTo("OVER_BUDGET");
-        assertThat(commit.value().budgetVarianceRatio()).isEqualTo((visible - 10) / 10.0);
+        assertThat(commit.value().budgetVarianceRatio()).isEqualTo((visible - budget) / (double) budget);
+    }
+
+    @Test
+    void aDraftWithinFifteenPercentOfBudgetIsWithinBudget() {
+        int visible = BidContentQualityGuard.visibleCharacterCount(CLEAN_HTML);
+        int budget = (int) Math.ceil(visible / 1.15);
+        assertThat((double) visible).isGreaterThan(budget).isLessThanOrEqualTo(budget * 1.15);
+        claimable("u1", budget);
+        when(gateway.draftChapter(draftRequest)).thenReturn(response(CLEAN_HTML));
+
+        service.generateUnit(TASK, BID, OWNER, "snap-1", SNAPSHOT_HASH, "u1");
+
+        assertThat(committed().value().budgetStatus()).isEqualTo("WITHIN_BUDGET");
     }
 
     /** 草稿带出内部标识：按问题交给模型重写一次，重写干净就提交重写后的正文，并记一条修订事件。 */
