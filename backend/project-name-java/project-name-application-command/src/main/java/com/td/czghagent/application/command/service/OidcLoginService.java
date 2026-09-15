@@ -127,6 +127,13 @@ public class OidcLoginService {
      *
      * <p>返回的可能是同一个会话（没到续期时点）或续期后的会话；
      * 续期失败时抛错，由调用方清 cookie。
+     *
+     * <p><strong>同一会话的续期必须排队。</strong>平台的刷新令牌是轮换的，而且带重放检测：
+     * 一张已经换过的刷新令牌再拿去用，平台当场吊销整条令牌链（auth-bff
+     * {@code rotateRefreshToken}）。页面上同时发出的几个请求（切回标签页时权益查询与门禁重问一起到）
+     * 若都在票过期后到达，各自拿同一张旧令牌去换——第一个换到新票，第二个被判为重放，
+     * 连带把第一个刚换到的也吊销，会话随之被删，用户被踢回登录页，而日志里只有一句续期失败。
+     * 所以先锁住会话行再重读：排在后面的请求读到前一个已经换好的票，直接用它。
      */
     @Transactional
     public RpSession refreshIfNeeded(RpSession session) {
@@ -134,23 +141,28 @@ public class OidcLoginService {
         if (!session.needsRefresh(now)) {
             return session;
         }
-        if (session.refreshToken() == null || session.refreshToken().isBlank()) {
+        RpSession current = sessions.lockForRefresh(session.id()).orElseThrow(() -> new BusinessException(
+                "AUTH_SESSION_EXPIRED", "登录状态已失效，请重新登录", 401, false, null));
+        if (!current.needsRefresh(now)) {
+            return current;
+        }
+        if (current.refreshToken() == null || current.refreshToken().isBlank()) {
             throw new BusinessException(
                     "AUTH_SESSION_EXPIRED", "登录状态已失效，请重新登录", 401, false, null);
         }
-        OidcGateway.Tokens refreshed = gateway.refresh(session.refreshToken());
+        OidcGateway.Tokens refreshed = gateway.refresh(current.refreshToken());
         LocalDateTime accessExpiresAt = now.plusSeconds(refreshed.expiresInSeconds());
         // 轮换存新弃旧。IdP 未返回新刷新令牌时沿用旧的——
         // 那是「刷新令牌不轮换」的合法配置，不是缺失。
         String nextRefresh = refreshed.refreshToken() == null
-                ? session.refreshToken() : refreshed.refreshToken();
-        sessions.updateTokens(session.id(), refreshed.accessToken(), nextRefresh, accessExpiresAt);
-        LOGGER.debug("RP session {} refreshed", session.id());
+                ? current.refreshToken() : refreshed.refreshToken();
+        sessions.updateTokens(current.id(), refreshed.accessToken(), nextRefresh, accessExpiresAt);
+        LOGGER.debug("RP session {} refreshed", current.id());
         return new RpSession(
-                session.id(), session.subject(), session.displayName(), session.email(),
-                session.picture(), session.tenant(), session.rolesCsv(),
-                refreshed.accessToken(), nextRefresh, accessExpiresAt, session.expiresAt(),
-                session.orgName(), session.workspaceName());
+                current.id(), current.subject(), current.displayName(), current.email(),
+                current.picture(), current.tenant(), current.rolesCsv(),
+                refreshed.accessToken(), nextRefresh, accessExpiresAt, current.expiresAt(),
+                current.orgName(), current.workspaceName());
     }
 
     /**

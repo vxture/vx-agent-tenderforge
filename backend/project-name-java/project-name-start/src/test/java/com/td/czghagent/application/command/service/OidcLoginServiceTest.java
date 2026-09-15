@@ -222,15 +222,52 @@ class OidcLoginServiceTest {
 
     @Test
     void treatsAMissingRefreshTokenAsSessionDeath() {
-        RpSession noRefresh = new RpSession(
+        RpSession noRefresh = sessions.remember(new RpSession(
                 "s-1", "sub-1", "张三", null, null, null, "",
                 "access", null,
-                LocalDateTime.now().plusSeconds(10), LocalDateTime.now().plusHours(1));
+                LocalDateTime.now().plusSeconds(10), LocalDateTime.now().plusHours(1)));
 
         assertThatThrownBy(() -> service.refreshIfNeeded(noRefresh))
                 .isInstanceOf(BusinessException.class)
                 .extracting(error -> ((BusinessException) error).getErrorCode())
                 .isEqualTo("AUTH_SESSION_EXPIRED");
+    }
+
+    /**
+     * 另一个请求刚换好票：锁住会话行重读后直接用，不再拿旧刷新令牌去换。
+     *
+     * <p>平台的刷新令牌轮换带重放检测，旧令牌再用一次，整条令牌链当场吊销——会话随之被删，
+     * 人被踢回登录页（2026-09-16 生产上发生过，没有任何登出审计）。
+     */
+    @Test
+    void usesTheTokensAnotherRequestJustRotatedInsteadOfRefreshingAgain() {
+        RpSession stale = sessionExpiringIn(10);
+        sessions.remember(new RpSession(
+                "s-1", "sub-1", "张三", null, null, null, "",
+                "fresh-access", "fresh-refresh",
+                LocalDateTime.now().plusSeconds(3600), LocalDateTime.now().plusHours(12),
+                "华东设计院", "投标一部"));
+
+        RpSession resolved = service.refreshIfNeeded(stale);
+
+        assertThat(resolved.accessToken()).isEqualTo("fresh-access");
+        assertThat(resolved.refreshToken()).isEqualTo("fresh-refresh");
+        assertThat(gateway.refreshCalls).as("旧刷新令牌不能再拿去换").isZero();
+    }
+
+    /** 锁住时会话已经不在（刚登出、反向登出）：按会话失效处理，不拿它的刷新令牌去换票。 */
+    @Test
+    void treatsASessionDeletedBeforeTheLockAsSessionDeath() {
+        RpSession gone = new RpSession(
+                "s-gone", "sub-1", "张三", null, null, null, "",
+                "old-access", "old-refresh",
+                LocalDateTime.now().plusSeconds(10), LocalDateTime.now().plusHours(12));
+
+        assertThatThrownBy(() -> service.refreshIfNeeded(gone))
+                .isInstanceOf(BusinessException.class)
+                .extracting(error -> ((BusinessException) error).getErrorCode())
+                .isEqualTo("AUTH_SESSION_EXPIRED");
+        assertThat(gateway.refreshCalls).isZero();
     }
 
     // ── 登出 ────────────────────────────────────────────────────────────────
@@ -247,12 +284,13 @@ class OidcLoginServiceTest {
                 .containsOnlyNulls();
     }
 
-    private static RpSession sessionExpiringIn(long seconds) {
-        return new RpSession(
+    /** 快到期的会话，同时记成库里此刻的那一行（续期加锁后重读的就是它）。 */
+    private RpSession sessionExpiringIn(long seconds) {
+        return sessions.remember(new RpSession(
                 "s-1", "sub-1", "张三", null, null, null, "",
                 "old-access", "old-refresh",
                 LocalDateTime.now().plusSeconds(seconds), LocalDateTime.now().plusHours(12),
-                "华东设计院", "投标一部");
+                "华东设计院", "投标一部"));
     }
 
     // ── 登出 ────────────────────────────────────────────────────────────────
@@ -389,6 +427,19 @@ class OidcLoginServiceTest {
         @Override
         public Optional<RpSession> findByTokenHash(String tokenHash, LocalDateTime now) {
             return Optional.empty();
+        }
+
+        /** 库里此刻的会话行：续期加锁后重读的就是它。 */
+        private final Map<String, RpSession> rows = new HashMap<>();
+
+        RpSession remember(RpSession session) {
+            rows.put(session.id(), session);
+            return session;
+        }
+
+        @Override
+        public Optional<RpSession> lockForRefresh(String sessionId) {
+            return Optional.ofNullable(rows.get(sessionId));
         }
 
         @Override
