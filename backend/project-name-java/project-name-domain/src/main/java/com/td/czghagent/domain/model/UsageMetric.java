@@ -14,6 +14,9 @@ package com.td.czghagent.domain.model;
  * <p><strong>这里没有 token 指标，是刻意的。</strong>推理用量由 Atlas 作为唯一
  * 入口计量；本产品再报一次等于同一次推理被记两遍。产品该报的是自己的
  * <em>业务单元</em>——一次正文生成、一份成果文档——那些东西 Atlas 看不见。
+ *
+ * <p><strong>这些都是统计维度，不是配额计量。</strong>配额与计费走 token 换算的
+ * credits；这里的数字回答「产出了多少」，不回答「还能用多少」。
  */
 public enum UsageMetric {
 
@@ -26,7 +29,18 @@ public enum UsageMetric {
     BID_GENERATIONS("tenderforge.bid.generations"),
 
     /** 一份导出的成果文档。每个 export 行一次，重导一版算新的一次。 */
-    DOCUMENT_EXPORTS("tenderforge.document.exports");
+    DOCUMENT_EXPORTS("tenderforge.document.exports"),
+
+    /**
+     * 交付标书的字数：各章标题 + 正文的可见字符，与 docx 字数基本对应。
+     *
+     * <p>在<strong>导出时</strong>按高水位计：全文字数超过这份标书已报过的最大值时，
+     * 只报差额。于是一份标书累计报出的字数 = 它导出过的最大全文字数——反复导出不虚增，
+     * 改短不回退，改长只补差额；中间反复修改的细节不计。幂等键 = 标书 id + 新水位。
+     *
+     * <p>这不是 token 指标：模型推理的 token 由 Atlas 计量，这里计的是交付物里的字。
+     */
+    DOCUMENT_CHARACTERS("tenderforge.document.characters");
 
     private final String key;
 

@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalLong;
 
 /** Domain-port adapter; focused collaborators own the SQL for each persistence concern. */
 @Repository
@@ -322,6 +323,12 @@ public class JdbcBidRepository implements BidRepository {
     @Transactional
     public void insertExport(ExportRecord export) {
         tasks.insertExport(export);
+    }
+
+    @Override
+    @Transactional
+    public OptionalLong raiseMeteredCharacters(String bidId, long characters) {
+        return tasks.raiseMeteredCharacters(bidId, characters);
     }
 
     @Override

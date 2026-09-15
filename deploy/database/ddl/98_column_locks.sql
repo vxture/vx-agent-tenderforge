@@ -41,8 +41,9 @@ GRANT UPDATE (attempts, claim_token, claimed_at, flushed_at, last_error)
 REVOKE UPDATE ON bid.audit_log FROM tenderforge_svc;
 -- audit_log: 代码里没有任何 UPDATE —— 追加型，不给 UPDATE。
 REVOKE UPDATE ON bid.bid_document FROM tenderforge_svc;
-GRANT UPDATE (bidding_mode, content_hash, content_stale, content_status, content_version, error_message, interpretation_hash, interpretation_status, interpretation_version, outline_hash, outline_status, outline_version, revision, stale_reason, status, target_pages, title, updated_at, workflow_step)
+GRANT UPDATE (bidding_mode, content_hash, content_stale, content_status, content_version, error_message, interpretation_hash, interpretation_status, interpretation_version, metered_characters, outline_hash, outline_status, outline_version, revision, stale_reason, status, target_pages, title, updated_at, workflow_step)
   ON bid.bid_document TO tenderforge_svc;
+-- metered_characters 由 incr/0001 加上：本文件排在增量之后施加，活库上这条 GRANT 才找得到列。
 REVOKE UPDATE ON bid.bid_generation_task FROM tenderforge_svc;
 -- retry_count 一度漏在这里：那条 UPDATE 的 SET 子句里有个带自己 WHERE 的
 -- 子查询（completed_units = (SELECT ... WHERE ...)），静态提取停在了那个

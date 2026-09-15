@@ -71,8 +71,9 @@
 2026-09-10 之前本产品是 Flyway 在 api 启动时自动跑迁移，与治理规范
 「常规部署链不跑 migration/seed」冲突。现已改成规范要求的形态：
 
-* DDL 单一权威 = `deploy/database/ddl/`（`00_baseline` + `97_service_role`
-  + `98_column_locks` + `incr/`），手写、create-once
+* DDL 单一权威 = `deploy/database/ddl/`，手写、create-once，按
+  `00_baseline` → `incr/` → `97_service_role` → `98_column_locks` 的顺序施加
+  （权限排在结构之后，增量加的列才让得了 98 的 GRANT）
 * 施加通道 = `db-init.yml`（`confirm=yes` + `expected_sha` + 生产环境审批门）
 * **每次施加都是整份重放**，所以 DDL 必须能在活库上再跑一遍：外键包在
   `duplicate_object` 守卫里（`ADD CONSTRAINT` 没有 `IF NOT EXISTS`），由

@@ -3,6 +3,9 @@
 `00_baseline.sql` 是 **create-once** 的：永远不要在它里面 ALTER 一张已存在的表。
 结构变更放这里，编号递增、`NNNN_slug.sql`，由 `apply.sh` 按文件名顺序施加。
 
+施加顺序是 **基线 → 增量 → `97_service_role` → `98_column_locks`**：权限排在结构之后，
+增量新加的表才拿得到 97 的授权，新加的列才让得了 98 的 GRANT。
+
 ## 硬性要求
 
 **每个增量必须自己幂等**——`ADD COLUMN IF NOT EXISTS`、`CREATE INDEX IF NOT EXISTS`；
@@ -23,6 +26,9 @@ DDL，全部集成测试起不来。此前这里写着「带 `IF NOT EXISTS` 的
 
 同批改 `98_column_locks.sql` 的白名单。不改的表现是服务写 `permission denied`，
 而那是有意的——让「我加了一列」必须同时回答「谁能写它」。
+
+列只加在增量里、不回写基线：这样新库与活库走同一条路径，`PostgresBackedTest`
+施加的就是活库上那一遍（例：`0001_bid_document_metered_characters.sql`）。
 
 ## 施加
 

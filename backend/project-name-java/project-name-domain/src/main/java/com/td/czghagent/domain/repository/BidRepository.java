@@ -14,6 +14,7 @@ import com.td.czghagent.domain.model.BidWorkspaceViews;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalLong;
 
 public interface BidRepository {
     void insertBid(BidDocument bid);
@@ -132,6 +133,15 @@ public interface BidRepository {
     int nextExportVersion(String bidId);
 
     void insertExport(ExportRecord export);
+
+    /**
+     * 把这份标书的字数统计高水位抬到 {@code characters}。
+     *
+     * <p>抬了，返回抬之前的值；没有超过现有水位，返回空、什么都不写。
+     * 判断与写入必须原子——两次导出并发时，后到的那个要读到被抬过的水位，
+     * 否则两边各报一遍重叠的那一段。不动 {@code revision}：计量不是用户可见的修改。
+     */
+    OptionalLong raiseMeteredCharacters(String bidId, long characters);
 
     List<BidExport> listExports(String bidId);
 
