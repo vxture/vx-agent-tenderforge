@@ -24,16 +24,20 @@ export default defineConfig({
     },
   },
   test: {
+    // 缺省仍是 node：纯逻辑测试不需要 DOM，起一个 DOM 只会变慢。
+    // 组件渲染测试（*.test.tsx）在文件头用 `// @vitest-environment happy-dom` 自己声明——
+    // 按文件声明而不是按目录猜，一个忘了声明的渲染测试会当场报 document is not defined，而不是悄悄换了环境。
     environment: 'node',
-    include: ['src/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    setupFiles: ['./src/test/setup.ts'],
     coverage: {
       provider: 'v8',
       reporter: ['text-summary', 'json-summary'],
-      include: ['src/**/*.ts'],
-      // 只统计被测的纯逻辑层。页面与组件没有渲染测试，
-      // 把它们算进分母只会得到一个被稀释到无法解读的数字，
-      // 而那个数字既不能说明契约层是否被保护，也不能推动任何决定。
-      exclude: ['src/**/*.test.ts', 'src/**/*.d.ts', 'src/main.tsx'],
+      // 组件有了渲染测试，分母就把 .tsx 算进来：此前只统计 .ts 时页面「不在分母里」，
+      // 报出来的数字看着体面，却回答不了「界面有没有被测过」。现在这个数字会先变难看——那是真实的样子。
+      // 覆盖率在 CI 里只报告不设闸，判据仍是反证。
+      include: ['src/**/*.{ts,tsx}'],
+      exclude: ['src/**/*.test.{ts,tsx}', 'src/**/*.d.ts', 'src/main.tsx', 'src/test/**'],
     },
   },
 })
