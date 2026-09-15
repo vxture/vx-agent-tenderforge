@@ -2,6 +2,7 @@
 // MODEL: gpt-5
 // DATE: 2026-08-02
 import { apiRequest, downloadFile } from '@/api/client'
+import type { CursorPage, PageRequest } from '@/types/page'
 import type {
   AssetCategory,
   BidChapterDetail,
@@ -20,8 +21,24 @@ import type {
   SectionRevisionMode,
 } from '@/types/tender'
 
+/** 拼查询串：空值不带，没有参数时不留一个孤零零的 `?`。 */
+const queryString = (values: Record<string, string | number | null | undefined>) => {
+  const query = new URLSearchParams()
+  Object.entries(values).forEach(([key, value]) => {
+    if (value !== null && value !== undefined && String(value).trim()) {
+      query.set(key, String(value).trim())
+    }
+  })
+  const text = query.toString()
+  return text ? `?${text}` : ''
+}
+
 export const tenderApi = {
-  listBids: () => apiRequest<BidSummary[]>('/api/bids'),
+  /** 我的标书，游标分页（通则 A-3），最近更新在前。 */
+  listBids: (page: PageRequest = {}) =>
+    apiRequest<CursorPage<BidSummary>>(
+      `/api/bids${queryString({ cursor: page.cursor, limit: page.limit })}`
+    ),
   createBid: (input: BidSetupInput) =>
     apiRequest<BidWorkspace>('/api/bids', {
       method: 'POST',
@@ -106,18 +123,26 @@ export const tenderApi = {
       `/api/bids/${bidId}/chapters/${chapterId}/ai-revisions`,
       { method: 'POST', body: input }
     ),
-  listExports: (bidId: string) => apiRequest<BidExport[]>(`/api/bids/${bidId}/exports`),
+  /** 成果导出，游标分页，最近生成的在前——「最新」取 limit=1 的第一条。 */
+  listExports: (bidId: string, page: PageRequest = {}) =>
+    apiRequest<CursorPage<BidExport>>(
+      `/api/bids/${bidId}/exports${queryString({ cursor: page.cursor, limit: page.limit })}`
+    ),
   createExport: (bidId: string) =>
     apiRequest<BidExport>(`/api/bids/${bidId}/exports`, { method: 'POST' }),
   // 按标识下载：「最新」是调用方从 listExports 结果里挑出来的视角，不是一个路径段（通则 A-2）。
   downloadExport: (bidId: string, exportId: string, title: string) =>
     downloadFile(`/api/bids/${bidId}/exports/${exportId}/download`, `${title}-成果.docx`),
-  listAssets: (category?: AssetCategory, keyword = '') => {
-    const query = new URLSearchParams()
-    if (category) query.set('category', category)
-    if (keyword.trim()) query.set('keyword', keyword.trim())
-    return apiRequest<BidReferenceAsset[]>(`/api/bid-assets?${query}`)
-  },
+  /** 素材库，游标分页；分类与关键字是筛选条件，走查询参数（A-2）。 */
+  listAssets: (filters: { category?: AssetCategory; keyword?: string } & PageRequest = {}) =>
+    apiRequest<CursorPage<BidReferenceAsset>>(
+      `/api/bid-assets${queryString({
+        category: filters.category,
+        keyword: filters.keyword,
+        cursor: filters.cursor,
+        limit: filters.limit,
+      })}`
+    ),
   uploadAsset: (category: AssetCategory, file: File) => {
     const formData = new FormData()
     formData.set('category', category)

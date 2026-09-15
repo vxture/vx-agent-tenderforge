@@ -2,6 +2,7 @@ package com.td.czghagent.infrastructure.repository;
 
 import com.td.czghagent.domain.model.BidReferenceAsset;
 import com.td.czghagent.domain.model.BidReferenceChunk;
+import com.td.czghagent.domain.model.PageCursor;
 import com.td.czghagent.domain.model.TenantScope;
 import com.td.czghagent.domain.repository.BidRepository;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -32,12 +33,16 @@ final class JdbcBidAssetPersistence {
                 asset.contentHash(), asset.status());
     }
 
-    List<BidReferenceAsset> listAssets(String ownerId, String category, String keyword) {
+    /** 键集分页，{@code (updated_at, id)} 降序；决胜键的理由见 {@code JdbcBidWorkspaceReader#listBids}。 */
+    List<BidReferenceAsset> listAssets(String ownerId, TenantScope tenant, String category, String keyword,
+                                       PageCursor after, int limit) {
         StringBuilder sql = new StringBuilder("""
-                SELECT * FROM bid_reference_asset WHERE owner_id = ? AND status = 'ACTIVE'
+                SELECT * FROM bid_reference_asset
+                WHERE owner_id = ? AND workspace_id = ? AND status = 'ACTIVE'
                 """);
         List<Object> args = new ArrayList<>();
         args.add(ownerId);
+        args.add(tenant.workspaceId());
         if (category != null && !category.isBlank()) {
             sql.append(" AND category = ?");
             args.add(category);
@@ -46,20 +51,36 @@ final class JdbcBidAssetPersistence {
             sql.append(" AND LOWER(display_name) LIKE ?");
             args.add("%" + keyword.trim().toLowerCase(Locale.ROOT) + "%");
         }
-        sql.append(" ORDER BY updated_at DESC, id DESC");
+        if (after != null) {
+            sql.append(" AND (updated_at < ? OR (updated_at = ? AND id < ?))");
+            args.add(after.createdAt());
+            args.add(after.createdAt());
+            args.add(after.id());
+        }
+        sql.append(" ORDER BY updated_at DESC, id DESC LIMIT ?");
+        args.add(limit);
         return jdbcTemplate.query(sql.toString(), BidJdbcMappers.ASSET, args.toArray());
     }
 
-    Optional<BidRepository.AssetRecord> findAsset(String assetId, String ownerId) {
+    Optional<BidReferenceAsset> findActiveAsset(String assetId, String ownerId, TenantScope tenant) {
         return jdbcTemplate.query("""
-                SELECT * FROM bid_reference_asset WHERE id = ? AND owner_id = ? AND status = 'ACTIVE'
+                SELECT * FROM bid_reference_asset
+                WHERE id = ? AND owner_id = ? AND workspace_id = ? AND status = 'ACTIVE'
+                """, BidJdbcMappers.ASSET, assetId, ownerId, tenant.workspaceId()).stream().findFirst();
+    }
+
+    Optional<BidRepository.AssetRecord> findAsset(String assetId, String ownerId, TenantScope tenant) {
+        return jdbcTemplate.query("""
+                SELECT * FROM bid_reference_asset
+                WHERE id = ? AND owner_id = ? AND workspace_id = ? AND status = 'ACTIVE'
                 """, (rs, row) -> new BidRepository.AssetRecord(
                 rs.getString("id"), rs.getString("owner_id"),
                 new TenantScope(rs.getString("org_id"), rs.getString("workspace_id")),
                 rs.getString("category"),
                 rs.getString("display_name"), rs.getString("original_file_name"),
                 rs.getString("object_key"), rs.getString("media_type"), rs.getLong("file_size"),
-                rs.getString("content_hash"), rs.getString("status")), assetId, ownerId)
+                rs.getString("content_hash"), rs.getString("status")), assetId, ownerId,
+                tenant.workspaceId())
                 .stream().findFirst();
     }
 
@@ -100,10 +121,11 @@ final class JdbcBidAssetPersistence {
                 """, status, errorMessage, assetId);
     }
 
-    boolean removeAsset(String assetId, String ownerId) {
+    boolean removeAsset(String assetId, String ownerId, TenantScope tenant) {
         return jdbcTemplate.update("""
                 UPDATE bid_reference_asset SET status = 'REMOVED', updated_at = CURRENT_TIMESTAMP,
-                    revision = revision + 1 WHERE id = ? AND owner_id = ? AND status = 'ACTIVE'
-                """, assetId, ownerId) == 1;
+                    revision = revision + 1
+                WHERE id = ? AND owner_id = ? AND workspace_id = ? AND status = 'ACTIVE'
+                """, assetId, ownerId, tenant.workspaceId()) == 1;
     }
 }

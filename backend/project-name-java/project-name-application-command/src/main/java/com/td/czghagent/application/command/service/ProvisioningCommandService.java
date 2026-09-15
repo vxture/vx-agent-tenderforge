@@ -46,7 +46,9 @@ public class ProvisioningCommandService {
         /** 事件不是发给本产品的。 */
         WRONG_PRODUCT,
         /** 类型没见过：记下投递，不做动作。 */
-        UNKNOWN_TYPE
+        UNKNOWN_TYPE,
+        /** 通知类事件：按提示处理（驱逐权益缓存，或本产品无对应缓存而无需动作）。 */
+        NOTIFIED
     }
 
     private final ProvisioningRepository provisioning;
@@ -77,6 +79,15 @@ public class ProvisioningCommandService {
             return Outcome.DUPLICATE;
         }
 
+        // 通知类事件不带 seq，必须在乱序判定之前分流：按 0 去比，任何开通过的空间上
+        // 都会被判「过期」丢掉——而 subscription_changed 恰恰是要让权益缓存失效的那一条。
+        // 幂等仍按投递标识，上面的抢占已经管住了重投。
+        if (event.isNotification()) {
+            Outcome outcome = acknowledgeNotification(event);
+            provisioning.recordOutcome(event.deliveryId(), outcome.name());
+            return outcome;
+        }
+
         long lastSeq = provisioning.lastSeq(event.workspaceId(), ProductIdentity.PRODUCT_CODE);
         if (event.seq() <= lastSeq) {
             // 乱序到达的旧事件。用它去覆盖状态会把一个已经停用的空间改回开通——
@@ -100,6 +111,21 @@ public class ProvisioningCommandService {
         };
         provisioning.recordOutcome(event.deliveryId(), outcome.name());
         return outcome;
+    }
+
+    /**
+     * 通知是提示，不是状态（通则 C3 下发「两种通知怎么用」）。
+     *
+     * <p>{@code subscription_changed} 携带的不是新权益，是「你缓存的权益过期了」——驱逐之后，
+     * 下一次读自然经 C2 重拉，不在这里解析载荷、不改开通记录。
+     * {@code grant.invalidated} 针对共享授权缓存，本产品不持有这类缓存，记下投递即可。
+     */
+    private Outcome acknowledgeNotification(ProvisioningEvent event) {
+        if (ProvisioningEvent.SUBSCRIPTION_CHANGED.equals(event.type())
+                && event.workspaceId() != null) {
+            evictEntitlement(event.workspaceId());
+        }
+        return Outcome.NOTIFIED;
     }
 
     private Outcome apply(ProvisioningEvent event, String state,

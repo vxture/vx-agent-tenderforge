@@ -45,7 +45,7 @@ public class BidOutlineGenerationProcessor {
         if (!progress(taskId, "PREPARING", 10)) {
             return;
         }
-        BidDocument bid = support.requireBid(bidId, ownerId);
+        BidDocument bid = support.requireBidForTask(bidId, ownerId);
         OperationContext context = context(bid, traceId, ipAddress);
         BidWorkspace workspace = bidRepository.loadWorkspace(bid);
         validateTask(taskId, workspace);
@@ -128,7 +128,7 @@ public class BidOutlineGenerationProcessor {
         List<TenderAiGateway.ReferenceSummary> references = new ArrayList<>();
         for (String assetId : workspace.selectedAssetIds()) {
             BidRepository.AssetRecord asset = bidRepository
-                    .findAsset(assetId, context.user().id()).orElse(null);
+                    .findAsset(assetId, context.user().id(), context.user().tenant()).orElse(null);
             if (asset == null || !"OUTLINE".equals(asset.category())) {
                 continue;
             }

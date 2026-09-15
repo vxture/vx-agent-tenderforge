@@ -160,15 +160,14 @@ jobs:
               echo "找不到数据库容器 $container——栈没起来，或者 DEPLOY_STAGE 与部署时不一致" >&2
               exit 1
             }
-          for f in 00_baseline.sql 97_service_role.sql 98_column_locks.sql; do
-            echo "[ddl] applying $f"
-            docker exec -i -e PGPASSWORD="$POSTGRES_ROOT_PASSWORD" "$container" \
-              psql -U postgres -d "vx_${PRODUCT_CODE}_db" -v ON_ERROR_STOP=1 -q \
-              < "deploy/database/ddl/$f"
-          done
-          for f in deploy/database/ddl/incr/*.sql; do
+          # 顺序：基线 → 增量 → 97 → 98。权限排在结构之后：97 按「schema 下全部表」授权、
+          # 98 按列授权，增量新加的表与列必须先存在。反过来排，活库上 98 会倒在
+          # 「列不存在」上，而空库（基线已含全部结构时）看不出来。与 apply.sh、PostgresBackedTest 一致。
+          ddl=deploy/database/ddl
+          for f in "$ddl/00_baseline.sql" "$ddl"/incr/*.sql \
+                   "$ddl/97_service_role.sql" "$ddl/98_column_locks.sql"; do
             [ -e "$f" ] || continue
-            echo "[ddl] applying incr $(basename "$f")"
+            echo "[ddl] applying $(basename "$f")"
             docker exec -i -e PGPASSWORD="$POSTGRES_ROOT_PASSWORD" "$container" \
               psql -U postgres -d "vx_${PRODUCT_CODE}_db" -v ON_ERROR_STOP=1 -q < "$f"
           done

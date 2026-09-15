@@ -3,16 +3,19 @@
 // DATE: 2026-08-27
 package com.td.czghagent.infrastructure.repository;
 
+import com.td.czghagent.domain.model.TenantScope;
 import com.td.czghagent.domain.model.BidDocument;
 import com.td.czghagent.domain.model.BidExport;
 import com.td.czghagent.domain.model.BidProductionState;
 import com.td.czghagent.domain.model.BidSummary;
 import com.td.czghagent.domain.model.BidWorkspace;
 import com.td.czghagent.domain.model.BidWorkspaceViews;
+import com.td.czghagent.domain.model.PageCursor;
 import com.td.czghagent.domain.repository.BidProductionRepository;
 import java.time.LocalDateTime;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -29,7 +32,22 @@ final class JdbcBidWorkspaceReader {
         this.tasks = tasks;
     }
 
-    List<BidSummary> listBids(String ownerId) {
+    /**
+     * 键集分页：{@code (updated_at, id)} 严格小于游标锚点的下一批。
+     *
+     * <p>决胜键 {@code id} 必须同时出现在排序与比较里——只按时间比，同一时刻更新的几行
+     * 在页边界上要么重复、要么漏掉，而两种表现都像「数据就是这样」。
+     */
+    List<BidSummary> listBids(String ownerId, TenantScope tenant, PageCursor after, int limit) {
+        List<Object> args = new ArrayList<>(List.of(ownerId, tenant.workspaceId()));
+        String keyset = "";
+        if (after != null) {
+            keyset = " AND (b.updated_at < ? OR (b.updated_at = ? AND b.id < ?))";
+            args.add(after.createdAt());
+            args.add(after.createdAt());
+            args.add(after.id());
+        }
+        args.add(limit);
         return jdbcTemplate.query("""
                 SELECT b.*,
                        (SELECT COUNT(*) FROM bid_chapter c WHERE c.bid_id = b.id) AS total_chapters,
@@ -45,8 +63,9 @@ final class JdbcBidWorkspaceReader {
                            ORDER BY j.created_at DESC, j.id DESC LIMIT 1) AS actual_pages,
                        (SELECT MAX(e.version_no) FROM bid_export e WHERE e.bid_id = b.id)
                            AS latest_export_version
-                FROM bid_document b WHERE b.owner_id = ?
-                ORDER BY b.updated_at DESC, b.id DESC
+                FROM bid_document b WHERE b.owner_id = ? AND b.workspace_id = ?
+                """ + keyset + """
+                 ORDER BY b.updated_at DESC, b.id DESC LIMIT ?
                 """, (rs, row) -> new BidSummary(
                 rs.getString("id"), rs.getString("code"), rs.getString("title"),
                 rs.getInt("target_pages"), rs.getString("bidding_mode"),
@@ -57,10 +76,17 @@ final class JdbcBidWorkspaceReader {
                 BidJdbcMappers.nullableInteger(rs.getObject("actual_pages")),
                 BidJdbcMappers.nullableInteger(rs.getObject("latest_export_version")),
                 JdbcTimes.localDateTime(rs, "created_at"),
-                JdbcTimes.localDateTime(rs, "updated_at")), ownerId);
+                JdbcTimes.localDateTime(rs, "updated_at")), args.toArray());
     }
 
-    Optional<BidDocument> findBid(String bidId, String ownerId) {
+    Optional<BidDocument> findBid(String bidId, String ownerId, TenantScope tenant) {
+        return jdbcTemplate.query(
+                "SELECT * FROM bid_document WHERE id = ? AND owner_id = ? AND workspace_id = ?",
+                BidJdbcMappers.BID, bidId, ownerId, tenant.workspaceId()).stream().findFirst();
+    }
+
+    /** 后台任务用：不看工作空间。见 {@code BidRepository#findBidForTask}。 */
+    Optional<BidDocument> findBidForTask(String bidId, String ownerId) {
         return jdbcTemplate.query(
                 "SELECT * FROM bid_document WHERE id = ? AND owner_id = ?",
                 BidJdbcMappers.BID, bidId, ownerId).stream().findFirst();
@@ -88,7 +114,7 @@ final class JdbcBidWorkspaceReader {
         BidWorkspace.GenerationTask task = tasks.latestTask(bid.id());
         BidWorkspace.OutlineTask outlineTask = tasks.latestOutlineTask(bid.id());
         List<String> selected = selectedAssets(bid.id());
-        List<BidExport> exports = tasks.listExports(bid.id());
+        List<BidExport> exports = tasks.recentExports(bid.id());
         BidProductionState production = productionRepository.loadState(
                 bid.id(), task == null ? null : task.id());
         return new BidWorkspace(
@@ -101,7 +127,7 @@ final class JdbcBidWorkspaceReader {
         BidWorkspace.SourceFile source = sourceFile(bid.id());
         BidWorkspace.OutlineTask outlineTask = tasks.latestOutlineTask(bid.id());
         List<String> selected = selectedAssets(bid.id());
-        List<BidExport> exports = tasks.listExports(bid.id());
+        List<BidExport> exports = tasks.recentExports(bid.id());
         BidProductionState production = productionRepository.loadState(
                 bid.id(), task == null ? null : task.id());
         return new BidWorkspaceViews.Metadata(
@@ -203,6 +229,6 @@ final class JdbcBidWorkspaceReader {
     }
 
     private BidDocument latestBid(BidDocument bid) {
-        return findBid(bid.id(), bid.ownerId()).orElse(bid);
+        return findBidForTask(bid.id(), bid.ownerId()).orElse(bid);
     }
 }

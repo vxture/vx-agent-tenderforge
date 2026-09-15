@@ -15,7 +15,9 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -80,7 +82,8 @@ public class UsageFlushJob {
             return new Summary(0, 0, 0, 0, 0);
         }
 
-        List<String> recorded = new ArrayList<>();
+        // 幂等键 → 平台事件 id。插入序保留认领顺序，日志与对账读起来和缓冲区一致。
+        Map<String, String> recorded = new LinkedHashMap<>();
         List<String> retry = new ArrayList<>();
         List<String> gatedWorkspaces = new ArrayList<>();
         int replayed = 0;
@@ -94,7 +97,7 @@ public class UsageFlushJob {
                         + (outcome.reason() == null ? "" : ": " + outcome.reason());
                 continue;
             }
-            recorded.add(usage.idempotencyKey());
+            recorded.put(usage.idempotencyKey(), outcome.eventId());
             if (outcome.replayed()) {
                 replayed++;
             }

@@ -108,9 +108,9 @@ Compose 项目名是 `tenderforge`（`docker-compose.yml` 顶层 `name:`），�
 
 **登记的偏离，两条，均带失效条件：**
 
-1. `/api/admin/users` 的启停仍是布尔 `enabled`，而 B-3 要求单一字符串 `state`。
-   理由不是迁移成本——这整个资源即将被「平台 IdP 提供身份 + 本地只存 workspace 内业务角色」
-   替换，新资源会一出生就用 `state`。**失效条件：本地账号体系被替换即作废。**
+1. ~~`/api/admin/users` 的启停仍是布尔 `enabled`，而 B-3 要求单一字符串 `state`。~~ ——
+   **2026-09-15 已销号**：失效条件「本地账号体系被替换」已满足。身份归平台 IdP，
+   本地口令通道先行退役，随后 `/api/admin/users*` 与本地资料编辑整体删除，偏离随资源消失。
 2. 仓内类型名 `BidWorkspace`（标书编辑聚合）与平台 `workspace`（租户工作空间）同词异义。
    线上契约没有撞名——`BidWorkspace` 从不作为 JSON 键出现，响应键是
    `{bid, sourceFile, criteria, outline, chapters, ...}`；这是仓内可读性问题而非契约违规。
@@ -127,8 +127,8 @@ Compose 项目名是 `tenderforge`（`docker-compose.yml` 顶层 `name:`），�
 | `api/client.ts` | 同源会话 cookie（浏览器零 token）、统一响应解包、401 清会话、受保护文件下载 |
 | `api/modules/` | `auth`、`admin`、`tender` 后端契约 |
 | `features/tender/` | 标书、素材和五个工作区页面 |
-| `features/account/` | 显示名称、头像 |
-| `features/admin/` | 用户与审计管理 |
+| `features/account/` | 平台身份只读展示与控制台资料入口 |
+| `features/admin/` | 审计日志 |
 | `router/` | 路由、登录和角色守卫、错误边界 |
 | `stores/` | Zustand 会话和少量全局 UI 状态 |
 | `config/` | TanStack Query 客户端 |
@@ -210,14 +210,13 @@ Compose 项目名是 `tenderforge`（`docker-compose.yml` 顶层 `name:`），�
 | `/planner/writing` | 编写方式 | `PLANNER` |
 | `/planner/assets` | 个人素材 | `PLANNER` |
 | `/planner/bids` | 我的标书 | `PLANNER` |
-| `/planner/account` | 当前账号 | `PLANNER` |
+| `/planner/account` | 个人资料（平台身份只读，链到控制台资料页） | 已登录 |
 | `/planner/bids/new/setup` | 新建标书 | `PLANNER` |
 | `/planner/bids/{id}/setup` | 标书设置 | 所有者 |
 | `/planner/bids/{id}/interpretation` | 招标文件解读 | 所有者 |
 | `/planner/bids/{id}/outline` | 目录编写 | 所有者 |
 | `/planner/bids/{id}/generating` | 正文生成进度 | 所有者 |
 | `/planner/bids/{id}/content` | 正文编辑、审查、排版和下载 | 所有者 |
-| `/console/users` | 用户管理 | `ADMIN` |
 | `/console/audit-logs` | 审计日志 | `ADMIN` |
 | `/403`、`/404`、`/500` | 错误页 | 按错误进入 |
 
@@ -411,12 +410,27 @@ Compose 中 `api` 只提交工作流，`worker` 注册四个队列并执行 Acti
 
 | 情形 | 形状 | 本系统的例子 |
 | --- | --- | --- |
-| 无回显内容 | 裸 JSON 数组 | `/api/bids`、`/api/bid-assets`、`/api/admin/users`、`/api/bids/{bidId}/exports` |
-| 无界游标流水 | `{ items, nextCursor }` | `/api/admin/audit-logs` |
+| 有写下来的上限 | 裸 JSON 数组 | `/api/bids/{bidId}/generation-events`（最近 100 条）；工作台内嵌的 `exports`（最近 20 份） |
+| 没有写下来的上限 | `{ items, nextCursor }` | `/api/bids`、`/api/bid-assets`、`/api/bids/{bidId}/exports`、`/api/admin/audit-logs` |
 | 单个对象 | 对象本体 | 其余全部 |
 
-集合键一律叫 `items`；`nextCursor` 为 `null` 表示没有下一页。列表 `limit` 由服务端钳制到
-200，**不静默截断语义**——调用方按「返回条数等于上限」判断还有数据。
+**判据是「有没有人写下过这张表的上限」**（通则 A-3），不是「会不会因为系统自己跑而增长」。
+一个人在一个工作空间里能建多少份标书、传多少份素材、一份标书导出多少个版本，没有任何人
+写下过——所以这三个列表 2026-09-15 起改为游标分页，此前的裸数组是按旧判据归的类。
+
+键集游标锚在 `(时间, id)` 上：标书与素材取 `updatedAt`（保持「最近更新在前」，翻页途中
+被编辑的一行可能跨页移动，这是保留该排序接受的代价），导出取 `createdAt`（第一条就是最新，
+「下载最新」取 `limit=1`）。`id` 是并列时的决胜键，必须同时出现在排序与比较里——缺了它，
+同一时刻的几行在页边界上重复或漏掉，`ListCursorPaginationIntegrationTest` 专门造了时间相同的行来钉这一条。
+
+集合键一律叫 `items`；`nextCursor` 为 `null` 表示没有下一页，游标不透明、原样回传（A-5）。
+`limit` 由服务端钳制到 `[1, 200]`，缺省 20，**不静默截断语义**——调用方按 `nextCursor` 判断还有数据。
+上传素材、生成导出之后的回显按标识取回，不去翻列表：列表是分页的，新的那一条不保证在第一页。
+
+**出参时间一律带时区偏移**，如 `2026-09-15T14:00:00+08:00`（通则次要约定：时间一律 ISO-8601
+带时区字符串）。领域模型用挂钟时间 `LocalDateTime`（由库里的 `TIMESTAMPTZ` 经 `JdbcTimes` 转到 JVM 时区），
+默认序列化不带偏移、调用方只能猜时区；`JacksonConfiguration` 在出参边界补上 JVM 时区的偏移。
+只改序列化不改入参：请求里的时间都走查询参数 `@DateTimeFormat`，没有请求体字段是 `LocalDateTime`。
 
 **失败响应统一为** `{ code, message, retryable, field? }`（X-1）。三个必备字段不可缺省：
 `retryable` 是被调方自己的答复，调用方照读即可，不要按状态码另行推断；`field` 仅字段级
@@ -436,28 +450,21 @@ Compose 中 `api` 只提交工作流，`worker` 注册四个队列并执行 Acti
 
 | 方法 | 路径 | 作用 |
 | --- | --- | --- |
-| `GET` | `/api/auth/me` | 返回当前用户 |
+| `GET` | `/api/auth/me` | 返回当前用户（平台身份），同层附控制台资料页地址 `consoleProfileUrl` |
 | `GET` | `/api/auth/oidc/login` | 发起平台登录，`302` 跳 IdP；`returnTo` 已白名单化 |
 | `GET` | `/api/auth/oidc/callback` | IdP 回调，种下不透明会话 cookie 并 `302` 回站内 |
-| `POST` | `/api/auth/oidc/backchannel-logout` | 平台反向登出通知；验签后撤销该 subject 的全部会话 |
-| `POST` | `/api/auth/logout` | **唯一的登出入口**，撤销当前平台会话并清 cookie，返回 `204` |
+| `POST` | `/api/auth/oidc/backchannel-logout` | 平台反向登出通知；验签后撤销该 subject 的全部会话。**目前收不到**：通则 2026-09-15 修订写明运营台登记不了后台登出（`slo_participation=none`），需要时找平台运维补登记 |
+| `POST` | `/api/auth/logout` | **唯一的登出入口**，撤销当前平台会话并清 cookie，返回 `{ logoutUrl }`：平台登出端点 + `client_id` + `post_logout_redirect_uri`，前端顶层导航过去结束账户中心会话；替身、配置不全或身份服务不可达时为 `null`，退回 `/login` |
 | `GET` | `/api/status` | 平台接入自证：四条通道的真实状态；只报状态不报值 |
-| `POST` | `/api/account/avatar` | 上传、处理并替换当前用户头像 |
-| `GET` | `/api/account/avatar` | 鉴权读取当前用户头像 |
-| `PATCH` | `/api/account/profile` | 修改显示名称 |
-| `GET/POST` | `/api/admin/users` | 按 `limit` 钳制的筛选（裸数组）/ 创建用户 |
-| `GET/PATCH` | `/api/admin/users/{userId}` | 查询 / 乐观锁部分更新 |
-| `POST` | `/api/admin/users/{userId}/deactivate` | 停用账号，幂等 |
-| `POST` | `/api/admin/users/{userId}/activate` | 启用账号，幂等 |
 | `GET` | `/api/admin/audit-logs` | 按关键字、动作、结果和时间查询审计，键集游标翻页 |
 
 ### 7.2 素材与标书
 
 | 方法 | 路径 | 作用 |
 | --- | --- | --- |
-| `GET/POST` | `/api/bid-assets` | 筛选个人素材 / 上传并异步解析素材 |
+| `GET/POST` | `/api/bid-assets` | 筛选个人素材（`category`、`keyword`，游标分页）/ 上传并异步解析素材 |
 | `DELETE` | `/api/bid-assets/{assetId}` | 删除当前用户素材 |
-| `GET/POST` | `/api/bids` | 查询我的标书 / 创建标书 |
+| `GET/POST` | `/api/bids` | 查询我的标书（游标分页，最近更新在前）/ 创建标书 |
 | `GET` | `/api/bids/{bidId}` | 完整工作区聚合 |
 | `GET` | `/api/bids/{bidId}/metadata` | 轻量阶段与状态元数据 |
 | `GET` | `/api/bids/{bidId}/outline` | 目录与章节摘要视图 |
@@ -502,7 +509,11 @@ Strict 会让浏览器不带上刚种下的 cookie，表现为「登录成功后
 任何知道 `admin` 口令的人都能绕过平台身份，C2 权益与 C3 计量随之失效，界面上毫无异样。
 鉴权过滤器**不读** `Authorization` 头，库里残留的 `user_session` 行因此全部失效。
 `LocalPasswordChannelRetiredIntegrationTest` 用库里真实有效的旧凭据守着它回不来。
-`app_user` 表、用户管理页与账户页的改名/头像暂留，整体退役另行进行。
+本地账号管理（`/api/admin/users*`）与资料编辑（`/api/account/*`）同日随后退役：它们按
+`app_user.id` 找人，对平台用户一律 404，而管理的账号已经无法登录。显示名与头像归平台 IdP，
+账户页只读展示，并链到控制台资料页（地址由 `CONSOLE_BASE_URL` 单点拼出，经 `/api/auth/me` 下发）。
+头像是 IdP 的绝对地址，直接渲染，不走本站的受保护读取。`app_user` / `user_session` 表保留
+（DDL 不动）、代码不再读写。`LocalAccountSurfacesRetiredIntegrationTest` 守着这组入口不回来。
 
 **是否已登录由服务端裁定**，不由 localStorage 里有没有字符串裁定：RP 会话装在
 HttpOnly cookie 里，浏览器读不到它。
@@ -740,23 +751,37 @@ Java `BidDocumentExporter` 的本地实现用于文档服务关闭时的开发/�
 与真实值冲突，而且肉眼可辨「这一行还没接上平台身份」。**不留空**是有意的：可空的租户键会让
 一次忘记加过滤的查询静默返回全部行，而那个响应看起来完全正常。
 
-**当前读过滤仍按 `owner_id`**，写入已按租户列落库。今天两者一一对应（`local:<ownerId>`），
-所以两个过滤等价；接通 OIDC 后同一个人可属于多个工作空间，那一刻**必须**把
-`bid_document` / `bid_reference_asset` 的读过滤切到 `workspace_id`。
-切换点由 `TenantScope.isLocal()` 标记：库里还带 `local:` 前缀的行就是尚未迁移的那些。
+**读过滤 = `owner_id` + `workspace_id`**（2026-09-15 切换；写入早已按租户列落库）。平台身份下
+同一个人可属于多个工作空间，只按 `owner_id` 过滤会让 A 空间的标书与素材出现在 B 空间里，
+而那个响应看起来完全正常。请求路径一律经 `BidRepository` 的 `findBid` / `listBids` /
+`findAsset` / `listAssets` / `removeAsset` / `replaceAssetSelections` 带上当前会话的
+`TenantScope`：别的空间里的标书与别人的标书同样答 403，素材删除答 404、选择答 400。
+**后台任务**（Temporal 活动）走 `findBidForTask`：bidId 来自一个已在请求路径上通过校验的任务，
+而租户轴以取回的标书行为准。`TenantIsolationIntegrationTest` 守着这件事。
+
+**成员之间互不可见（owner 2026-09-15 定）**：可见范围是「本人 × 当前空间」，同一工作空间的
+其他成员看不到彼此的标书与素材。这是定下来的产品决策，不是待补的缺口——不要以「多租户就该
+空间内共享」为由放开；`TenantIsolationIntegrationTest` 里「同空间另一个人不可见」那条用例守着它，
+要放开得先改这条决策。库里带 `local:` 前缀的历史行归属本地账号，平台用户按 `owner_id` 本来就看不到。
 
 ### 10.1 账户与审计
 
 | 表 | 作用 |
 | --- | --- |
-| `app_user`、`app_role`、`app_user_role` | 用户、角色和启停状态 |
-| `auth_session` | 哈希会话 Token、过期和注销时间 |
+| `app_user`、`user_session` | **已退役**的本地账号与会话（2026-09-15）。表保留、DDL 不动，代码不再读写；审计列表为历史行解析操作者名时 LEFT JOIN `app_user` |
 | `audit_log` | 按 X-3 最小字段集：`event_id`、`occurred_at`、`actor_id`、`actor_console`、`object_type`、`object_id`、`action`、`outcome`，另加 `task_id`、`org_id`、`workspace_id`、`trace_id`、`ip_address`、`detail_summary` |
 
 审计表**只追加**：`AuditRepository` 上不暴露 update / delete，更正只能是补偿事件。
 `actor_console` 对本产品界面发起的写填产品码 `tenderforge`，对后台通道（Temporal 活动）
 留空——通则明确 MUST NOT 硬编一个，编出来的控制台名会让审计员按控制台筛查时
 收到一批根本不是从那里发起的动作。
+
+**审计列表的关联必须显式 `::text`。** `actor_id` / `object_id` 是 `VARCHAR`（要装平台
+subject），`app_user.id` / `bid_document.id` 是 `UUID`；PostgreSQL 没有 `uuid = varchar`
+运算符，未加转换时这条查询连计划都生成不出来——迁到 PostgreSQL 起审计页对每个管理员
+都是 500，而唯一覆盖它的单测用的是替身仓储，看不见。2026-09-15 修正，转换放在 UUID 一侧
+（反过来会让非 UUID 的 subject 报错），由 `LocalAccountSurfacesRetiredIntegrationTest`
+以真实库守着。
 
 ### 10.2 工作区
 
@@ -796,9 +821,13 @@ Java `BidDocumentExporter` 的本地实现用于文档服务关闭时的开发/�
   `bid` 域 schema。外键统一在文件末尾 ALTER（引用关系有环，按依赖排序建表
   会在环上断掉）。
 * `97_service_role.sql` —— 最小权限角色与 `search_path`。
-* `98_column_locks.sql` —— 列级 UPDATE 白名单。19 张表有可写列，
-  20 张追加型表一律不给。
+* `98_column_locks.sql` —— 列级 UPDATE 白名单。17 张表有可写列，
+  22 张追加型表一律不给（数字以 `check_column_locks.py` 的输出为准）。
 * `incr/NNNN_*.sql` —— 结构增量，必须自己幂等（`apply.sh` 会整个重放）。
+
+施加顺序是 **基线 → 增量 → 97 → 98**：权限排在结构之后，增量新加的表拿得到 97 的授权、新加的列
+让得了 98 的 GRANT。2026-09-15 之前增量排在 98 之后——第一个加可写列的增量（`0001` 的
+`metered_characters`）就会让活库上的 98 倒在「列不存在」上，而空库施加看不出来。
 
 2026-09-10 之前这里是 Flyway 的 30 个 `V*.sql`，与治理规范
 「常规部署链不跑 migration/seed」冲突。整改过程与暴露出的四个只有真引擎
@@ -809,19 +838,45 @@ Java `BidDocumentExporter` 的本地实现用于文档服务关闭时的开发/�
 `platform_usage_event`，主键就是幂等键——重放天然是无操作，并发同键插入撞主键，
 而撞主键正是「这条已经记过了」的正确答案。
 
-计量点两个，都在 `BidContentCommandService`：
+三个指标，挂在正文生成入口与两条导出路径上。**它们都是统计维度，不是配额计量**——配额与计费
+走 token 换算的 credits（推理经 Atlas 计量）；产品报的是 Atlas 看不见的业务量，回答「产出了多少」，
+不回答「还能用多少」。
 
-| 指标 | 触发点 | 幂等键 |
-| --- | --- | --- |
-| `tenderforge.bid.generations` | 正文生成任务**创建成功**之后 | 任务 id |
-| `tenderforge.document.exports` | 导出事务内、`insertExport` 之后 | export id |
+| 指标 | 触发点 | 用量 | 幂等键 |
+| --- | --- | --- | --- |
+| `tenderforge.bid.generations` | `BidContentCommandService`：正文生成任务**创建成功**之后 | 1 | 任务 id |
+| `tenderforge.document.exports` | 两条导出路径（同步导出、正式排版 `BidLayoutProcessor`）写成 export 行之后 | 1 | export id |
+| `tenderforge.document.characters` | 同上，全文字数**超过高水位**时 | 超出高水位的字数 | 标书 id + 新水位 |
 
-两处的键都取被计量那个东西自己的标识，不是随机 UUID。差别在重试上：
+两条导出路径共用 `ExportUsageMeter`，不各写一遍。**正式排版这条此前一次都没计**——只有同步兼容导出在记，
+于是正式排版产出的成果文档全部不在账上，2026-09-15 补上。
+
+**字数按高水位计。** 目标是「最终交付的标书有多少字」（如 40 万字），与 docx 字数基本对应、允许少量偏差，
+不追踪中间反复修改的细节。口径 = 各章标题 + 正文的可见字符（去标签、去空白，与界面「全文正文共 N 字」
+同一套剥离规则）；封面、目录与没有落到章节上的上级标题不计，是与 Word 字数之间可接受的偏差来源。
+
+每次导出算出全文字数 N，与 `bid_document.metered_characters`（已报高水位 H，`incr/0001`）比：
+N > H 才报 N − H 并把 H 抬到 N，否则不报。于是一份标书累计报出的字数 = 它导出过的最大全文字数——
+反复导出不虚增，改短不回退，改长只补差额。
+
+* **行锁。** 抬水位先 `SELECT … FOR UPDATE` 再判再写。不锁时两次并发导出都读到旧水位，重叠的部分被记两遍，
+  而两笔的幂等键不同，谁也拦不住。`ExportCharacterMeteringIntegrationTest` 用真实行锁复现这个交错。
+* **与缓冲同一事务。** `ExportUsageMeter.record` 是 `@Transactional`：同步导出里并入导出事务；正式排版没有
+  外层事务，它自己开一个。分开提交的话，缓冲写失败时水位已经抬过去，那段字数再也不会被报。
+* **幂等键** = 指标名 + 标书 id + 新水位。水位只增不减，同一个值不会被抬到第二次。
+* **不动 `revision`。** 那是界面的乐观锁版本，计量不是用户可见的修改。
+
+键都取被计量那个东西自己的标识，不是随机 UUID。差别在重试上：
 用户连点三次生成只会产生一个任务，账上也只有一笔；换成随机键，
 连点、前端重试、网关重放会各记一次，而它们在日志里长得和三次真实生成一模一样。
 
-导出那条写在**事务里**，和 export 行同生同死——回滚了就没有这笔账，不需要补偿逻辑。
+同步导出那条写在**事务里**，和 export 行同生同死——回滚了就没有这笔账，不需要补偿逻辑。
 这是落库缓冲相对进程内缓冲的实际好处，不只是「重启不丢」。
+
+**冲洗成功时记下平台的事件 id**（`platform_event_id`，`incr/0002`，2026-09-15）。通则 C3 上行：
+consume 响应里的 `event_id`「存在你自己的请求记录旁可直接对账——重放时返回的是原始事件的 id」。
+此前只记 `flushed_at`，事件 id 随响应丢掉，两侧只能拿幂等键去模糊对。现在每行按键写入各自的事件 id；
+替身或未返回该字段的平台版本写空值，不编一个。
 
 **没有 token 指标，是刻意的。** 推理用量由 Atlas 作为唯一入口计量，产品再报一次
 等于同一次推理被记两遍。产品报的是自己的业务单元——那些东西 Atlas 看不见。
@@ -873,6 +928,7 @@ Java `BidDocumentExporter` 的本地实现用于文档服务关闭时的开发/�
 | 验签不过 | 401 | 签错了的请求重试也不会变对 |
 | 身体不是 JSON、缺投递标识或 workspace | 400 | 同上，且明确 `retryable: false` |
 | 已处理 / 重复 / 过期 / 发错产品 / 类型不认识 | 200 | 后四种都不是错误，是「至少一次」投递的正常产物 |
+| 通知类事件（`subscription_changed` / `grant.invalidated`） | 200 | 不带 seq，**在乱序判定之前分流**：按 0 去比会在任何开通过的空间上被判过期丢掉。前者驱逐权益缓存、下次读经 C2 重拉；后者本产品无对应缓存，记下投递即可 |
 | 我们自己没处理成 | 500 | 只有这一条是要平台重试的信号 |
 
 幂等靠投递标识**抢占**（主键冲突即重复），不是「先查后插」——后者在两个副本之间
@@ -891,6 +947,25 @@ Java `BidDocumentExporter` 的本地实现用于文档服务关闭时的开发/�
 **目前没有「开通时初始化业务空间」的动作**——本产品不预先创建任何东西，
 标书是用户按需建的。这个位置留着，接上去时要保证可重入。
 
+**启动时与定期对账：靠构造满足，不写对账任务**（2026-09-15）。通则 C3 下发：「不要把
+`tenant.provisioned` 当成唯一的建账触发——启动时与定期各对账一次当前应有的开通关系。
+这样任何一条投递丢失的代价都只是延迟。」本产品丢一条投递的代价**已经**只是延迟，靠的是三件事同时成立：
+
+1. 开通表没有人读状态——只读 `last_seq` 丢弃乱序事件；
+2. 开通时不做业务动作（上一段）；
+3. 门控只经 C2，缓存按平台给的 `max-age=45`。
+
+一条 `tenant.provisioned` 丢了，用户最多 45 秒后经 C2 看到权益。这时写一个「启动时与定期经 C2
+重拉」的任务没有东西可对：拿 C2 刷一张没人读的表，是造第二份真相，而且是没有 seq、会和 webhook
+互相覆盖的真相。
+
+**这个构造一旦被打破，对账就成了必须**，而打破它的改动都很自然：门控里加一句「开通记录是
+provisioned 才放行」、开通时顺手建默认空间、把权益缓存拉长省请求。它们都不会让测试变红。
+`scripts/guardrails/check_provisioning_record_only.py` 在 CI 里逐条钉住这三件事；要打破其中
+一条，先实现对账，再把守卫里的 `RECONCILER` 指向它。「列出本产品应有开通关系」的平台接口目前
+不存在，已回平台提 [vxture-platform#342](https://github.com/vxture-platform/vxture-platform/issues/342)，
+不在本仓自造替代。
+
 ## 11. 安全、隔离与审计
 
 - 身份只来自平台 IdP（§7.2b）。会话是服务端 `rp_session`，浏览器只持不透明 HttpOnly
@@ -907,8 +982,8 @@ Java `BidDocumentExporter` 的本地实现用于文档服务关闭时的开发/�
   consume「记账不裁决」（通则 C3），依据应是 consume 的 `gated` 回执。拒绝时前端渲染订阅引导，
   深链取自 `GET /api/entitlement`，只在点击时打开。`check_entitlement_gates.py` 守着「每个命令方法
   先判定」，`EntitlementEnforcementIntegrationTest` 对每个端点真发请求。
-- `/api/admin/**` 强制 `ADMIN`；具体用例仍检查角色。标书与素材仓储查询必须同时带
-  `owner_id`，越权统一返回 403/404 语义，不泄露对象键。
+- `/api/admin/**` 强制 `ADMIN`；具体用例仍检查角色。标书与素材的请求路径查询必须同时带
+  `owner_id` 与 `workspace_id`（§10.0），越权统一返回 403/404 语义，不泄露对象键。
 - Java 与 Python 使用常量时间比较内部 Token；模型 API Key 只从 `AI_MODEL_API_KEY` 环境变量读取。
 - `/health` 只表示进程存活，`/ready` 还会确认 `AI_MODEL_API_KEY` 非空；API 和 Worker 仅依赖
   ready 的 AI 容器启动。Key 缺失时不会向外部模型发起请求。
@@ -1063,7 +1138,7 @@ Spring 的 `RestClient` 把读超时包成普通的 `RestClientException`，
 
 库 `vx_tenderforge_db`、角色 `tenderforge_svc`（ADR-007），最小权限
 （SELECT/INSERT/DELETE，无 DDL，无整表 UPDATE）+ 列级 UPDATE 白名单
-（`98_column_locks.sql`，19 张表 158 个可写列，20 张追加型表一律不给）。
+（`98_column_locks.sql`，2026-09-15 为 17 张表 151 个可写列，22 张追加型表一律不给）。
 
 ### ~~TD-003 · MySQL~~ —— 2026-09-10 已销号
 

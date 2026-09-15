@@ -71,8 +71,9 @@
 2026-09-10 之前本产品是 Flyway 在 api 启动时自动跑迁移，与治理规范
 「常规部署链不跑 migration/seed」冲突。现已改成规范要求的形态：
 
-* DDL 单一权威 = `deploy/database/ddl/`（`00_baseline` + `97_service_role`
-  + `98_column_locks` + `incr/`），手写、create-once
+* DDL 单一权威 = `deploy/database/ddl/`，手写、create-once，按
+  `00_baseline` → `incr/` → `97_service_role` → `98_column_locks` 的顺序施加
+  （权限排在结构之后，增量加的列才让得了 98 的 GRANT）
 * 施加通道 = `db-init.yml`（`confirm=yes` + `expected_sha` + 生产环境审批门）
 * **每次施加都是整份重放**，所以 DDL 必须能在活库上再跑一遍：外键包在
   `duplicate_object` 守卫里（`ADD CONSTRAINT` 没有 `IF NOT EXISTS`），由
@@ -103,6 +104,24 @@
 不写死，已正确则跳过，可单独执行 `bash deploy/deploy.sh owner`。
 护栏 `check_deploy_private_owner.py` 对着真实 Docker 验它，用两个 uid 的探针镜像
 拦住写死 uid 的实现。`data/postgres` 不需要：postgres 镜像的入口脚本自己修属主。
+
+### 2.5 主机上手工执行 compose 的镜像
+
+compose 里的镜像是 `${IMAGE_REGISTRY}/${IMAGE_NAMESPACE}/…:${IMAGE_TAG}`，三个变量只在
+CI 部署时导出，宿主机 `.env` 里没有。2026-09-15 为改一个环境变量在主机上手工
+`docker compose up -d api`，镜像被解析成 `ghcr.io/vxture/tenderforge-api:local`——
+拉取被拒、转去本地构建、因主机上没有源码而失败。更坏的结局是主机上恰好有个
+`:local` 镜像，服务被悄悄换掉。
+
+`deploy.sh` 在镜像拉取全部成功后、`compose up` 之前生成 `docker-compose.override.yml`
+（compose 自动合并），把 api / worker / ai / web 钉到本次部署的主源引用；回滚走同一个
+`start`，一并覆盖。它**不写 `.env`**（运维权威文件，部署从不覆盖）；deploy.yml 与
+rollback.yml 的 `rsync --delete` 排除它，倒在拉取阶段的部署不会删掉上一次的钉子。
+仓根 `.gitignore` 忽略它，本地开发仍走 `:local` 构建。
+
+护栏 `check_deploy_image_pins.py` 跑 `deploy.sh pin` 本身，对真实的
+`docker compose config` 断言：不导出 `IMAGE_*` 时四个服务解析到部署引用、重复生成是覆盖
+而非追加；并静态断言生成位于拉取检查之后、`compose up` 之前，两个 workflow 都排除它。
 
 ---
 
@@ -206,18 +225,19 @@ Insights → Dependency graph → Dependabot 手动跑一次 "Check for updates"
 - webhook 投递地址：`https://tenderforge.vxture.com/api/webhooks/vxture`
   （路径由通则统一规定，所有产品一致；平台侧登记这个值）
 
-  **这个地址的切换分三步，顺序不能换**（X-4）。平台侧当前登记的还是旧地址
-  `/provisioning/webhook`：
+  **这个地址的切换已按 X-4 三步做完**（2026-09-15）。本产品早期取过非标准的旧路径，
+  迁移经过：
 
-  1. 本产品新旧两路都能收，并发版 —— nginx 上留一条 `location = /provisioning/webhook`
-     把旧路径转到标准路径，两条路进同一个控制器；
-  2. 平台侧把登记地址改成 `/api/webhooks/vxture`；
-  3. 删掉那条 nginx 别名，并把 `check_webhook_path.py` 的 `LEGACY_INBOUND_PATH`
-     置成 `None` —— 守卫会立刻反过来要求别名必须消失。
+  1. 本产品新旧两路都能收，并发版 —— nginx 上曾留一条旧路径别名转到标准路径，
+     两条路进同一个控制器；
+  2. 平台侧登记在标准路径 —— 平台登记处 `assertStandardWebhookPath` 只给 vxtpl / yucer
+     留了旧路径豁免，本产品在平台上只可能登记在 `/api/webhooks/vxture`；
+  3. 删掉 nginx 别名，`check_webhook_path.py` 的 `LEGACY_INBOUND_PATH` 置为 `None` ——
+     守卫此后反过来要求旧路径不得回到 nginx。
 
-  **跳过第 1 步直接做第 2 步，或者只上新路径就发版，都会有一段投递落空的窗口，
-  而落空不报错**：未匹配的路径落到 SPA catch-all，平台拿回 index.html 和 HTTP 200，
-  投递被判为送达。第 3 步也不是可选的——留着两条路，下一个人无法从代码判断
+  **这个顺序不能换**：跳过第 1 步直接做第 2 步，或者只上新路径就发版，都会有一段投递
+  落空的窗口，而落空不报错——未匹配的路径落到 SPA catch-all，平台拿回 index.html 和
+  HTTP 200，投递被判为送达。第 3 步也不是可选的：留着两条路，下一个人无法从代码判断
   线上登记的是哪一个。
 - ~~需要授权的 Atlas endpoint~~ —— 2026-09-14 已授权四条通用路由
   `chat/deterministic` / `chat/fast` / `chat/default` / `chat/reasoning`，

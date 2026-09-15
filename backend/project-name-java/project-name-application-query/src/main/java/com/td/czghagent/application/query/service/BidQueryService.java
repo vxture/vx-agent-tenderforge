@@ -11,12 +11,12 @@ import com.td.czghagent.domain.model.BidSummary;
 import com.td.czghagent.domain.model.BidWorkspace;
 import com.td.czghagent.domain.model.BidWorkspaceViews;
 import com.td.czghagent.domain.model.CurrentUser;
+import com.td.czghagent.domain.model.CursorPage;
+import com.td.czghagent.domain.model.PageCursor;
 import com.td.czghagent.domain.model.StoredFile;
 import com.td.czghagent.domain.port.FileStorage;
 import com.td.czghagent.domain.repository.BidRepository;
 import org.springframework.stereotype.Service;
-
-import java.util.List;
 
 @Service
 public class BidQueryService {
@@ -29,8 +29,17 @@ public class BidQueryService {
         this.fileStorage = fileStorage;
     }
 
-    public List<BidSummary> list(CurrentUser user) {
-        return bidRepository.listBids(user.id());
+    /**
+     * 我的标书，游标分页（通则 A-3）。
+     *
+     * <p>一个人在一个工作空间里能建多少份标书，没有任何人写下过上限——所以不是裸数组。
+     * 排序保持「最近更新在前」，锚点取 {@code (updatedAt, id)}。
+     */
+    public CursorPage<BidSummary> list(CurrentUser user, Integer limit, String cursor) {
+        int size = CursorPage.clampLimit(limit);
+        return CursorPage.fromOverfetch(
+                bidRepository.listBids(user.id(), user.tenant(), PageCursor.decode(cursor), size + 1),
+                size, bid -> new PageCursor(bid.updatedAt(), bid.id()));
     }
 
     public BidWorkspace workspace(String bidId, CurrentUser user) {
@@ -57,13 +66,23 @@ public class BidQueryService {
                 new BusinessException("BID_CHAPTER_NOT_FOUND", "正文章节不存在", 404));
     }
 
-    public List<BidReferenceAsset> assets(String category, String keyword, CurrentUser user) {
-        return bidRepository.listAssets(user.id(), normalize(category), normalize(keyword));
+    /** 素材库，游标分页；分类与关键字是筛选条件，走查询参数（A-2）。 */
+    public CursorPage<BidReferenceAsset> assets(String category, String keyword, Integer limit,
+                                                String cursor, CurrentUser user) {
+        int size = CursorPage.clampLimit(limit);
+        return CursorPage.fromOverfetch(
+                bidRepository.listAssets(user.id(), user.tenant(), normalize(category),
+                        normalize(keyword), PageCursor.decode(cursor), size + 1),
+                size, asset -> new PageCursor(asset.updatedAt(), asset.id()));
     }
 
-    public List<BidExport> exports(String bidId, CurrentUser user) {
+    /** 一份标书的成果导出，游标分页，最近生成的在前——「下载最新」取 {@code limit=1} 的第一条。 */
+    public CursorPage<BidExport> exports(String bidId, Integer limit, String cursor, CurrentUser user) {
         requireBid(bidId, user);
-        return bidRepository.listExports(bidId);
+        int size = CursorPage.clampLimit(limit);
+        return CursorPage.fromOverfetch(
+                bidRepository.listExports(bidId, PageCursor.decode(cursor), size + 1),
+                size, export -> new PageCursor(export.createdAt(), export.id()));
     }
 
     /**
@@ -87,7 +106,7 @@ public class BidQueryService {
     }
 
     private BidDocument requireBid(String bidId, CurrentUser user) {
-        return bidRepository.findBid(bidId, user.id()).orElseThrow(() ->
+        return bidRepository.findBid(bidId, user.id(), user.tenant()).orElseThrow(() ->
                 bidRepository.existsBid(bidId)
                         ? new BusinessException("BID_ACCESS_DENIED", "无权访问该标书", 403)
                         : new BusinessException("BID_NOT_FOUND", "标书不存在", 404)

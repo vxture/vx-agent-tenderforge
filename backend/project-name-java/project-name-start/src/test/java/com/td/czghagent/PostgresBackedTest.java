@@ -92,7 +92,10 @@ public abstract class PostgresBackedTest {
     }
 
     /**
-     * 按 db-init 的顺序施加：三段基线 → incr/ 下的编号增量，然后给服务角色一个口令。
+     * 按 db-init 的顺序施加：基线 → incr/ 下的编号增量 → 97 角色 → 98 列锁，然后给服务角色一个口令。
+     *
+     * <p>权限排在结构之后。增量加的列只存在于增量里（基线是 create-once 的），
+     * 98 对它的 GRANT 必须在增量之后跑——这里的顺序与活库一致，排错了全部集成测试起不来。
      *
      * <p>以容器 superuser 施加——DDL 本来就该由拥有 DDL 权限的人跑，而
      * {@code tenderforge_svc} 恰恰没有这个权限（那正是 97 要保证的事）。
@@ -101,9 +104,9 @@ public abstract class PostgresBackedTest {
         try (Connection connection = DriverManager.getConnection(
                 POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
              Statement statement = connection.createStatement()) {
-            List<String> files = new ArrayList<>(
-                    List.of("00_baseline.sql", "97_service_role.sql", "98_column_locks.sql"));
+            List<String> files = new ArrayList<>(List.of("00_baseline.sql"));
             files.addAll(increments());
+            files.addAll(List.of("97_service_role.sql", "98_column_locks.sql"));
             for (String file : files) {
                 statement.execute(read(file));
             }

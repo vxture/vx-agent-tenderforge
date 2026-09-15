@@ -6,12 +6,14 @@ package com.td.czghagent.infrastructure.repository;
 import com.td.czghagent.domain.exception.BusinessException;
 import com.td.czghagent.domain.model.BidExport;
 import com.td.czghagent.domain.model.BidWorkspace;
+import com.td.czghagent.domain.model.PageCursor;
 import com.td.czghagent.domain.repository.BidRepository;
 import java.time.LocalDateTime;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.UUID;
 
 final class JdbcBidTaskExportPersistence {
@@ -295,10 +297,55 @@ final class JdbcBidTaskExportPersistence {
                 """, export.bidId());
     }
 
-    List<BidExport> listExports(String bidId) {
+    /**
+     * 先 {@code FOR UPDATE} 锁行，再判、再写。
+     *
+     * <p>不锁的话，两次并发导出会都读到旧水位：前一个抬到 100 报 100，后一个抬到 150
+     * 却按旧水位 0 报 150——重叠的 100 字被记了两遍，而两笔的幂等键不同，谁也拦不住。
+     * 锁住之后，后到的那个等前一个提交，读到的是 100，只报 50。
+     */
+    OptionalLong raiseMeteredCharacters(String bidId, long characters) {
+        Long previous = jdbcTemplate.queryForObject(
+                "SELECT metered_characters FROM bid_document WHERE id = ? FOR UPDATE",
+                Long.class, bidId);
+        if (previous == null || previous >= characters) {
+            return OptionalLong.empty();
+        }
+        jdbcTemplate.update(
+                "UPDATE bid_document SET metered_characters = ? WHERE id = ?", characters, bidId);
+        return OptionalLong.of(previous);
+    }
+
+    /**
+     * 工作台与元数据里内嵌的导出列表只带最近这么多份——写下来的上限（通则 A-3）。
+     * 完整历史走游标分页的 {@code GET /api/bids/{bidId}/exports}。
+     */
+    static final int WORKSPACE_EXPORT_LIMIT = 20;
+
+    /** 键集分页，{@code (created_at, id)} 降序；第一条就是最近生成的那份。 */
+    List<BidExport> listExports(String bidId, PageCursor after, int limit) {
+        if (after == null) {
+            return jdbcTemplate.query("""
+                    SELECT * FROM bid_export WHERE bid_id = ?
+                    ORDER BY created_at DESC, id DESC LIMIT ?
+                    """, BidJdbcMappers.EXPORT, bidId, limit);
+        }
         return jdbcTemplate.query("""
-                SELECT * FROM bid_export WHERE bid_id = ? ORDER BY version_no DESC
-                """, BidJdbcMappers.EXPORT, bidId);
+                SELECT * FROM bid_export WHERE bid_id = ?
+                  AND (created_at < ? OR (created_at = ? AND id < ?))
+                ORDER BY created_at DESC, id DESC LIMIT ?
+                """, BidJdbcMappers.EXPORT,
+                bidId, after.createdAt(), after.createdAt(), after.id(), limit);
+    }
+
+    List<BidExport> recentExports(String bidId) {
+        return listExports(bidId, null, WORKSPACE_EXPORT_LIMIT);
+    }
+
+    Optional<BidExport> findExportSummary(String bidId, String exportId) {
+        return jdbcTemplate.query("""
+                SELECT * FROM bid_export WHERE bid_id = ? AND id = ?
+                """, BidJdbcMappers.EXPORT, bidId, exportId).stream().findFirst();
     }
 
     Optional<BidRepository.ExportRecord> findExport(String bidId, String exportId) {

@@ -7,6 +7,7 @@ import com.td.czghagent.domain.model.UsageEvent;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 用量缓冲区。
@@ -38,8 +39,14 @@ public interface UsageBufferRepository {
      */
     List<BufferedUsage> claim(String claimToken, int limit, LocalDateTime now, LocalDateTime lease);
 
-    /** 标记为已冲洗。行不立刻删除——对账要看得见已经报过什么。 */
-    void markFlushed(List<String> idempotencyKeys, LocalDateTime flushedAt);
+    /**
+     * 标记为已冲洗，并记下平台给这一行的用量事件 id。行不立刻删除——对账要看得见已经报过什么。
+     *
+     * @param platformEventIds 幂等键 → 平台 consume 返回的 {@code event_id}（可为 null：替身或
+     *                         未返回该字段的平台版本）。重放时平台返回的是<strong>原始事件</strong>的 id，
+     *                         这正是两侧能逐条对上的原因（通则 C3 上行）
+     */
+    void markFlushed(Map<String, String> platformEventIds, LocalDateTime flushedAt);
 
     /**
      * 归还认领并记下失败原因。

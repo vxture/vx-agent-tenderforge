@@ -36,16 +36,22 @@ const jsonResponse = (status: number, body: unknown) =>
     headers: { 'content-type': 'application/json' },
   })
 
-describe('apiRequest', () => {
+/**
+ * 在所在的 describe 里为每条用例铺好 fetch 与 window 替身，结束后撤掉。
+ *
+ * 401 分支会清 localStorage 并改写 location，所以需要 window 存在。这里给最小替身
+ * 而不是引 jsdom：这些是纯解包逻辑的用例，为它们背一整个 DOM 实现只会让套件变慢，
+ * 而且会把「这段代码依赖浏览器全局」这个事实藏起来。
+ *
+ * `storedToken` 是 localStorage 里残留的值——各组要的不同：解包组不关心（null），
+ * 零 token 组故意放一个残留值，否则「不发 Authorization」对着空 storage 永远成立。
+ */
+function stubBrowser(storedToken: string | null, pathname: string) {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn())
-    // 401 分支会清 localStorage 并改写 location，所以需要 window 存在。
-    // 这里给一个最小替身而不是引 jsdom：
-    // 这几条是纯解包逻辑的用例，为它们背一整个 DOM 实现只会让套件变慢，
-    // 而且会把「这段代码依赖浏览器全局」这个事实藏起来。
     vi.stubGlobal('window', {
-      localStorage: { getItem: () => null, removeItem: () => undefined },
-      location: { pathname: '/', search: '', href: '' },
+      localStorage: { getItem: () => storedToken, removeItem: () => undefined },
+      location: { pathname, search: '', href: '' },
     })
   })
 
@@ -53,6 +59,10 @@ describe('apiRequest', () => {
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
   })
+}
+
+describe('apiRequest', () => {
+  stubBrowser(null, '/')
 
   it('成功响应直接是载荷，没有外层信封', async () => {
     vi.mocked(fetch).mockResolvedValue(jsonResponse(200, { id: 'bid-1', title: '标书' }))
@@ -129,18 +139,7 @@ describe('apiRequest', () => {
 })
 
 describe('401 的两种处置', () => {
-  beforeEach(() => {
-    vi.stubGlobal('fetch', vi.fn())
-    vi.stubGlobal('window', {
-      localStorage: { getItem: () => 'stale-token', removeItem: () => undefined },
-      location: { pathname: '/planner/bids', search: '', href: '' },
-    })
-  })
-
-  afterEach(() => {
-    vi.unstubAllGlobals()
-    vi.restoreAllMocks()
-  })
+  stubBrowser('stale-token', '/planner/bids')
 
   /**
    * 默认：401 视为会话失效，跳登录页。
@@ -195,24 +194,13 @@ describe('拒绝码词表', () => {
  * 对着空 storage 断言「不发」，旧代码也会通过。
  */
 describe('浏览器零 token', () => {
-  beforeEach(() => {
-    vi.stubGlobal('fetch', vi.fn())
-    vi.stubGlobal('window', {
-      localStorage: { getItem: () => 'legacy-token', removeItem: () => undefined },
-      location: { pathname: '/planner/bids', search: '', href: '' },
-    })
-  })
-
-  afterEach(() => {
-    vi.unstubAllGlobals()
-    vi.restoreAllMocks()
-  })
+  stubBrowser('legacy-token', '/planner/bids')
 
   it('业务请求与受保护文件读取都不带 Authorization 头', async () => {
     vi.mocked(fetch).mockImplementation(async () => jsonResponse(200, {}))
 
     await apiRequest('/api/bids')
-    await fetchProtectedBlob('/api/account/avatar')
+    await fetchProtectedBlob('/api/bids/b-1/exports/e-1/download')
 
     const calls = vi.mocked(fetch).mock.calls
     expect(calls).toHaveLength(2)

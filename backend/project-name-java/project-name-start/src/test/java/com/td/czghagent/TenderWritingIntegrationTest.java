@@ -267,16 +267,20 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
         String other = signIn("tender-other");
         mockMvc.perform(get("/api/bids").cookie(session(owner)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(0));
+                .andExpect(jsonPath("$.items.length()").value(0))
+                .andExpect(jsonPath("$.nextCursor").isEmpty());
         JsonNode created = performJson(post("/api/bids"), owner, """
                 {"writingMethod":"SCORING_CRITERIA","title":"技术标投标文件",
                  "targetPages":60,"biddingMode":"BLIND"}
                 """);
         String bidId = created.path("bid").path("id").asText();
         assertThat(created.path("bid").path("workflowStep").asText()).isEqualTo("INTERPRETATION");
+        assertThat(created.path("bid").path("createdAt").asText())
+                .as("出参时间带时区偏移（通则：时间一律 ISO-8601 带时区）——这条断言证明 Jackson 配置真的接上了")
+                .matches(".*T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?([+-]\\d{2}:\\d{2}|Z)$");
         mockMvc.perform(get("/api/bids").cookie(session(owner)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(1));
+                .andExpect(jsonPath("$.items.length()").value(1));
 
         mockMvc.perform(get("/api/bids/{bidId}", bidId).cookie(session(other)))
                 .andExpect(status().isForbidden())
@@ -576,7 +580,7 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
         assertThat(laidOut.path("exports").get(0).path("version").asInt()).isEqualTo(2);
         JsonNode exports = responseData(mockMvc.perform(
                         get("/api/bids/{bidId}/exports", bidId).cookie(session(owner)))
-                .andExpect(status().isOk()).andReturn());
+                .andExpect(status().isOk()).andReturn()).path("items");
         assertThat(exports).isNotEmpty();
         String exportId = exports.get(exports.size() - 1).path("id").asText();
         byte[] docx = mockMvc.perform(
@@ -636,11 +640,6 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
                 """, String.class, bidId);
         assertThat(archivedChapters).contains(existingChapterId, existingContent);
 
-        // 此处原本顺带验证 PATCH /api/account/profile。它按 app_user.id 找人，而平台用户
-        // 不在 app_user 里——对真实用户它答 404 USER_NOT_FOUND。这条断言过去是绿的，
-        // 只因为测试用本地口令账号登录，恰好掩盖了 C1 切换后账户页已经失效这件事。
-        // 那不是标书主流程的一部分，也不是本次退役引入的；随 app_user 整体退役一并处理，
-        // 而不是在这里断言 404 把缺陷写成规格。
         List<String> auditedOperations = jdbcTemplate.queryForList(
                 "SELECT DISTINCT operation_type FROM bid_ai_run WHERE bid_id = ? AND status = 'SUCCEEDED'",
                 String.class, bidId);

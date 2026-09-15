@@ -181,9 +181,19 @@ final class BidContentQualityGuard {
     }
 
     static int visibleCharacterCount(String html) {
+        return visibleText(html).length();
+    }
+
+    /**
+     * 去掉标签、空白实体与空白之后的可见文本。
+     *
+     * <p>字数与「这一章改没改过」（导出计量的去重键）都以它为准——两处各算一套，
+     * 迟早会出现「字数没变却被当成修改」或反过来。
+     */
+    static String visibleText(String html) {
         String withoutEntities = SPACE_ENTITY_PATTERN.matcher(safe(html)).replaceAll(" ");
         return TAG_PATTERN.matcher(withoutEntities).replaceAll("")
-                .replaceAll("\\s+", "").length();
+                .replaceAll("\\s+", "");
     }
 
     static String reviewInstruction(List<BidProductionState.ReviewIssue> issues) {

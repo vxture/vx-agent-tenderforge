@@ -23,8 +23,7 @@ GRANT UPDATE (deprovisioned_at, last_seq, provisioned_at, state, updated_at)
 
 -- --- local_authz ---
 REVOKE UPDATE ON local_authz.app_user FROM tenderforge_svc;
-GRANT UPDATE (avatar_revision, avatar_url, display_name, enabled, password_hash, revision, role_code, updated_at)
-  ON local_authz.app_user TO tenderforge_svc;
+-- app_user: 本地账号管理与资料编辑 2026-09-15 退役，代码里没有任何 UPDATE —— 不给 UPDATE。
 REVOKE UPDATE ON local_authz.oidc_authorization_request FROM tenderforge_svc;
 -- oidc_authorization_request: 代码里没有任何 UPDATE —— 追加型，不给 UPDATE。
 REVOKE UPDATE ON local_authz.rp_session FROM tenderforge_svc;
@@ -35,15 +34,17 @@ REVOKE UPDATE ON local_authz.user_session FROM tenderforge_svc;
 
 -- --- local_usage ---
 REVOKE UPDATE ON local_usage.platform_usage_event FROM tenderforge_svc;
-GRANT UPDATE (attempts, claim_token, claimed_at, flushed_at, last_error)
+GRANT UPDATE (attempts, claim_token, claimed_at, flushed_at, last_error, platform_event_id)
   ON local_usage.platform_usage_event TO tenderforge_svc;
+-- platform_event_id 由 incr/0002 加上：本文件排在增量之后施加，活库上这条 GRANT 才找得到列。
 
 -- --- bid ---
 REVOKE UPDATE ON bid.audit_log FROM tenderforge_svc;
 -- audit_log: 代码里没有任何 UPDATE —— 追加型，不给 UPDATE。
 REVOKE UPDATE ON bid.bid_document FROM tenderforge_svc;
-GRANT UPDATE (bidding_mode, content_hash, content_stale, content_status, content_version, error_message, interpretation_hash, interpretation_status, interpretation_version, outline_hash, outline_status, outline_version, revision, stale_reason, status, target_pages, title, updated_at, workflow_step)
+GRANT UPDATE (bidding_mode, content_hash, content_stale, content_status, content_version, error_message, interpretation_hash, interpretation_status, interpretation_version, metered_characters, outline_hash, outline_status, outline_version, revision, stale_reason, status, target_pages, title, updated_at, workflow_step)
   ON bid.bid_document TO tenderforge_svc;
+-- metered_characters 由 incr/0001 加上：本文件排在增量之后施加，活库上这条 GRANT 才找得到列。
 REVOKE UPDATE ON bid.bid_generation_task FROM tenderforge_svc;
 -- retry_count 一度漏在这里：那条 UPDATE 的 SET 子句里有个带自己 WHERE 的
 -- 子查询（completed_units = (SELECT ... WHERE ...)），静态提取停在了那个

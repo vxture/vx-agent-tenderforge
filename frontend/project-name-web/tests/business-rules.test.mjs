@@ -18,7 +18,7 @@ const sourceFiles = (directory) =>
 
 test('planner navigation contains exactly the four TenderAgent modules', () => {
   const menu = source('src/layouts/menuConfig.ts')
-  for (const label of ['标书写作', '素材管理', '我的标书', '用户管理']) {
+  for (const label of ['标书写作', '素材管理', '我的标书', '个人资料']) {
     assert.match(menu, new RegExp(`title: '${label}'`))
   }
   assert.equal((menu.match(/path: '\/planner\//g) ?? []).length, 4)
@@ -368,19 +368,41 @@ test('tender API covers setup, parsing, outline, content, export and assets', ()
 })
 
 /**
- * 本地口令通道 2026-09-15 退役：身份只来自平台 IdP，前端既不能登录也不能改口令。
- * 反过来断言而不是删掉这条——把口令入口加回 API 模块，这里会先红。
+ * 账号与资料归平台 IdP（2026-09-15）：本地口令、本地资料编辑与本地用户管理全部退役，
+ * 账户页只读展示平台身份。反过来断言而不是删掉这条——把任何一个本地入口加回来，这里先红。
  */
-test('account management is limited to the current profile and avatar, with no password channel', () => {
-  const accountApi = source('src/api/modules/auth.ts')
-  assert.match(accountApi, /\/api\/account\/profile/)
-  assert.match(accountApi, /\/api\/account\/avatar/)
-  assert.doesNotMatch(accountApi, /\/api\/account\/password/)
-  assert.doesNotMatch(accountApi, /\/api\/auth\/login['"]/)
-  assert.doesNotMatch(accountApi, /\/api\/admin\/users/)
+test('account surfaces show the platform identity read-only, with no local account channel', () => {
+  // 路径断言对准代码里的字符串字面量（引号开头），不对准注释：
+  // 模块注释里写着「/api/admin/users* 已退役」，对原文匹配会把一句说明当成回退。
+  const authModule = source('src/api/modules/auth.ts')
+  assert.doesNotMatch(authModule, /['"`]\/api\/account\//)
+  assert.doesNotMatch(authModule, /\/api\/auth\/login['"]/)
+  assert.doesNotMatch(authModule, /accountApi/)
 
-  const page = source('src/pages/PlannerAccount/index.tsx')
-  assert.match(page, /features\/account\/AccountPage/)
+  const adminModule = source('src/api/modules/admin.ts')
+  assert.doesNotMatch(adminModule, /['"`]\/api\/admin\/users/)
+  assert.match(adminModule, /\/api\/admin\/audit-logs/)
+
+  // 头像断言绑定到真正渲染图片的那个属性上，不只看名字出没出现：
+  // 只 import 了 platformAvatarSrc、属性里却直接塞 avatarUrl，名字匹配照样会过。
+  const page = source('src/features/account/AccountPage.tsx')
+  assert.match(page, /href=\{profileUrl\}/)
+  assert.match(page, /consoleProfileUrl/)
+  assert.match(page, /src=\{platformAvatarSrc\(user\?\.avatarUrl\)\}/)
+  assert.doesNotMatch(page, /useMutation|<form|type="file"|useProtectedImageUrl/)
+
+  const header = source('src/layouts/Header.tsx')
+  for (const path of [
+    'src/router/index.tsx',
+    'src/layouts/menuConfig.ts',
+    'src/layouts/Header.tsx',
+    'src/pages/PortalRedirect/index.tsx',
+  ]) {
+    assert.doesNotMatch(source(path), /console\/users|AdminUsers|UsersPage/, path)
+  }
+  assert.doesNotMatch(header, /useProtectedImageUrl/)
+  assert.match(header, /avatarSrc: platformAvatarSrc\(user\?\.avatarUrl\)/)
+  assert.match(source('src/pages/PlannerAccount/index.tsx'), /features\/account\/AccountPage/)
 })
 
 test('TenderAgent branding uses Funnel Display', () => {
@@ -456,33 +478,32 @@ test('audit log translates every current business audit action', () => {
 
 test('session recovery and standard lists use public design-system patterns', () => {
   const guard = source('src/router/AuthGuard.tsx')
-  const users = source('src/features/admin/UsersPage.tsx')
   const audit = source('src/features/admin/AuditLogsPage.tsx')
   const bids = source('src/features/tender/BidsPage.tsx')
   const assets = source('src/features/tender/TenderAssetsPage.tsx')
 
   assert.match(guard, /<ShellBootScreen/)
-  for (const page of [users, audit, bids, assets]) {
+  for (const page of [audit, bids, assets]) {
     assert.match(page, /<ListPageTemplate/)
     assert.match(page, /<DataTable/)
     assert.doesNotMatch(page, /<Table(?:\s|>)/)
   }
 
-  // 分页控件按数据来源分两类，不是一条统一规则。
-  // 标书与素材是服务端一次返回的裸数组，页码翻在浏览器里，用 DS 的 Pagination；
-  // 审计是服务端键集游标（通则 A-3），它没有总数也没有页码，
+  // 分页控件按数据来源分两类，不是一条统一规则：
+  // 服务端一次返回的裸数组，页码翻在浏览器里，用 DS 的 Pagination；
+  // 服务端键集游标（通则 A-3）没有总数也没有页码，
   // 套一个需要 pageCount 的控件只能靠编造那两个数字——那正是这里要挡住的。
-  for (const page of [bids, assets]) {
-    assert.match(page, /<Pagination/)
+  //
+  // 2026-09-15 起标书与素材也改为游标分页：此前它们是裸数组 + 浏览器内翻页，
+  // 但没有任何人写下过它们的上限（A-3），于是与审计归到同一类。
+  // 分类跟着数据来源走，判据没变。
+  for (const page of [audit, bids, assets]) {
+    assert.doesNotMatch(page, /<Pagination/)
+    assert.match(page, /nextCursor/)
   }
-  assert.doesNotMatch(audit, /<Pagination/)
-  assert.match(audit, /nextCursor/)
-  // 账号是有界管理面对象，一次取完，不该出现任何服务端翻页痕迹。
-  assert.doesNotMatch(users, /<Pagination/)
-  for (const page of [users, bids, assets]) {
+  for (const page of [bids, assets]) {
     assert.match(page, /<ActionMenu/)
   }
-  assert.doesNotMatch(users, /AdminPagination|SectionShell/)
   assert.doesNotMatch(audit, /AdminPagination|SectionShell/)
 })
 

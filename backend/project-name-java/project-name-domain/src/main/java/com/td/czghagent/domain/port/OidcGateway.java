@@ -41,6 +41,19 @@ public interface OidcGateway {
      */
     String subjectOfLogoutToken(String logoutToken);
 
+    /**
+     * 平台登出端点的地址（RP-Initiated Logout 1.0），带 {@code client_id} 与
+     * {@code post_logout_redirect_uri}；无从构造时返回 {@code null}。
+     *
+     * <p>只删本地会话不算登出：账户中心的会话还在，再点登录会被静默 SSO 直接送回来，
+     * 换不了账号，登记的登出回跳地址也永远用不上。平台会话 cookie 是 SameSite=Lax，
+     * 只有<strong>顶层导航</strong>带得上，所以这里只给地址，由浏览器自己跳过去。
+     *
+     * <p>不带 {@code id_token_hint}：平台按 {@code client_id} 登记的回跳白名单校验，
+     * 会话已过期时也认得出发起方——为一个可选参数把 id_token 存进会话表，不值。
+     */
+    String endSessionUrl();
+
     /** 会话时长。放在端口上是因为 mock 与平台可以给出不同的值。 */
     long sessionSeconds();
 

@@ -6,7 +6,6 @@ package com.td.czghagent.rest.security;
 import com.td.czghagent.PostgresBackedTest;
 import com.td.czghagent.domain.model.RpSession;
 import com.td.czghagent.domain.model.TenantScope;
-import com.td.czghagent.domain.port.PasswordHasher;
 import com.td.czghagent.domain.repository.RpSessionRepository;
 import com.td.czghagent.domain.service.SessionToken;
 import jakarta.servlet.http.Cookie;
@@ -48,14 +47,21 @@ class LocalPasswordChannelRetiredIntegrationTest extends PostgresBackedTest {
 
     private static final String PASSWORD = "Legacy@2026";
 
+    /**
+     * {@link #PASSWORD} 的 BCrypt 哈希（cost 12），写死。
+     *
+     * <p>本仓已没有口令哈希器——口令通道整体退役了。但「口令正确也进不来」仍然要求库里是一个
+     * 与口令真正匹配的哈希：随便填一个字符串，一个把登录加回来的实现同样会拒绝它，
+     * 这条断言就测不到东西了。
+     */
+    private static final String PASSWORD_HASH =
+            "$2y$12$jLa7o1etkk6MEWXQDIDw/.Fwt2sZ8mJcqwx3gu6HQwR5heQazXKwy";
+
     @Autowired
     private MockMvc mockMvc;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
-
-    @Autowired
-    private PasswordHasher passwordHasher;
 
     @Autowired
     private RpSessionRepository rpSessions;
@@ -72,7 +78,7 @@ class LocalPasswordChannelRetiredIntegrationTest extends PostgresBackedTest {
         jdbcTemplate.update("""
                 INSERT INTO app_user(id, username, password_hash, display_name, role_code, enabled)
                 VALUES (?, ?, ?, ?, 'ADMIN', TRUE)
-                """, userId, username, passwordHasher.hash(PASSWORD), "遗留管理员");
+                """, userId, username, PASSWORD_HASH, "遗留管理员");
         liveLegacyToken = SessionToken.generate();
         jdbcTemplate.update("""
                 INSERT INTO user_session(id, user_id, token_hash, expires_at)

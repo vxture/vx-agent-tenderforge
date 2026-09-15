@@ -25,17 +25,20 @@ public class BidLayoutProcessor {
     private final BidDocumentExporter exporter;
     private final FileStorage fileStorage;
     private final AuditRepository auditRepository;
+    private final ExportUsageMeter exportUsageMeter;
 
-    public BidLayoutProcessor(BidRepository bidRepository,
-                              BidProductionRepository productionRepository,
-                              BidDocumentExporter exporter,
-                              FileStorage fileStorage,
-                              AuditRepository auditRepository) {
+    BidLayoutProcessor(BidRepository bidRepository,
+                       BidProductionRepository productionRepository,
+                       BidDocumentExporter exporter,
+                       FileStorage fileStorage,
+                       AuditRepository auditRepository,
+                       ExportUsageMeter exportUsageMeter) {
         this.bidRepository = bidRepository;
         this.productionRepository = productionRepository;
         this.exporter = exporter;
         this.fileStorage = fileStorage;
         this.auditRepository = auditRepository;
+        this.exportUsageMeter = exportUsageMeter;
     }
 
     public void process(String layoutJobId, String bidId, String ownerId) {
@@ -75,6 +78,9 @@ public class BidLayoutProcessor {
             productionRepository.completeLayoutJob(
                     layoutJobId, bidId, rendered.actualPages(),
                     rendered.qaStatus(), rendered.qaSummary());
+            // 正式排版是生产主路径的导出。此前这里一次都没计——只有同步兼容导出那条在记，
+            // 于是正式排版产出的每一份成果文档都不在账上。计在导出行与任务完成都写成之后。
+            exportUsageMeter.record(bid, workspace.chapters(), exportId, ownerId);
         } catch (RuntimeException exception) {
             fileStorage.delete(stored.objectKey());
             throw exception;
@@ -103,7 +109,7 @@ public class BidLayoutProcessor {
     }
 
     private BidDocument requireBid(String bidId, String ownerId) {
-        return bidRepository.findBid(bidId, ownerId).orElseThrow(() ->
+        return bidRepository.findBidForTask(bidId, ownerId).orElseThrow(() ->
                 new BusinessException("BID_NOT_FOUND", "排版任务对应标书不存在", 404));
     }
 

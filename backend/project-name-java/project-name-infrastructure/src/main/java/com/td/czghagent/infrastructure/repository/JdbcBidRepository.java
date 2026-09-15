@@ -1,5 +1,6 @@
 package com.td.czghagent.infrastructure.repository;
 
+import com.td.czghagent.domain.model.TenantScope;
 import com.td.czghagent.domain.model.BidDocument;
 import com.td.czghagent.domain.model.BidExport;
 import com.td.czghagent.domain.model.BidReferenceAsset;
@@ -7,14 +8,17 @@ import com.td.czghagent.domain.model.BidReferenceChunk;
 import com.td.czghagent.domain.model.BidSummary;
 import com.td.czghagent.domain.model.BidWorkspace;
 import com.td.czghagent.domain.model.BidWorkspaceViews;
+import com.td.czghagent.domain.model.PageCursor;
 import com.td.czghagent.domain.repository.BidProductionRepository;
 import com.td.czghagent.domain.repository.BidRepository;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalLong;
 
 /** Domain-port adapter; focused collaborators own the SQL for each persistence concern. */
 @Repository
@@ -40,13 +44,18 @@ public class JdbcBidRepository implements BidRepository {
     }
 
     @Override
-    public List<BidSummary> listBids(String ownerId) {
-        return reader.listBids(ownerId);
+    public List<BidSummary> listBids(String ownerId, TenantScope tenant, PageCursor after, int limit) {
+        return reader.listBids(ownerId, tenant, after, limit);
     }
 
     @Override
-    public Optional<BidDocument> findBid(String bidId, String ownerId) {
-        return reader.findBid(bidId, ownerId);
+    public Optional<BidDocument> findBid(String bidId, String ownerId, TenantScope tenant) {
+        return reader.findBid(bidId, ownerId, tenant);
+    }
+
+    @Override
+    public Optional<BidDocument> findBidForTask(String bidId, String ownerId) {
+        return reader.findBidForTask(bidId, ownerId);
     }
 
     @Override
@@ -54,12 +63,26 @@ public class JdbcBidRepository implements BidRepository {
         return reader.existsBid(bidId);
     }
 
+    /**
+     * 工作台读取在<strong>同一个快照</strong>里完成。
+     *
+     * <p>读取器分多条语句取目录、章节、任务、导出与生产状态。不包事务时每条语句各看
+     * 各的已提交数据：重新生成目录恰好在两条语句之间提交，一次响应里就会出现
+     * 「目录任务已完成」配「旧章节、旧页数」——写入侧是原子的，撕裂发生在读这一侧。
+     *
+     * <p>{@code REPEATABLE_READ} 不能省：PostgreSQL 默认的读已提交级别下，事务内每条语句
+     * 仍各取一个快照，单加事务注解等于没加。已处于读写事务中的调用方会加入外层事务、
+     * 沿用外层隔离级别——那些路径本就在自己的写事务里读，不在本修复范围内。
+     */
     @Override
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public BidWorkspace loadWorkspace(BidDocument bid) {
         return reader.loadWorkspace(bid);
     }
 
+    /** 与 {@link #loadWorkspace} 同理：任务、导出与生产状态分几条语句读，要在同一个快照里。 */
     @Override
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public BidWorkspaceViews.Metadata loadMetadata(BidDocument bid) {
         return reader.loadMetadata(bid);
     }
@@ -163,8 +186,9 @@ public class JdbcBidRepository implements BidRepository {
 
     @Override
     @Transactional
-    public void replaceAssetSelections(String bidId, String ownerId, List<String> assetIds) {
-        drafts.replaceAssetSelections(bidId, ownerId, assetIds);
+    public void replaceAssetSelections(String bidId, String ownerId, TenantScope tenant,
+                                       List<String> assetIds) {
+        drafts.replaceAssetSelections(bidId, ownerId, tenant, assetIds);
     }
 
     @Override
@@ -276,13 +300,19 @@ public class JdbcBidRepository implements BidRepository {
 
     @Override
     public List<BidReferenceAsset> listAssets(
-            String ownerId, String category, String keyword) {
-        return assets.listAssets(ownerId, category, keyword);
+            String ownerId, TenantScope tenant, String category, String keyword,
+            PageCursor after, int limit) {
+        return assets.listAssets(ownerId, tenant, category, keyword, after, limit);
     }
 
     @Override
-    public Optional<AssetRecord> findAsset(String assetId, String ownerId) {
-        return assets.findAsset(assetId, ownerId);
+    public Optional<BidReferenceAsset> findActiveAsset(String assetId, String ownerId, TenantScope tenant) {
+        return assets.findActiveAsset(assetId, ownerId, tenant);
+    }
+
+    @Override
+    public Optional<AssetRecord> findAsset(String assetId, String ownerId, TenantScope tenant) {
+        return assets.findAsset(assetId, ownerId, tenant);
     }
 
     @Override
@@ -302,8 +332,8 @@ public class JdbcBidRepository implements BidRepository {
     }
 
     @Override
-    public boolean removeAsset(String assetId, String ownerId) {
-        return assets.removeAsset(assetId, ownerId);
+    public boolean removeAsset(String assetId, String ownerId, TenantScope tenant) {
+        return assets.removeAsset(assetId, ownerId, tenant);
     }
 
     @Override
@@ -318,8 +348,19 @@ public class JdbcBidRepository implements BidRepository {
     }
 
     @Override
-    public List<BidExport> listExports(String bidId) {
-        return tasks.listExports(bidId);
+    @Transactional
+    public OptionalLong raiseMeteredCharacters(String bidId, long characters) {
+        return tasks.raiseMeteredCharacters(bidId, characters);
+    }
+
+    @Override
+    public List<BidExport> listExports(String bidId, PageCursor after, int limit) {
+        return tasks.listExports(bidId, after, limit);
+    }
+
+    @Override
+    public Optional<BidExport> findExportSummary(String bidId, String exportId) {
+        return tasks.findExportSummary(bidId, exportId);
     }
 
     @Override

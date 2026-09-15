@@ -228,12 +228,25 @@ jobs:
       - name: C2 entitlement gate guardrail (every command checks entitlement first)
         run: python scripts/guardrails/check_entitlement_gates.py
 
+      # IMAGE_* 只在 CI 部署时导出；主机上手工 docker compose 会解析成 :local（2026-09-15）。
+      # deploy.sh 把部署的镜像钉进 docker-compose.override.yml。护栏跑 deploy.sh 本身，
+      # 对真实的 compose config 断言不导出 IMAGE_* 时四个服务仍解析到部署引用。
+      - name: Deployed image pins guardrail (manual compose resolves deployed images)
+        run: python scripts/guardrails/check_deploy_image_pins.py
+
       # C3 回调路径由通则统一规定（所有产品 /api/webhooks/vxture），而本仓有六处
       # 独立写下它。错开的表现都不像「路径配错了」：漏了会话豁免名单是平台收到
       # 非 2xx 重试十次，漏了 nginx 转发是平台拿到 index.html 和 HTTP 200——
       # 投递被判为送达，开通与档位变更静默消失，两侧都不报错。
       - name: Webhook path guardrail (C3 下发 · 六处一致)
         run: python scripts/guardrails/check_webhook_path.py
+
+      # 通则 C3 下发：webhook 是提示，丢一条投递的代价只能是延迟。本产品靠构造满足——
+      # 开通表只读 last_seq、开通时不做业务动作、门控只经 C2 且缓存 ≤ 45 秒。
+      # 打破任何一条的改动都很自然、都不会让测试变红，只会让平台 10 次重投用尽后的
+      # 那条投递从延迟变成永久缺失。要打破，先写启动时与定期对账（平台接口见 #342）。
+      - name: Provisioning record-only guardrail (C3 下发 · 丢投递只是延迟)
+        run: python scripts/guardrails/check_provisioning_record_only.py
 
       - name: Python lint (ruff)
         working-directory: backend/project-name-python

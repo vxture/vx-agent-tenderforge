@@ -4,6 +4,7 @@
 package com.td.czghagent.domain.model;
 
 import java.util.List;
+import java.util.function.Function;
 
 /**
  * 无界流水的响应形状（产品接入通则 A-3 / A-4）。
@@ -31,6 +32,22 @@ public record CursorPage<T>(
 
     public static <T> CursorPage<T> of(List<T> items, String nextCursor) {
         return new CursorPage<>(List.copyOf(items), nextCursor);
+    }
+
+    /**
+     * 由「多取一条」的结果切出一页。
+     *
+     * <p>调用方按 {@code limit + 1} 取数：取回的行数不超过 {@code limit} 就是最后一页；
+     * 多出来的那条不返回，只证明「后面还有」，游标锚在本页最后一条上。
+     * 不用 {@code count(*)} 判断还有没有下一页：在无界表上它既昂贵，又会在两次请求之间
+     * 因为新写入而给出自相矛盾的答案。
+     */
+    public static <T> CursorPage<T> fromOverfetch(List<T> rows, int limit, Function<T, PageCursor> anchor) {
+        if (rows.size() <= limit) {
+            return of(rows, null);
+        }
+        List<T> page = rows.subList(0, limit);
+        return of(page, anchor.apply(page.get(limit - 1)).encode());
     }
 
     /** 把请求的 limit 钳制进 [1, MAX_LIMIT]。 */
