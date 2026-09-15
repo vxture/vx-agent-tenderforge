@@ -343,6 +343,11 @@ class PlatformStatusControllerTest {
         }
 
         @Override
+        public String endSessionUrl() {
+            return null;
+        }
+
+        @Override
         public long sessionSeconds() {
             return 0;
         }

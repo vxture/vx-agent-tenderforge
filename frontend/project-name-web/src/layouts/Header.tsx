@@ -23,6 +23,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useGlobalStore } from '@/stores/global'
 import { platformAvatarSrc } from '@/utils/avatar'
 
+import { logoutAndLeave } from './logout'
 import type { MenuItem } from './menuConfig'
 import { getMenuListByPortal } from './menuConfig'
 
@@ -85,13 +86,14 @@ function HeaderTools() {
   )
 }
 
-async function logout(clearAuth: () => void) {
-  try {
-    await authApi.logout()
-  } finally {
-    clearAuth()
-    window.location.href = '/login'
-  }
+function logout(clearAuth: () => void) {
+  return logoutAndLeave({
+    logout: authApi.logout,
+    clearAuth,
+    go: (url) => {
+      window.location.href = url
+    },
+  })
 }
 
 function AccountPanel() {
