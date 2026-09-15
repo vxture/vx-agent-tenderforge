@@ -13,7 +13,7 @@ import { useAuthStore } from '@/stores/auth'
 import { platformAvatarSrc } from '@/utils/avatar'
 
 import { accessState } from './access'
-import { identityLabelOf, workspaceLinesOf } from './identity'
+import { contactLineOf, identityLabelOf, workspaceLinesOf } from './identity'
 import { entitlementKeys, useEntitlementQuery } from './queries'
 
 /**
@@ -63,6 +63,7 @@ export function SubscriptionGate({ children }: { children: ReactNode }) {
       identity={{
         userName: identityLabelOf(user),
         avatarSrc: platformAvatarSrc(user?.avatarUrl),
+        contact: contactLineOf(user),
         ...workspaceLinesOf(user, SHELL_TEXT.workspaceFallback),
       }}
       onRetry={() => mutate()}

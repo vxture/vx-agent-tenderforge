@@ -28,6 +28,8 @@ const planner: CurrentUser = {
   avatarUrl: null,
   orgName: null,
   workspaceName: null,
+  email: null,
+  phone: null,
   admin: false,
   consoleProfileUrl: null,
 }
