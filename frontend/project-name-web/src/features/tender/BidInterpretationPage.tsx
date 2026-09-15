@@ -18,14 +18,24 @@ import {
   Progress,
   Spinner,
   StatusBadge,
+  Tabs,
+  TabsList,
+  TabsTrigger,
   Textarea,
   ViewHeader,
 } from '@vxture/design-system'
 
-import type { BidCriterion, CriterionInput, InterpretationObjectType } from '@/types/tender'
+import type {
+  AssetCategory,
+  BidCriterion,
+  CriterionInput,
+  InterpretationObjectType,
+} from '@/types/tender'
 import { createClientId } from '@/utils/clientId'
+import { useCursorPager } from '@/utils/cursorPager'
 
 import { BidPageShell } from './components/BidPageShell'
+import { CursorPagerFooter } from './components/CursorPagerFooter'
 import { ErrorState, LoadingState } from './components/Feedback'
 import { InterpretationFreezePanel } from './components/InterpretationFreezePanel'
 import { InterpretationObjectStatus } from './components/InterpretationObjectStatus'
@@ -59,6 +69,14 @@ const interpretationObjects: {
   },
 ]
 
+/** 解读环节可选的参考素材分类：图库不参与目录与正文编写。 */
+type ReferenceCategory = Exclude<AssetCategory, 'GALLERY'>
+
+const referenceCategoryLabels: Record<ReferenceCategory, string> = {
+  OUTLINE: '标书大纲',
+  TEMPLATE: '标书范本',
+}
+
 const parseStatusLabels = {
   PENDING: '待解析',
   PARSING: '解析中',
@@ -89,7 +107,12 @@ export default function BidInterpretationPage() {
   const saveMutation = useSaveCriteriaMutation(bidId)
   const selectionMutation = useSelectAssetsMutation(bidId)
   const freezeMutation = useFreezeInterpretationMutation(bidId)
-  const assetsQuery = useTenderAssetsQuery()
+  // 参考素材只取范本与大纲，按分类在服务端筛：列表是分页的，取回来再在前端滤掉图库，
+  // 会让某一页被滤空而后面还有数据。
+  const [assetCategory, setAssetCategory] = useState<ReferenceCategory>('OUTLINE')
+  const [assetKeyword, setAssetKeyword] = useState('')
+  const assetPager = useCursorPager(`${assetCategory}|${assetKeyword}`)
+  const assetsQuery = useTenderAssetsQuery(assetCategory, assetKeyword, assetPager.cursor)
   const [criteria, setCriteria] = useState<CriterionInput[]>([])
   const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([])
   const [validation, setValidation] = useState('')
@@ -124,7 +147,7 @@ export default function BidInterpretationPage() {
   const hasPartialSuccess =
     workspace.sourceFile?.parseStatus === 'FAILED' &&
     [workspace.sourceFile.overviewStatus, workspace.sourceFile.scoringStatus].includes('SUCCEEDED')
-  const referenceAssets = assetsQuery.data?.filter((asset) => asset.category !== 'GALLERY') ?? []
+  const referenceAssets = assetsQuery.data?.items ?? []
   const persisting =
     saveMutation.isPending || selectionMutation.isPending || freezeMutation.isPending
 
@@ -399,9 +422,29 @@ export default function BidInterpretationPage() {
               </span>
             </CardHeader>
             <CardContent>
+              <div className="mb-md flex flex-wrap items-center justify-between gap-sm">
+                <Tabs
+                  value={assetCategory}
+                  onValueChange={(value) => setAssetCategory(value as ReferenceCategory)}
+                >
+                  <TabsList>
+                    {(Object.keys(referenceCategoryLabels) as ReferenceCategory[]).map((key) => (
+                      <TabsTrigger key={key} value={key}>
+                        {referenceCategoryLabels[key]}
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
+                </Tabs>
+                <Input
+                  className="w-full sm:w-panel-sm"
+                  value={assetKeyword}
+                  placeholder={`搜索${referenceCategoryLabels[assetCategory]}`}
+                  onChange={(event) => setAssetKeyword(event.target.value)}
+                />
+              </div>
               {assetsQuery.isPending ? <LoadingState label="加载素材" /> : null}
               {!assetsQuery.isPending && referenceAssets.length === 0 ? (
-                <EmptyState icon="archive" title="暂无标书大纲或标书范本" />
+                <EmptyState icon="archive" title={`暂无${referenceCategoryLabels[assetCategory]}`} />
               ) : null}
               {referenceAssets.length ? (
                 <div className="grid gap-xs sm:grid-cols-2">
@@ -437,6 +480,18 @@ export default function BidInterpretationPage() {
                       </label>
                     )
                   })}
+                </div>
+              ) : null}
+              {assetsQuery.data && (referenceAssets.length > 0 || assetPager.canGoPrevious) ? (
+                <div className="mt-md">
+                  <CursorPagerFooter
+                    count={referenceAssets.length}
+                    unit="项"
+                    canGoPrevious={assetPager.canGoPrevious}
+                    nextCursor={assetsQuery.data.nextCursor}
+                    onPrevious={assetPager.previous}
+                    onNext={assetPager.next}
+                  />
                 </div>
               ) : null}
             </CardContent>

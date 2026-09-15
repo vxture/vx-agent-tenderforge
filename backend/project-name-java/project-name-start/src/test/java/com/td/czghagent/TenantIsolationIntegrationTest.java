@@ -163,10 +163,12 @@ class TenantIsolationIntegrationTest extends PostgresBackedTest {
     }
 
     private List<String> ids(MvcResult result) throws Exception {
-        JsonNode array = json(result);
-        assertThat(array.isArray()).as("列表响应应当是裸数组").isTrue();
+        JsonNode page = json(result);
+        assertThat(page.path("items").isArray())
+                .as("列表响应是 {items, nextCursor}（通则 A-3：没有写下来的上限就给游标）")
+                .isTrue();
         List<String> ids = new ArrayList<>();
-        array.forEach(item -> ids.add(item.path("id").asText()));
+        page.path("items").forEach(item -> ids.add(item.path("id").asText()));
         return ids;
     }
 

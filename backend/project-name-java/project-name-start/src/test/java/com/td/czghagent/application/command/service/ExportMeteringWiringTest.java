@@ -106,9 +106,10 @@ class ExportMeteringWiringTest {
         when(bidRepository.findBid("bid-1", "owner-1", TENANT)).thenReturn(Optional.of(bid));
         when(exporter.renderDocx(any(), any(), any())).thenReturn(new byte[]{1, 2, 3});
         // export 行的 id 在服务内部随机生成；读回时从计量事件里取——计量没接上，这里也会断。
-        when(bidRepository.listExports("bid-1")).thenAnswer(invocation -> List.of(new BidExport(
-                exportIdFromMeteredEvents(), "bid-1", 1, "x.docx", 3, null, "NOT_CHECKED",
-                LocalDateTime.now())));
+        when(bidRepository.findExportSummary(eq("bid-1"), anyString())).thenAnswer(invocation ->
+                Optional.of(new BidExport(
+                        exportIdFromMeteredEvents(), "bid-1", 1, "x.docx", 3, null, "NOT_CHECKED",
+                        LocalDateTime.now())));
         BidContentCommandService service = new BidContentCommandService(
                 bidRepository, fileStorage, mock(BidAiExecutionService.class), exporter,
                 productionRepository, mock(BidGenerationOrchestrator.class),

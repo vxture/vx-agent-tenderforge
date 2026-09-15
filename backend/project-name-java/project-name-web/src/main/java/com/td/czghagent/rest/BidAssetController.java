@@ -6,6 +6,7 @@ package com.td.czghagent.rest;
 import com.td.czghagent.application.command.service.BidCommandService;
 import com.td.czghagent.application.query.service.BidQueryService;
 import com.td.czghagent.domain.model.BidReferenceAsset;
+import com.td.czghagent.domain.model.CursorPage;
 import com.td.czghagent.rest.security.RequestIdentity;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.MediaType;
@@ -19,7 +20,6 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.util.List;
 
 @RestController
 @RequestMapping("/api/bid-assets")
@@ -33,13 +33,16 @@ public class BidAssetController {
         this.queryService = queryService;
     }
 
+    /** 素材库：{@code {items, nextCursor}}，{@code limit} 由服务端钳制到 200（通则 A-3 / A-4）。 */
     @GetMapping
-    public List<BidReferenceAsset> list(
+    public CursorPage<BidReferenceAsset> list(
             @RequestParam(required = false) String category,
             @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) Integer limit,
+            @RequestParam(required = false) String cursor,
             HttpServletRequest request
     ) {
-        return queryService.assets(category, keyword, RequestIdentity.user(request));
+        return queryService.assets(category, keyword, limit, cursor, RequestIdentity.user(request));
     }
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)

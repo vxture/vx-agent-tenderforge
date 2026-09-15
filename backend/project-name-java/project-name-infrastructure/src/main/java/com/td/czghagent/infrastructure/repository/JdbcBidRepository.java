@@ -8,6 +8,7 @@ import com.td.czghagent.domain.model.BidReferenceChunk;
 import com.td.czghagent.domain.model.BidSummary;
 import com.td.czghagent.domain.model.BidWorkspace;
 import com.td.czghagent.domain.model.BidWorkspaceViews;
+import com.td.czghagent.domain.model.PageCursor;
 import com.td.czghagent.domain.repository.BidProductionRepository;
 import com.td.czghagent.domain.repository.BidRepository;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -43,8 +44,8 @@ public class JdbcBidRepository implements BidRepository {
     }
 
     @Override
-    public List<BidSummary> listBids(String ownerId, TenantScope tenant) {
-        return reader.listBids(ownerId, tenant);
+    public List<BidSummary> listBids(String ownerId, TenantScope tenant, PageCursor after, int limit) {
+        return reader.listBids(ownerId, tenant, after, limit);
     }
 
     @Override
@@ -299,8 +300,14 @@ public class JdbcBidRepository implements BidRepository {
 
     @Override
     public List<BidReferenceAsset> listAssets(
-            String ownerId, TenantScope tenant, String category, String keyword) {
-        return assets.listAssets(ownerId, tenant, category, keyword);
+            String ownerId, TenantScope tenant, String category, String keyword,
+            PageCursor after, int limit) {
+        return assets.listAssets(ownerId, tenant, category, keyword, after, limit);
+    }
+
+    @Override
+    public Optional<BidReferenceAsset> findActiveAsset(String assetId, String ownerId, TenantScope tenant) {
+        return assets.findActiveAsset(assetId, ownerId, tenant);
     }
 
     @Override
@@ -347,8 +354,13 @@ public class JdbcBidRepository implements BidRepository {
     }
 
     @Override
-    public List<BidExport> listExports(String bidId) {
-        return tasks.listExports(bidId);
+    public List<BidExport> listExports(String bidId, PageCursor after, int limit) {
+        return tasks.listExports(bidId, after, limit);
+    }
+
+    @Override
+    public Optional<BidExport> findExportSummary(String bidId, String exportId) {
+        return tasks.findExportSummary(bidId, exportId);
     }
 
     @Override

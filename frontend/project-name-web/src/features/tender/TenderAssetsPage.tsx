@@ -15,18 +15,18 @@ import {
   type IconName,
   Input,
   ListPageTemplate,
-  Pagination,
   ShellPageContainer,
   Tabs,
   TabsList,
   TabsTrigger,
-  useListPagination,
   ViewHeader,
 } from '@vxture/design-system'
 
 import { QueryError } from '@/components/QueryState'
 import type { AssetCategory, BidReferenceAsset } from '@/types/tender'
+import { useCursorPager } from '@/utils/cursorPager'
 
+import { CursorPagerFooter } from './components/CursorPagerFooter'
 import { ErrorState } from './components/Feedback'
 import {
   useRemoveTenderAssetMutation,
@@ -88,6 +88,10 @@ const assetColumns: DataTableColumn<BidReferenceAsset>[] = [
 
 type AssetListContentProps = {
   assets: BidReferenceAsset[]
+  nextCursor: string | null
+  canGoPrevious: boolean
+  onPrevious: () => void
+  onNext: (cursor: string) => void
   currentTab: (typeof tabs)[number]
   category: AssetCategory
   keyword: string
@@ -105,6 +109,10 @@ type AssetListContentProps = {
 
 function AssetListContent({
   assets,
+  nextCursor,
+  canGoPrevious,
+  onPrevious,
+  onNext,
   currentTab,
   category,
   keyword,
@@ -119,8 +127,6 @@ function AssetListContent({
   onCategoryChange,
   onKeywordChange,
 }: AssetListContentProps) {
-  const pagination = useListPagination(assets)
-
   return (
     <ListPageTemplate
       header={
@@ -139,7 +145,7 @@ function AssetListContent({
       summary={mutationError ? <ErrorState error={mutationError} /> : undefined}
       filters={
         <FilterBar
-          count={`共 ${assets.length} 项`}
+          count={`本页 ${assets.length} 项`}
           onReset={() => onKeywordChange('')}
           resetLabel="清空搜索"
           search={
@@ -176,11 +182,10 @@ function AssetListContent({
         ) : (
           <DataTable
             columns={assetColumns}
-            rows={pagination.pageRows}
+            rows={assets}
             rowKey={(asset) => asset.id}
             loading={loading}
             loadingRows={8}
-            indexStart={pagination.indexStart}
             labels={{ rowActions: '操作' }}
             rowActions={(asset) => {
               const items: ActionMenuItem[] = [
@@ -225,21 +230,14 @@ function AssetListContent({
         )
       }
       footer={
-        assets.length > 0 ? (
-          <Pagination
-            page={pagination.page}
-            pageCount={pagination.pageCount}
-            total={assets.length}
-            countLabel={`共 ${assets.length} 项`}
-            pageSize={pagination.pageSize}
-            pageSizeOptions={['auto', 10, 20, 50]}
-            onPageChange={pagination.onPageChange}
-            onPageSizeChange={pagination.onPageSizeChange}
-            previousLabel="上一页"
-            nextLabel="下一页"
-            pageSizeLabel="每页条数"
-            pageSizeOptionTemplate="每页 {size} 条"
-            pageSizeAutoLabel="自适应"
+        assets.length > 0 || canGoPrevious ? (
+          <CursorPagerFooter
+            count={assets.length}
+            unit="项"
+            canGoPrevious={canGoPrevious}
+            nextCursor={nextCursor}
+            onPrevious={onPrevious}
+            onNext={onNext}
           />
         ) : undefined
       }
@@ -251,7 +249,9 @@ export default function TenderAssetsPage() {
   const inputRef = useRef<HTMLInputElement>(null)
   const [category, setCategory] = useState<AssetCategory>('TEMPLATE')
   const [keyword, setKeyword] = useState('')
-  const query = useTenderAssetsQuery(category, keyword)
+  // 分类或关键字一变就回到第一页：旧游标锚在旧结果集上。
+  const pager = useCursorPager(`${category}|${keyword}`)
+  const query = useTenderAssetsQuery(category, keyword, pager.cursor)
   const uploadMutation = useUploadTenderAssetMutation()
   const removeMutation = useRemoveTenderAssetMutation()
   const currentTab = tabs.find((tab) => tab.key === category) ?? tabs[0]
@@ -282,7 +282,11 @@ export default function TenderAssetsPage() {
 
         <AssetListContent
           key={category}
-          assets={query.data ?? []}
+          assets={query.data?.items ?? []}
+          nextCursor={query.data?.nextCursor ?? null}
+          canGoPrevious={pager.canGoPrevious}
+          onPrevious={pager.previous}
+          onNext={pager.next}
           currentTab={currentTab}
           category={category}
           keyword={keyword}

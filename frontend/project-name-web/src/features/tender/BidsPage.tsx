@@ -12,19 +12,19 @@ import {
   type DataTableColumn,
   EmptyState,
   ListPageTemplate,
-  Pagination,
   ShellPageContainer,
   StatusBadge,
   type StatusBadgeTone,
-  useListPagination,
   ViewHeader,
 } from '@vxture/design-system'
 
 import { ApiError } from '@/api/client'
 import { tenderApi } from '@/api/modules/tender'
 import { QueryError } from '@/components/QueryState'
-import type { BidExport, BidStatus, BidStep, BidSummary } from '@/types/tender'
+import type { BidStatus, BidStep, BidSummary } from '@/types/tender'
+import { useCursorPager } from '@/utils/cursorPager'
 
+import { CursorPagerFooter } from './components/CursorPagerFooter'
 import { ErrorState } from './components/Feedback'
 import { useBidsQuery } from './queries'
 
@@ -127,11 +127,11 @@ const bidColumns = (openBid: (bid: BidSummary) => void): DataTableColumn<BidSumm
 
 export default function BidsPage() {
   const navigate = useNavigate()
-  const query = useBidsQuery()
+  const pager = useCursorPager()
+  const query = useBidsQuery(pager.cursor)
   const [downloading, setDownloading] = useState('')
   const [downloadError, setDownloadError] = useState<unknown>(null)
-  const bids = query.data ?? []
-  const pagination = useListPagination(bids)
+  const bids = query.data?.items ?? []
 
   const openBid = (bid: BidSummary) => {
     const destination = ['GENERATING', 'GENERATION_PAUSED'].includes(bid.status)
@@ -143,20 +143,16 @@ export default function BidsPage() {
   /**
    * 下载最近一次成果。
    *
-   * 先列后取是有意的：服务端不再提供 /exports/latest/download——「最新」是一个视角，
-   * 把它固化成路径段就再也无法参数化（通则 A-2）。挑哪一个由这里决定，
-   * 于是「按版本号最大」这条规则留在了它属于的地方，而不是被焊进一条路由。
+   * 先列后取是有意的：服务端不提供 /exports/latest/download——「最新」是一个视角，
+   * 把它固化成路径段就再也无法参数化（通则 A-2）。导出列表按生成时间倒序、游标分页，
+   * 所以只取一条：limit=1 的第一条就是最近生成的那份，不必把全部版本拉回来再挑。
    */
   const download = async (bid: BidSummary) => {
     setDownloading(bid.id)
     setDownloadError(null)
     try {
-      const exports = await tenderApi.listExports(bid.id)
-      const latest = exports.reduce<BidExport | null>(
-        (best, item) => (best === null || item.version > best.version ? item : best),
-        null
-      )
-      if (latest === null) {
+      const latest = (await tenderApi.listExports(bid.id, { limit: 1 })).items[0]
+      if (!latest) {
         throw new ApiError('该标书尚无可下载成果', 404, 'BID_EXPORT_NOT_FOUND', false)
       }
       await tenderApi.downloadExport(bid.id, latest.id, bid.title)
@@ -207,11 +203,10 @@ export default function BidsPage() {
             ) : (
               <DataTable
                 columns={bidColumns(openBid)}
-                rows={pagination.pageRows}
+                rows={bids}
                 rowKey={(bid) => bid.id}
                 loading={query.isPending}
                 loadingRows={8}
-                indexStart={pagination.indexStart}
                 rowActions={bidActions}
                 labels={{ rowActions: '操作' }}
                 empty={
@@ -226,21 +221,14 @@ export default function BidsPage() {
             )
           }
           footer={
-            bids.length > 0 ? (
-              <Pagination
-                page={pagination.page}
-                pageCount={pagination.pageCount}
-                total={bids.length}
-                countLabel={`共 ${bids.length} 份`}
-                pageSize={pagination.pageSize}
-                pageSizeOptions={['auto', 10, 20, 50]}
-                onPageChange={pagination.onPageChange}
-                onPageSizeChange={pagination.onPageSizeChange}
-                previousLabel="上一页"
-                nextLabel="下一页"
-                pageSizeLabel="每页条数"
-                pageSizeOptionTemplate="每页 {size} 条"
-                pageSizeAutoLabel="自适应"
+            query.data && (bids.length > 0 || pager.canGoPrevious) ? (
+              <CursorPagerFooter
+                count={bids.length}
+                unit="份"
+                canGoPrevious={pager.canGoPrevious}
+                nextCursor={query.data.nextCursor}
+                onPrevious={pager.previous}
+                onNext={pager.next}
               />
             ) : undefined
           }
