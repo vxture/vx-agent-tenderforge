@@ -1244,10 +1244,10 @@ git diff --check
 | --- | --- | --- |
 | 页面/交互 | `frontend/.../features`、`router` | `types`、API module、前端测试、本文章节 4 |
 | REST 契约 | Java `project-name-web/rest` | 前端 API/types、应用服务、本文章节 7 |
-| 业务状态/冻结 | Domain `BidProductionRules`、Command service | Flyway、前端步骤、本文章节 5/10 |
+| 业务状态/冻结 | Domain `BidProductionRules`、Command service | DDL 增量、前端步骤、本文章节 5/10 |
 | AI JSON 契约 | Domain `TenderAiGateway`、Python `*_models.py` | HTTP adapter、Pydantic、两端测试、章节 8 |
 | 长任务 | `application-command/workflow` | Task Queue、幂等、Compose worker、章节 6/13 |
-| 表结构 | `project-name-start/resources/sql` 新 V23+ | JDBC 仓储、领域模型、章节 10 |
+| 表结构 | `deploy/database/ddl/incr/` 新增编号文件（可重放） | `98_column_locks.sql` 授权、JDBC 仓储、领域模型、发版前 db-init、章节 10 |
 | 文件/排版 | Infrastructure exporter、Python `document_*` | QA、私有存储、章节 9 |
 | 部署变量 | `docker-compose.yml`、`.env.example` | Java/Python config、README、章节 12 |
 

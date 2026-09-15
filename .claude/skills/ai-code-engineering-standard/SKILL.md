@@ -22,7 +22,7 @@ last_updated: 2026-08-14
 - Java 依赖方向为 Web/Start -> Application -> Domain；Infrastructure 实现 Domain 端口。
 - Python 只提供内部解析、AI 和文档契约，不向浏览器开放业务接口。
 - 跨服务数据使用明确 DTO/Pydantic/record，不以未校验 Map 或自由文本替代稳定契约。
-- 新数据库结构追加 Flyway 迁移，不修改 V1-V22。
+- 新数据库结构只追加 `deploy/database/ddl/incr/NNNN_*.sql`（必须可重放），新列在 `98_column_locks.sql` 授权；不改基线与已有增量。应用启动不做迁移，由 `db-init` 工作流施加。
 
 ## 类型、复杂度和错误
 
