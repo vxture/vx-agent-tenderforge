@@ -12,6 +12,7 @@ import com.td.czghagent.domain.repository.BidProductionRepository;
 import com.td.czghagent.domain.repository.BidRepository;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
@@ -61,12 +62,26 @@ public class JdbcBidRepository implements BidRepository {
         return reader.existsBid(bidId);
     }
 
+    /**
+     * 工作台读取在<strong>同一个快照</strong>里完成。
+     *
+     * <p>读取器分多条语句取目录、章节、任务、导出与生产状态。不包事务时每条语句各看
+     * 各的已提交数据：重新生成目录恰好在两条语句之间提交，一次响应里就会出现
+     * 「目录任务已完成」配「旧章节、旧页数」——写入侧是原子的，撕裂发生在读这一侧。
+     *
+     * <p>{@code REPEATABLE_READ} 不能省：PostgreSQL 默认的读已提交级别下，事务内每条语句
+     * 仍各取一个快照，单加事务注解等于没加。已处于读写事务中的调用方会加入外层事务、
+     * 沿用外层隔离级别——那些路径本就在自己的写事务里读，不在本修复范围内。
+     */
     @Override
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public BidWorkspace loadWorkspace(BidDocument bid) {
         return reader.loadWorkspace(bid);
     }
 
+    /** 与 {@link #loadWorkspace} 同理：任务、导出与生产状态分几条语句读，要在同一个快照里。 */
     @Override
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public BidWorkspaceViews.Metadata loadMetadata(BidDocument bid) {
         return reader.loadMetadata(bid);
     }
