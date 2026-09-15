@@ -3,29 +3,9 @@
 // DATE: 2026-09-15
 import { describe, expect, it } from 'vitest'
 
-import type { BidOutlineNode } from '@/types/tender'
+import { outlineNode as node } from '@/test/fixtures/tender'
 
 import { buildOutlineLabels } from './outlineNumbering'
-
-const node = (
-  id: string,
-  parentId: string | null,
-  level: number,
-  sortOrder: number,
-  title = id
-): BidOutlineNode =>
-  ({
-    id,
-    parentId,
-    level,
-    title,
-    plannedPages: 0,
-    sortOrder,
-    revision: 0,
-    taskBrief: '',
-    mustKeywords: [],
-    scoringPointIds: [],
-  }) as unknown as BidOutlineNode
 
 describe('buildOutlineLabels', () => {
   it('三级目录分别编成「第一章」「一、」「（一）」', () => {

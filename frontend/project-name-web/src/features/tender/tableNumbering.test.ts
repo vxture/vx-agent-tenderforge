@@ -3,34 +3,9 @@
 // DATE: 2026-09-15
 import { describe, expect, it } from 'vitest'
 
-import type { BidChapterSummary, BidOutlineNode } from '@/types/tender'
+import { chapterSummary as chapter, outlineNode as node } from '@/test/fixtures/tender'
 
 import { buildTableNumberingContext, formatTableTitle, stripTableNumberPrefix } from './tableNumbering'
-
-const node = (id: string, parentId: string | null, level: number, sortOrder: number) =>
-  ({
-    id,
-    parentId,
-    level,
-    title: id,
-    plannedPages: 0,
-    sortOrder,
-    revision: 0,
-    taskBrief: '',
-    mustKeywords: [],
-    scoringPointIds: [],
-  }) as unknown as BidOutlineNode
-
-const chapter = (id: string, outlineNodeId: string, tableCount: number) =>
-  ({
-    id,
-    outlineNodeId,
-    title: outlineNodeId,
-    generationStatus: 'READY',
-    tableCount,
-    updatedAt: '2026-08-28T00:00:00+08:00',
-    revision: 0,
-  }) as unknown as BidChapterSummary
 
 /** 两个一级章节：r1 下两个叶子（各 2、3 张表），r2 下一个叶子（1 张表）。 */
 const outline = [
