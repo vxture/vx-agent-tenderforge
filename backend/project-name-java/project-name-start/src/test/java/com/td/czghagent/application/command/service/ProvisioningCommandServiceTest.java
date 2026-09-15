@@ -164,6 +164,52 @@ class ProvisioningCommandServiceTest {
         assertThat(entitlements.invalidated).isEmpty();
     }
 
+    // ── 通知类事件 ──────────────────────────────────────────────────────────
+
+    /**
+     * 套餐变更通知不带 seq，也必须让权益缓存失效。
+     *
+     * <p>按 seq=0 做乱序判定，它在任何开通过（seq≥1）的空间上都是「过期」——
+     * 于是用户升了档，界面还按旧档位渲染，而这一路没有任何报错。
+     */
+    @Test
+    void aSubscriptionChangeWithoutSeqStillEvictsTheEntitlementOfAProvisionedWorkspace() {
+        service.handle(event("d-1", ProvisioningEvent.PROVISIONED, 3), "trace-1", NOW);
+
+        ProvisioningCommandService.Outcome outcome = service.handle(
+                event("d-2", ProvisioningEvent.SUBSCRIPTION_CHANGED, 0), "trace-2", NOW);
+
+        assertThat(outcome).isEqualTo(ProvisioningCommandService.Outcome.NOTIFIED);
+        assertThat(entitlements.invalidated)
+                .as("开通一次、套餐变更一次，各驱逐一次")
+                .containsExactly(WS, WS);
+        assertThat(repository.lastSeq).as("通知不推进开通序号").isEqualTo(3);
+        assertThat(repository.state).isEqualTo(ProvisioningEvent.STATE_PROVISIONED);
+    }
+
+    /** 授权失效通知：本产品不持有共享授权缓存，记下投递、不碰开通状态与权益缓存。 */
+    @Test
+    void acknowledgesAGrantInvalidationWithoutTouchingProvisioningState() {
+        ProvisioningCommandService.Outcome outcome = service.handle(
+                event("d-1", ProvisioningEvent.GRANT_INVALIDATED, 0), "trace-1", NOW);
+
+        assertThat(outcome).isEqualTo(ProvisioningCommandService.Outcome.NOTIFIED);
+        assertThat(repository.claimed).contains("d-1");
+        assertThat(repository.state).isNull();
+        assertThat(entitlements.invalidated).isEmpty();
+    }
+
+    /** 通知同样至少一次投递：重投不再驱逐一遍。 */
+    @Test
+    void aRepeatedNotificationIsHandledOnlyOnce() {
+        service.handle(event("d-1", ProvisioningEvent.SUBSCRIPTION_CHANGED, 0), "trace-1", NOW);
+
+        assertThat(service.handle(
+                event("d-1", ProvisioningEvent.SUBSCRIPTION_CHANGED, 0), "trace-1", NOW))
+                .isEqualTo(ProvisioningCommandService.Outcome.DUPLICATE);
+        assertThat(entitlements.invalidated).hasSize(1);
+    }
+
     // ── 健壮性 ──────────────────────────────────────────────────────────────
 
     /**
