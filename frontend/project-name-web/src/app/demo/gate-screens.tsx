@@ -5,6 +5,7 @@ import { useState } from 'react'
 
 import { SegmentedControl } from '@vxture/design-ui'
 
+import type { GateIdentityProps } from '../components/gate-identity'
 import { NoRoles } from '../components/no-roles'
 import { NoSubscription } from '../components/no-subscription'
 import { SignIn } from '../components/sign-in'
@@ -26,6 +27,14 @@ const SAMPLE_CONSOLE_URL = 'https://console.vxture.com'
 export default function GateScreensPreview() {
   const { GATE_PREVIEW_TEXT } = useMessages()
   const [screen, setScreen] = useState<Screen>('sign-in')
+
+  // 没有头像：预览里看到的是默认剪影，正是没设头像的成员会看到的样子。
+  const identity: GateIdentityProps = {
+    userName: GATE_PREVIEW_TEXT.sampleUser,
+    avatarSrc: null,
+    orgName: GATE_PREVIEW_TEXT.sampleOrg,
+    workspaceName: GATE_PREVIEW_TEXT.sampleWorkspace,
+  }
 
   return (
     <>
@@ -53,14 +62,11 @@ export default function GateScreensPreview() {
         <NoSubscription
           access={{ kind: 'never-subscribed' }}
           subscribeHref={SAMPLE_SUBSCRIBE_URL}
-          userName={GATE_PREVIEW_TEXT.sampleUser}
-          workspaceLabel={GATE_PREVIEW_TEXT.sampleWorkspace}
+          identity={identity}
           onRetry={() => undefined}
         />
       )}
-      {screen === 'no-roles' && (
-        <NoRoles userName={GATE_PREVIEW_TEXT.sampleUser} workspaceLabel={GATE_PREVIEW_TEXT.sampleWorkspace} />
-      )}
+      {screen === 'no-roles' && <NoRoles identity={identity} />}
       {screen === 'signed-out' && <SignedOut consoleHref={SAMPLE_CONSOLE_URL} />}
     </>
   )

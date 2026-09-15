@@ -13,6 +13,7 @@ export const en: Dictionary = {
     brandName: 'TenderForge',
     website: 'ruyin',
     workspaceFallback: 'Current workspace',
+    identityCardLabel: 'Signed-in person and workspace',
     noAccessTitle: 'This workspace has no subscription',
     subscribeCta: 'Subscribe',
     noRolesTitle: 'No role has been assigned to you yet',
@@ -30,8 +31,6 @@ export const en: Dictionary = {
     badge: 'No subscription',
     description: 'Subscribe to continue, or ask a workspace administrator to.',
     ariaLabel: 'This workspace has no subscription',
-    identityLabel: 'Signed in as',
-    workspaceLabel: 'Workspace',
     signOut: 'Sign out',
 
     lapsedTitle: "This workspace's subscription has lapsed",
@@ -66,8 +65,6 @@ export const en: Dictionary = {
   NO_ROLES_TEXT: {
     badge: 'No role',
     ariaLabel: 'No role has been assigned to you yet',
-    identityLabel: 'Signed in as',
-    workspaceLabel: 'Workspace',
     recheck: 'Check again',
     signOut: 'Sign out',
   },
@@ -78,6 +75,7 @@ export const en: Dictionary = {
     noRoles: 'No role',
     signedOut: 'Signed out',
     sampleUser: 'Sample member',
+    sampleOrg: 'Sample organization',
     sampleWorkspace: 'Sample workspace',
   },
   HEADER_TEXT: {

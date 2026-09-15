@@ -1,15 +1,16 @@
 // GENERATED_BY_AI
 // MODEL: claude-opus-5
 // DATE: 2026-09-15
-import { Card, LabeledValue, Stack } from '@vxture/design-ui'
+import { Stack } from '@vxture/design-ui'
 
 import type { AccessState } from '@/features/entitlement/access'
-
-import { useLocale, useMessages } from '../lib/i18n/provider'
 
 import { GateActions, GatePrimary, GatePrimaryButton, GateSignOut } from './gate-actions'
 import { GateFrame } from './gate-frame'
 import { GateHeading } from './gate-heading'
+import { GateIdentity, type GateIdentityProps } from './gate-identity'
+
+import { useLocale, useMessages } from '../lib/i18n/provider'
 
 // 已登录、当前工作区没有可用订阅（参照 vx-agent-yucer app/(app)/components/no-subscription.tsx）。
 //
@@ -17,6 +18,8 @@ import { GateHeading } from './gate-heading'
 // 谁在登录、被拒的是哪个工作区（管理员据此行动，走错工作区的成员据此发现自己走错了）——再给订阅的路与退出的路。
 //
 // 标题说的是工作区，不是产品码：读者没有选过产品码，也未必认得它。
+//
+// 身份块不是 yucer 的两列 LabeledValue（owner 2026-09-16）：真实名字在两列里被截断，见 gate-identity.tsx。
 //
 // 本产品比 yucer 多三种被拒的原因，形状完全一样，只换状态标签、一句话与主动作：
 // 订阅失效（前往续订，带出数据保留期）、档位不认得（查看订阅）、平台暂时没答上来（重试——
@@ -27,16 +30,14 @@ export type BlockedAccess = Exclude<AccessState, { kind: 'granted' }>
 export function NoSubscription({
   access,
   subscribeHref,
-  userName,
-  workspaceLabel,
+  identity,
   onRetry,
   retrying = false,
 }: {
   readonly access: BlockedAccess
   /** 服务端按权益拼好的控制台深链；从来不在这里推导。 */
   readonly subscribeHref: string | null
-  readonly userName: string
-  readonly workspaceLabel: string
+  readonly identity: GateIdentityProps
   readonly onRetry: () => void
   readonly retrying?: boolean
 }) {
@@ -80,10 +81,7 @@ export function NoSubscription({
       <Stack gap="lg" className="items-center">
         <GateHeading badge={copy.badge} badgeIcon="credit-card" title={copy.title} description={copy.description} />
 
-        <Card surface="soft" className="gap-md p-lg grid w-full grid-cols-2 text-left">
-          <LabeledValue label={T.identityLabel} value={userName} />
-          <LabeledValue label={T.workspaceLabel} value={workspaceLabel} />
-        </Card>
+        <GateIdentity {...identity} />
 
         <GateActions primary={primary} secondary={<GateSignOut>{T.signOut}</GateSignOut>} />
       </Stack>
