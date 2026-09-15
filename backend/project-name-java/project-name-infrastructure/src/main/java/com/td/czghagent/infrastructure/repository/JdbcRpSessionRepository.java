@@ -129,6 +129,16 @@ public class JdbcRpSessionRepository implements RpSessionRepository {
                 """, SESSION, tokenHash, now).stream().findFirst();
     }
 
+    /**
+     * 行锁持有到调用方事务提交：同一会话的并发续期在这里排成队，排在后面的读到的是前一个换好的票。
+     */
+    @Override
+    public Optional<RpSession> lockForRefresh(String sessionId) {
+        return jdbcTemplate.query("""
+                SELECT * FROM rp_session WHERE id = ? FOR UPDATE
+                """, SESSION, sessionId).stream().findFirst();
+    }
+
     @Override
     public void updateTokens(String sessionId, String accessToken, String refreshToken,
                              LocalDateTime accessExpiresAt) {

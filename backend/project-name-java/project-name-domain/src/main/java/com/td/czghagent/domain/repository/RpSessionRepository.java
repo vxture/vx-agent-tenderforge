@@ -39,6 +39,15 @@ public interface RpSessionRepository {
 
     Optional<RpSession> findByTokenHash(String tokenHash, LocalDateTime now);
 
+    /**
+     * 为续期锁住会话行并读出<strong>此刻</strong>的值，锁持有到调用方事务结束。
+     *
+     * <p>平台的刷新令牌轮换带重放检测：同一张旧刷新令牌用两次，整条令牌链当场吊销。
+     * 同一会话的并发请求必须在这里排队，排在后面的读到前一个已经换好的票，而不是各拿旧令牌去换。
+     * 会话已被删除时返回空。
+     */
+    Optional<RpSession> lockForRefresh(String sessionId);
+
     /** 静默续期后回写新票；轮换是存新弃旧，不保留上一张。 */
     void updateTokens(String sessionId, String accessToken, String refreshToken,
                       LocalDateTime accessExpiresAt);

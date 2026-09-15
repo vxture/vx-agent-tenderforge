@@ -135,6 +135,12 @@ class PlatformSessionResolverTest {
             return Optional.ofNullable(stored.get(tokenHash));
         }
 
+        /** 续期由被打桩的登录服务负责，这一层不加锁。 */
+        @Override
+        public Optional<RpSession> lockForRefresh(String sessionId) {
+            return Optional.empty();
+        }
+
         @Override
         public void deleteByTokenHash(String tokenHash) {
             deletedHashes.add(tokenHash);
