@@ -28,9 +28,11 @@ SPA catch-all，平台拿到 **index.html 和 HTTP 200**——投递被判为送
 那两处路由的注释都标着「product_200 section 4」，而那一节通篇只规定义务、
 **从没规定过路径**——两个产品各自造了同一个名字，又互相成了对方的先例。
 
-**第 4b 条管的是迁移本身，不是取值。** 平台侧登记的还是旧地址，所以 nginx 上留着
-一条把旧路径转到标准路径的别名——这是 X-4 的第 ① 步。它的删除条件不靠人记得：
-`LEGACY_INBOUND_PATH` 置成 `None` 的那一刻，这条判据会反过来要求别名必须消失。
+**第 4b 条管的是迁移本身，不是取值。** 迁移期 nginx 上留过一条把旧路径转到标准路径的
+别名（X-4 第 ① 步）。2026-09-15 迁移完成、别名删除，`LEGACY_INBOUND_PATH` 置为 `None`：
+这条判据从此反过来要求任何旧路径都不得回到 nginx。依据是平台登记处
+`assertStandardWebhookPath` 只给 vxtpl / yucer 留了旧路径豁免——本产品在平台上只可能
+登记在标准路径，旧路径的入站别名没有任何投递会用到。
 
 反证做法（每条判据都这么验过，确认会红）：
   - 把常量改成 `/provisioning/webhook`      → 第 1 条红
@@ -88,15 +90,15 @@ RETIRED_PATHS = ["/api/platform/provisioning/webhook", "/provisioning/webhook"]
 
 #: 迁移期允许保留的**入站别名**，或 `None` 表示迁移已完成。
 #:
-#: 平台侧当前登记的还是旧地址，所以 nginx 上要留一条别名把它转到标准路径——
-#: 这是 X-4 的第 ① 步「先同时收两个路径」。**不留这条就是跳过第 ① 步直接做第 ②**：
-#: 发版那一刻起，平台按旧地址投递会落到 SPA catch-all 拿回 index.html 和 HTTP 200，
-#: 投递被判为送达而产品什么都没收到，两侧都不报错。
+#: 迁移期它取旧路径，nginx 上留一条别名把旧地址转到标准路径（X-4 第 ① 步
+#: 「先同时收两个路径」）——不留就是跳过第 ① 步直接做第 ②，发版那一刻起平台按旧地址
+#: 投递会落到 SPA catch-all 拿回 index.html 和 HTTP 200，两侧都不报错。
 #:
-#: **第 ③ 步的删除条件就写在这里**：平台侧把登记地址改成标准路径之后，
-#: 把这个常量置成 `None`——守卫会立刻反过来要求 nginx 上那条 location 必须消失。
-#: 这样「什么时候能删」不靠人记得，它是一处会进 diff 的显式动作。
-LEGACY_INBOUND_PATH: str | None = "/provisioning/webhook"
+#: **2026-09-15 置为 `None`，即第 ③ 步。** 平台侧只可能把本产品登记在标准路径
+#: （登记处的旧路径豁免只剩 vxtpl / yucer），别名随之删除。置 `None` 之后守卫反过来
+#: 要求 nginx 里不得出现任何旧路径——想把别名加回来，得先改这个常量，那是一次会进 diff
+#: 的显式动作。
+LEGACY_INBOUND_PATH: str | None = None
 
 
 def read(path: Path) -> str:
