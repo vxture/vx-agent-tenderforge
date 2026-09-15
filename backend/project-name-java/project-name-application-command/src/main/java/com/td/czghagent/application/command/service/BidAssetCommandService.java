@@ -52,9 +52,9 @@ class BidAssetCommandService {
         if (!"GALLERY".equals(category)) {
             assetIngestionService.ensureIngested(asset);
         }
-        return bidRepository.listAssets(context.user().id(), context.user().tenant(), category, null)
-                .stream()
-                .filter(item -> item.id().equals(id)).findFirst().orElseThrow();
+        // 按标识取回，不去翻列表：列表是分页的，刚上传的这一条不保证在第一页。
+        return bidRepository.findActiveAsset(id, context.user().id(), context.user().tenant())
+                .orElseThrow();
     }
 
     @Transactional

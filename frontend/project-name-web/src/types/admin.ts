@@ -1,17 +1,8 @@
 // GENERATED_BY_AI
 // MODEL: gpt-5
 // DATE: 2026-08-02
-/**
- * 无界流水的响应形状（产品接入通则 A-3 / A-4）。
- *
- * 没有 total 与 totalPages 是刻意的：审计表因为系统自己跑而增长，
- * 一个总数在返回给界面的那一刻就已经过时，而它的代价是一次全表计数。
- * 「还能不能继续翻」由 nextCursor 回答，这是唯一不会自相矛盾的答案。
- */
-export interface CursorPage<T> {
-  items: T[]
-  nextCursor: string | null
-}
+/** 游标分页形状移到 types/page，标书、素材、导出列表与审计共用同一个定义。 */
+export type { CursorPage } from './page'
 
 /**
  * 审计条目，字段名取自《产品接入通则》X-3 的最小字段集。

@@ -11,6 +11,7 @@ import com.td.czghagent.domain.model.BidSummary;
 import com.td.czghagent.domain.model.TenantScope;
 import com.td.czghagent.domain.model.BidWorkspace;
 import com.td.czghagent.domain.model.BidWorkspaceViews;
+import com.td.czghagent.domain.model.PageCursor;
 
 import java.util.List;
 import java.util.Optional;
@@ -24,8 +25,14 @@ public interface BidRepository {
      *
      * <p>归属人与工作空间<strong>两个条件都要</strong>：同一个平台用户可以属于多个工作空间，
      * 只按归属人过滤会让 A 空间的标书出现在 B 空间里——而那个响应看起来完全正常。
+     *
+     * <p>键集分页（通则 A-3）：按 {@code (updatedAt, id)} 降序，{@code after} 为空表示从头开始，
+     * 取 {@code limit} 行——调用方多取一条来判断还有没有下一页。{@code id} 是并列时的决胜键，
+     * 缺了它，同一时刻更新的几份标书会在翻页时重复或漏掉。
+     * 锚点时间取的是 {@code updatedAt}：翻页途中被编辑的标书可能跨页移动，这是保留
+     * 「最近更新在前」这个排序所接受的代价。
      */
-    List<BidSummary> listBids(String ownerId, TenantScope tenant);
+    List<BidSummary> listBids(String ownerId, TenantScope tenant, PageCursor after, int limit);
 
     /** 请求路径的归属校验：归属人 + 工作空间。见 {@link #listBids}。 */
     Optional<BidDocument> findBid(String bidId, String ownerId, TenantScope tenant);
@@ -118,7 +125,12 @@ public interface BidRepository {
 
     void insertAsset(AssetRecord asset);
 
-    List<BidReferenceAsset> listAssets(String ownerId, TenantScope tenant, String category, String keyword);
+    /** 键集分页，按 {@code (updatedAt, id)} 降序；约定同 {@link #listBids}。 */
+    List<BidReferenceAsset> listAssets(String ownerId, TenantScope tenant, String category, String keyword,
+                                       PageCursor after, int limit);
+
+    /** 按标识取一个可用素材——上传后回显用，不必为找一条去翻整张表。 */
+    Optional<BidReferenceAsset> findActiveAsset(String assetId, String ownerId, TenantScope tenant);
 
     Optional<AssetRecord> findAsset(String assetId, String ownerId, TenantScope tenant);
 
@@ -143,7 +155,14 @@ public interface BidRepository {
      */
     OptionalLong raiseMeteredCharacters(String bidId, long characters);
 
-    List<BidExport> listExports(String bidId);
+    /**
+     * 一份标书的成果导出，键集分页，按 {@code (createdAt, id)} 降序——第一条就是最近生成的那份。
+     * 约定同 {@link #listBids}。
+     */
+    List<BidExport> listExports(String bidId, PageCursor after, int limit);
+
+    /** 按标识取一次导出的对外视图——创建后回显用。 */
+    Optional<BidExport> findExportSummary(String bidId, String exportId);
 
     /**
      * 按标识取一次成果导出。

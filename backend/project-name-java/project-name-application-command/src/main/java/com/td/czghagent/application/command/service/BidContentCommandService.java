@@ -283,8 +283,8 @@ class BidContentCommandService {
             fileStorage.delete(stored.objectKey());
             throw exception;
         }
-        return bidRepository.listExports(bidId).stream()
-                .filter(item -> item.id().equals(exportId)).findFirst().orElseThrow();
+        // 按标识取回，不去翻列表：列表是分页的。
+        return bidRepository.findExportSummary(bidId, exportId).orElseThrow();
     }
 
     private TenderAiGateway.FrozenDictionary frozenDictionary(BidWorkspace workspace) {

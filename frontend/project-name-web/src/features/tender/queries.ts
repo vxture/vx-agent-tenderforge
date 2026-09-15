@@ -15,22 +15,25 @@ import type {
 } from '@/types/tender'
 
 export const tenderKeys = {
+  /** 所有标书列表页的前缀：invalidate 它会让每一页都重新取。 */
   bids: ['tender-bids'] as const,
+  bidPage: (cursor: string | null) => ['tender-bids', cursor] as const,
   workspace: (bidId: string) => ['tender-workspace', bidId] as const,
   metadata: (bidId: string) => ['tender-metadata', bidId] as const,
   outline: (bidId: string) => ['tender-outline', bidId] as const,
   progress: (bidId: string) => ['tender-generation-progress', bidId] as const,
   chapter: (bidId: string, chapterId: string) =>
     ['tender-chapter', bidId, chapterId] as const,
-  assets: (category?: AssetCategory, keyword = '') => ['tender-assets', category, keyword] as const,
+  assets: (category?: AssetCategory, keyword = '', cursor: string | null = null) =>
+    ['tender-assets', category, keyword, cursor] as const,
 }
 
-export const useBidsQuery = () =>
+export const useBidsQuery = (cursor: string | null = null) =>
   useQuery({
-    queryKey: tenderKeys.bids,
-    queryFn: tenderApi.listBids,
+    queryKey: tenderKeys.bidPage(cursor),
+    queryFn: () => tenderApi.listBids({ cursor }),
     refetchInterval: (query) =>
-      query.state.data?.some((bid) =>
+      query.state.data?.items.some((bid) =>
         ['PARSING', 'OUTLINE_GENERATING', 'GENERATING', 'LAYOUT_QUEUED', 'LAYOUT_RUNNING'].includes(
           bid.status
         )
@@ -83,10 +86,14 @@ export const useBidChapterQuery = (bidId: string, chapterId: string) =>
     enabled: Boolean(bidId && chapterId),
   })
 
-export const useTenderAssetsQuery = (category?: AssetCategory, keyword = '') =>
+export const useTenderAssetsQuery = (
+  category?: AssetCategory,
+  keyword = '',
+  cursor: string | null = null
+) =>
   useQuery({
-    queryKey: tenderKeys.assets(category, keyword),
-    queryFn: () => tenderApi.listAssets(category, keyword),
+    queryKey: tenderKeys.assets(category, keyword, cursor),
+    queryFn: () => tenderApi.listAssets({ category, keyword, cursor }),
   })
 
 const metadataFromWorkspace = (workspace: BidWorkspace) => ({
