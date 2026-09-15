@@ -11,6 +11,8 @@ export const SHELL_TEXT = {
   brandName: '标书编写智能体',
   website: '官网',
   workspaceFallback: '当前工作区',
+  // 身份块不带可见标签（owner 2026-09-16），读屏软件靠这一句知道这块是什么。
+  identityCardLabel: '登录身份与当前工作区',
   noAccessTitle: '当前工作区未订阅',
   subscribeCta: '前往订阅',
   noRolesTitle: '还没有为你分配角色',
@@ -45,8 +47,6 @@ export const NO_SUBSCRIPTION_TEXT = {
   badge: '未订阅',
   description: '请先完成订阅，或联系工作区管理员订阅。',
   ariaLabel: '当前工作区尚未订阅',
-  identityLabel: '登录身份',
-  workspaceLabel: '当前工作区',
   signOut: '退出登录',
 
   lapsedTitle: '当前工作区的订阅已失效',
@@ -96,8 +96,6 @@ export const SIGNED_OUT_TEXT = {
 export const NO_ROLES_TEXT = {
   badge: '无角色',
   ariaLabel: '还没有为你分配角色',
-  identityLabel: '登录身份',
-  workspaceLabel: '当前工作区',
   recheck: '重新检查',
   signOut: '退出登录',
 } as const
@@ -110,6 +108,7 @@ export const GATE_PREVIEW_TEXT = {
   noRoles: '无角色',
   signedOut: '已退出',
   sampleUser: '示例成员',
+  sampleOrg: '示例组织',
   sampleWorkspace: '示例工作区',
 } as const
 

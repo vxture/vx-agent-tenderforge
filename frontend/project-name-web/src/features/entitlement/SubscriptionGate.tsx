@@ -10,9 +10,10 @@ import { entitlementApi } from '@/api/modules/entitlement'
 import { NoSubscription } from '@/app/components/no-subscription'
 import { useMessages } from '@/app/lib/i18n/provider'
 import { useAuthStore } from '@/stores/auth'
+import { platformAvatarSrc } from '@/utils/avatar'
 
 import { accessState } from './access'
-import { identityLabelOf, workspaceLabelOf } from './identity'
+import { identityLabelOf, workspaceLinesOf } from './identity'
 import { entitlementKeys, useEntitlementQuery } from './queries'
 
 /**
@@ -59,8 +60,11 @@ export function SubscriptionGate({ children }: { children: ReactNode }) {
     <NoSubscription
       access={access}
       subscribeHref={entitlement.data?.subscribeUrl ?? null}
-      userName={identityLabelOf(user)}
-      workspaceLabel={workspaceLabelOf(user, SHELL_TEXT.workspaceFallback)}
+      identity={{
+        userName: identityLabelOf(user),
+        avatarSrc: platformAvatarSrc(user?.avatarUrl),
+        ...workspaceLinesOf(user, SHELL_TEXT.workspaceFallback),
+      }}
       onRetry={() => mutate()}
       retrying={rechecking || entitlement.isFetching}
     />

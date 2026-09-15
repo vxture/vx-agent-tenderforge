@@ -3,10 +3,10 @@
 // DATE: 2026-09-15
 import type { CurrentUser } from '@/types/auth'
 
-// 门禁页上「谁在登录、被拒的是哪个工作区」两栏的取值。
+// 门禁页身份块的取值（身份块本身见 app/components/gate-identity.tsx）。
 //
 // 名字全部来自平台 access token（name、active_org_name、active_workspace_name），经会话与
-// `/api/auth/me` 原样带到这里。此前这两栏显示的是 `usr_<uuid>` 与兜底文案「当前工作区」：
+// `/api/auth/me` 原样带到这里。此前门禁页显示的是 `usr_<uuid>` 与兜底文案「当前工作区」：
 // 平台把名字签在 access token 里，服务端却只从 id_token 读。
 
 /** 登录身份：显示名；平台没给名字时退到账号标识，总比一栏空白好认。 */
@@ -14,15 +14,24 @@ export function identityLabelOf(user: CurrentUser | null | undefined): string {
   return user?.displayName || user?.username || ''
 }
 
+export interface WorkspaceLines {
+  /** 第一行。平台没给、或与工作区同名时为 null——同一个名字不写两行。 */
+  readonly orgName: string | null
+  /** 第二行。平台没给时是兜底文案，不拿组织名或标识凑数。 */
+  readonly workspaceName: string
+}
+
 /**
- * 当前工作区：「组织 / 工作区」。
+ * 组织与工作区，分两行（owner 2026-09-16）。
  *
- * 组织要说出来：同名工作区在不同组织里很常见，只写工作区名，走错组织的人发现不了自己走错了。
- * 两者同名时只写一次；平台没给工作区名时用兜底文案，不拿组织名或标识凑数。
+ * 此前拼成「组织 / 工作区」一串，放进卡片会被截断，截掉的正是工作区名。两行各自完整。
+ * 组织要说出来：同名工作区（「default workspace」）在不同组织里很常见，只写工作区名，走错组织的人发现不了。
  */
-export function workspaceLabelOf(user: CurrentUser | null | undefined, fallback: string): string {
-  const workspace = user?.workspaceName?.trim()
-  if (!workspace) return fallback
-  const org = user?.orgName?.trim()
-  return org && org !== workspace ? `${org} / ${workspace}` : workspace
+export function workspaceLinesOf(user: CurrentUser | null | undefined, fallback: string): WorkspaceLines {
+  const workspace = user?.workspaceName?.trim() || null
+  const org = user?.orgName?.trim() || null
+  return {
+    orgName: org && org !== workspace ? org : null,
+    workspaceName: workspace ?? fallback,
+  }
 }

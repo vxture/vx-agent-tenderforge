@@ -7,7 +7,7 @@ import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 import { useAuthStore } from '@/stores/auth'
@@ -113,22 +113,26 @@ describe('SubscriptionGate', () => {
     expect(await screen.findByRole('heading', { name: '当前工作区未订阅' })).toBeTruthy()
     expect(screen.queryByText('产品内容')).toBeNull()
     expect(screen.getByText('未订阅')).toBeTruthy()
-    // 只有产品能给的两件事：谁在登录、被拒的是哪个工作区——说的是平台签发的名字，不是标识。
-    expect(screen.getByText('登录身份')).toBeTruthy()
-    expect(screen.getByText('编制员小王')).toBeTruthy()
-    expect(screen.getByText('华东设计院 / 投标一部')).toBeTruthy()
+    // 只有产品能给的两件事：谁在登录、在哪个工作区——说的是平台签发的名字，不是标识；不带标签（owner 2026-09-16）。
+    const identity = within(screen.getByRole('group', { name: '登录身份与当前工作区' }))
+    expect(identity.getByText('编制员小王')).toBeTruthy()
+    // 组织一行、工作区一行，各自完整，不拼成一串去被截断。
+    expect(identity.getByText('华东设计院')).toBeTruthy()
+    expect(identity.getByText('投标一部')).toBeTruthy()
+    expect(screen.queryByText('登录身份')).toBeNull()
     expect(screen.queryByText('usr-1')).toBeNull()
   })
 
-  it('会话里没有工作区名时（名字上线之前建立的会话）显示兜底文案，不拿标识凑数', async () => {
+  it('会话里没有工作区名时（名字上线之前建立的会话）第二行显示兜底文案，不拿标识凑数', async () => {
     useAuthStore.getState().setUser(signedIn({ orgName: null, workspaceName: null }))
     api.current.mockResolvedValue(view())
 
     renderGate()
 
     await screen.findByRole('heading', { name: '当前工作区未订阅' })
-    // 标签「当前工作区」与兜底取值各一处。
-    expect(screen.getAllByText('当前工作区')).toHaveLength(2)
+    const identity = within(screen.getByRole('group', { name: '登录身份与当前工作区' }))
+    expect(identity.getByText('当前工作区')).toBeTruthy()
+    expect(identity.queryByText('usr-1')).toBeNull()
   })
 
   it('「前往订阅」是新开窗口的链接，指向服务端给的深链；页面本身不跳走（通则 C2）', async () => {
