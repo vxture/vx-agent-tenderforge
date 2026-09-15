@@ -7,10 +7,10 @@ import { createBrowserRouter, Navigate } from 'react-router'
 
 import { ShellBootScreen } from '@vxture/design-system'
 
+import { SignIn } from '@/app/components/sign-in'
 import { SubscriptionGate } from '@/features/entitlement/SubscriptionGate'
 import { MainLayout } from '@/layouts'
 import Forbidden from '@/pages/Forbidden'
-import Login from '@/pages/Login'
 import NotFound from '@/pages/NotFound'
 import PortalRedirect from '@/pages/PortalRedirect'
 import ServerError from '@/pages/ServerError'
@@ -33,7 +33,7 @@ const lazyProtectedPage = (loader: () => Promise<PageModule>) => async () => {
   return {
     Component: () => (
       <AuthGuard>
-        <SubscriptionGate standalone>
+        <SubscriptionGate>
           <Page />
         </SubscriptionGate>
       </AuthGuard>
@@ -108,7 +108,10 @@ const routes: RouteObject[] = [
     hydrateFallbackElement,
     lazy: lazyProtectedPage(() => import('@/features/tender/BidContentPage')),
   },
-  { path: '/login', element: <Login /> },
+  // 旧链接与书签：引导页本身就地渲染在任何没有会话的地址上，这里只为不让 /login 落到 404。
+  { path: '/login', element: <SignIn /> },
+  // 四张门禁页的预览：示例数据，不需要会话与平台（参照 yucer 的 gate-screens 预览路由）。
+  { path: '/gate-screens', lazy: lazyPage(() => import('@/app/demo/gate-screens')) },
   { path: '/403', element: <Forbidden /> },
   { path: '/404', element: <NotFound /> },
   { path: '/500', element: <ServerError /> },

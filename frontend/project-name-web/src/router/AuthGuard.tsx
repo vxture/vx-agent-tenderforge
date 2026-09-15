@@ -1,13 +1,17 @@
 // GENERATED_BY_AI
 // MODEL: gpt-5
 // DATE: 2026-07-29
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Navigate, useLocation } from 'react-router'
 
 import { useQuery } from '@tanstack/react-query'
 import { ShellBootScreen } from '@vxture/design-system'
 
 import { authApi } from '@/api/modules/auth'
+import { hasSignedOutMarker } from '@/app/auth/signed-out-marker'
+import { SignIn } from '@/app/components/sign-in'
+import { SignedOut } from '@/app/components/signed-out'
+import { consoleUrl } from '@/app/lib/console-url'
 import { useAuthStore } from '@/stores/auth'
 
 interface AuthGuardProps {
@@ -23,9 +27,14 @@ interface AuthGuardProps {
  * 然后每个业务请求各自 401 一次。
  *
  * 代价是每次进受保护路由要问一次服务端（react-query 缓存 60 秒）。
+ *
+ * 没有会话时就地渲染门禁页、不重定向（门禁页规范，参照 yucer 的布局）：保留地址，登录回来就是
+ * 读者要去的那一页。刚退出的人与从没登录过的人落在同一个地址、同样没有会话——读到已退出便条就给确认页，
+ * 否则给引导页。便条在挂载时读一次并记住：确认页挂载后会把它清掉，守卫之后重渲染时不能因此换成引导页。
  */
 export default function AuthGuard({ children }: AuthGuardProps) {
   const location = useLocation()
+  const [justSignedOut] = useState(hasSignedOutMarker)
   const user = useAuthStore((state) => state.user)
   const setUser = useAuthStore((state) => state.setUser)
   const clearAuth = useAuthStore((state) => state.clearAuth)
@@ -42,8 +51,7 @@ export default function AuthGuard({ children }: AuthGuardProps) {
   }, [clearAuth, currentUser.data, currentUser.isError, setUser])
 
   if (currentUser.isError) {
-    const redirect = encodeURIComponent(location.pathname + location.search)
-    return <Navigate to={`/login?redirect=${redirect}`} replace />
+    return justSignedOut ? <SignedOut consoleHref={consoleUrl()} /> : <SignIn />
   }
   if (currentUser.isPending) {
     return (
