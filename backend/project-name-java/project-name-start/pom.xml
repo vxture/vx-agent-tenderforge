@@ -46,6 +46,17 @@
             <artifactId>junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
+        <!--
+            工作流测试用 Temporal 自带的时间跳跃测试环境，进程内起测试服务，不需要 Docker。
+            工作流代码里的 Async、Promise、活动重试与 Workflow.getVersion 离开 Temporal 运行时不成立，
+            直接 new 实现类调方法验不到它们；版本与 temporal-sdk 保持一致。
+        -->
+        <dependency>
+            <groupId>io.temporal</groupId>
+            <artifactId>temporal-testing</artifactId>
+            <version>${temporal.version}</version>
+            <scope>test</scope>
+        </dependency>
 
     </dependencies>
     <build>
