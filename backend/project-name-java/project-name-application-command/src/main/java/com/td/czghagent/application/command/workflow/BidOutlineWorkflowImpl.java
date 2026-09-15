@@ -24,16 +24,8 @@ public class BidOutlineWorkflowImpl implements BidOutlineWorkflow {
         try {
             activities.process(taskId, bidId, ownerId, traceId, ipAddress);
         } catch (RuntimeException exception) {
-            activities.fail(taskId, bidId, rootMessage(exception));
+            activities.fail(taskId, bidId, WorkflowFailures.rootMessage(exception, "目录生成失败"));
             throw exception;
         }
-    }
-
-    private String rootMessage(RuntimeException exception) {
-        Throwable current = exception;
-        while (current.getCause() != null) {
-            current = current.getCause();
-        }
-        return current.getMessage() == null ? "目录生成失败" : current.getMessage();
     }
 }

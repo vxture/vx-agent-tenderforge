@@ -23,16 +23,8 @@ public class BidLayoutWorkflowImpl implements BidLayoutWorkflow {
         try {
             activities.render(layoutJobId, bidId, ownerId);
         } catch (RuntimeException exception) {
-            activities.fail(layoutJobId, bidId, rootMessage(exception));
+            activities.fail(layoutJobId, bidId, WorkflowFailures.rootMessage(exception, "标书排版失败"));
             throw exception;
         }
-    }
-
-    private String rootMessage(RuntimeException exception) {
-        Throwable current = exception;
-        while (current.getCause() != null) {
-            current = current.getCause();
-        }
-        return current.getMessage() == null ? "标书排版失败" : current.getMessage();
     }
 }
