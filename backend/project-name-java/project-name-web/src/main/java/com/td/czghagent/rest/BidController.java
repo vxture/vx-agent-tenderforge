@@ -12,6 +12,7 @@ import com.td.czghagent.domain.model.BidProductionState;
 import com.td.czghagent.domain.model.BidSummary;
 import com.td.czghagent.domain.model.BidWorkspace;
 import com.td.czghagent.domain.model.BidWorkspaceViews;
+import com.td.czghagent.domain.model.CursorPage;
 import com.td.czghagent.domain.model.StoredFile;
 import com.td.czghagent.rest.dto.BidRequests;
 import com.td.czghagent.rest.security.RequestIdentity;
@@ -57,9 +58,12 @@ public class BidController {
         this.queryService = queryService;
     }
 
+    /** 我的标书：{@code {items, nextCursor}}，{@code limit} 由服务端钳制到 200（通则 A-3 / A-4）。 */
     @GetMapping
-    public List<BidSummary> list(HttpServletRequest request) {
-        return queryService.list(RequestIdentity.user(request));
+    public CursorPage<BidSummary> list(@RequestParam(required = false) Integer limit,
+                                       @RequestParam(required = false) String cursor,
+                                       HttpServletRequest request) {
+        return queryService.list(RequestIdentity.user(request), limit, cursor);
     }
 
     @PostMapping
@@ -207,6 +211,12 @@ public class BidController {
         return commandService.resumeGeneration(bidId, RequestIdentity.operation(request));
     }
 
+    /**
+     * 最近的生成事件，<strong>最多 100 条</strong>，最新在前。
+     *
+     * <p>这是一个写下来的上限，不是分页的替代品（通则 A-3）：它回答「最近发生了什么」，
+     * 用于进度页滚动展示；完整的逐章结果在章节与生产状态里，不靠翻这份流水拼出来。
+     */
     @GetMapping("/{bidId}/generation-events")
     public List<BidProductionState.GenerationEvent> generationEvents(
             @PathVariable String bidId, HttpServletRequest request
@@ -272,10 +282,13 @@ public class BidController {
         return layoutService.start(bidId, RequestIdentity.operation(request));
     }
 
+    /** 成果导出：{@code {items, nextCursor}}，最近生成的在前。 */
     @GetMapping("/{bidId}/exports")
-    public List<BidExport> exports(@PathVariable String bidId,
-                                                HttpServletRequest request) {
-        return queryService.exports(bidId, RequestIdentity.user(request));
+    public CursorPage<BidExport> exports(@PathVariable String bidId,
+                                         @RequestParam(required = false) Integer limit,
+                                         @RequestParam(required = false) String cursor,
+                                         HttpServletRequest request) {
+        return queryService.exports(bidId, limit, cursor, RequestIdentity.user(request));
     }
 
     @PostMapping("/{bidId}/exports")

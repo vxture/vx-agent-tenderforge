@@ -6,6 +6,7 @@ package com.td.czghagent.infrastructure.repository;
 import com.td.czghagent.domain.exception.BusinessException;
 import com.td.czghagent.domain.model.BidExport;
 import com.td.czghagent.domain.model.BidWorkspace;
+import com.td.czghagent.domain.model.PageCursor;
 import com.td.czghagent.domain.repository.BidRepository;
 import java.time.LocalDateTime;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -315,10 +316,36 @@ final class JdbcBidTaskExportPersistence {
         return OptionalLong.of(previous);
     }
 
-    List<BidExport> listExports(String bidId) {
+    /**
+     * 工作台与元数据里内嵌的导出列表只带最近这么多份——写下来的上限（通则 A-3）。
+     * 完整历史走游标分页的 {@code GET /api/bids/{bidId}/exports}。
+     */
+    static final int WORKSPACE_EXPORT_LIMIT = 20;
+
+    /** 键集分页，{@code (created_at, id)} 降序；第一条就是最近生成的那份。 */
+    List<BidExport> listExports(String bidId, PageCursor after, int limit) {
+        if (after == null) {
+            return jdbcTemplate.query("""
+                    SELECT * FROM bid_export WHERE bid_id = ?
+                    ORDER BY created_at DESC, id DESC LIMIT ?
+                    """, BidJdbcMappers.EXPORT, bidId, limit);
+        }
         return jdbcTemplate.query("""
-                SELECT * FROM bid_export WHERE bid_id = ? ORDER BY version_no DESC
-                """, BidJdbcMappers.EXPORT, bidId);
+                SELECT * FROM bid_export WHERE bid_id = ?
+                  AND (created_at < ? OR (created_at = ? AND id < ?))
+                ORDER BY created_at DESC, id DESC LIMIT ?
+                """, BidJdbcMappers.EXPORT,
+                bidId, after.createdAt(), after.createdAt(), after.id(), limit);
+    }
+
+    List<BidExport> recentExports(String bidId) {
+        return listExports(bidId, null, WORKSPACE_EXPORT_LIMIT);
+    }
+
+    Optional<BidExport> findExportSummary(String bidId, String exportId) {
+        return jdbcTemplate.query("""
+                SELECT * FROM bid_export WHERE bid_id = ? AND id = ?
+                """, BidJdbcMappers.EXPORT, bidId, exportId).stream().findFirst();
     }
 
     Optional<BidRepository.ExportRecord> findExport(String bidId, String exportId) {

@@ -267,7 +267,8 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
         String other = signIn("tender-other");
         mockMvc.perform(get("/api/bids").cookie(session(owner)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(0));
+                .andExpect(jsonPath("$.items.length()").value(0))
+                .andExpect(jsonPath("$.nextCursor").isEmpty());
         JsonNode created = performJson(post("/api/bids"), owner, """
                 {"writingMethod":"SCORING_CRITERIA","title":"技术标投标文件",
                  "targetPages":60,"biddingMode":"BLIND"}
@@ -279,7 +280,7 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
                 .matches(".*T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?([+-]\\d{2}:\\d{2}|Z)$");
         mockMvc.perform(get("/api/bids").cookie(session(owner)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(1));
+                .andExpect(jsonPath("$.items.length()").value(1));
 
         mockMvc.perform(get("/api/bids/{bidId}", bidId).cookie(session(other)))
                 .andExpect(status().isForbidden())
@@ -579,7 +580,7 @@ class TenderWritingIntegrationTest extends PostgresBackedTest {
         assertThat(laidOut.path("exports").get(0).path("version").asInt()).isEqualTo(2);
         JsonNode exports = responseData(mockMvc.perform(
                         get("/api/bids/{bidId}/exports", bidId).cookie(session(owner)))
-                .andExpect(status().isOk()).andReturn());
+                .andExpect(status().isOk()).andReturn()).path("items");
         assertThat(exports).isNotEmpty();
         String exportId = exports.get(exports.size() - 1).path("id").asText();
         byte[] docx = mockMvc.perform(

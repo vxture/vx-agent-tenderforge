@@ -410,12 +410,22 @@ Compose 中 `api` 只提交工作流，`worker` 注册四个队列并执行 Acti
 
 | 情形 | 形状 | 本系统的例子 |
 | --- | --- | --- |
-| 无回显内容 | 裸 JSON 数组 | `/api/bids`、`/api/bid-assets`、`/api/bids/{bidId}/exports` |
-| 无界游标流水 | `{ items, nextCursor }` | `/api/admin/audit-logs` |
+| 有写下来的上限 | 裸 JSON 数组 | `/api/bids/{bidId}/generation-events`（最近 100 条）；工作台内嵌的 `exports`（最近 20 份） |
+| 没有写下来的上限 | `{ items, nextCursor }` | `/api/bids`、`/api/bid-assets`、`/api/bids/{bidId}/exports`、`/api/admin/audit-logs` |
 | 单个对象 | 对象本体 | 其余全部 |
 
-集合键一律叫 `items`；`nextCursor` 为 `null` 表示没有下一页。列表 `limit` 由服务端钳制到
-200，**不静默截断语义**——调用方按「返回条数等于上限」判断还有数据。
+**判据是「有没有人写下过这张表的上限」**（通则 A-3），不是「会不会因为系统自己跑而增长」。
+一个人在一个工作空间里能建多少份标书、传多少份素材、一份标书导出多少个版本，没有任何人
+写下过——所以这三个列表 2026-09-15 起改为游标分页，此前的裸数组是按旧判据归的类。
+
+键集游标锚在 `(时间, id)` 上：标书与素材取 `updatedAt`（保持「最近更新在前」，翻页途中
+被编辑的一行可能跨页移动，这是保留该排序接受的代价），导出取 `createdAt`（第一条就是最新，
+「下载最新」取 `limit=1`）。`id` 是并列时的决胜键，必须同时出现在排序与比较里——缺了它，
+同一时刻的几行在页边界上重复或漏掉，`ListCursorPaginationIntegrationTest` 专门造了时间相同的行来钉这一条。
+
+集合键一律叫 `items`；`nextCursor` 为 `null` 表示没有下一页，游标不透明、原样回传（A-5）。
+`limit` 由服务端钳制到 `[1, 200]`，缺省 20，**不静默截断语义**——调用方按 `nextCursor` 判断还有数据。
+上传素材、生成导出之后的回显按标识取回，不去翻列表：列表是分页的，新的那一条不保证在第一页。
 
 **出参时间一律带时区偏移**，如 `2026-09-15T14:00:00+08:00`（通则次要约定：时间一律 ISO-8601
 带时区字符串）。领域模型用挂钟时间 `LocalDateTime`（由库里的 `TIMESTAMPTZ` 经 `JdbcTimes` 转到 JVM 时区），
@@ -452,9 +462,9 @@ Compose 中 `api` 只提交工作流，`worker` 注册四个队列并执行 Acti
 
 | 方法 | 路径 | 作用 |
 | --- | --- | --- |
-| `GET/POST` | `/api/bid-assets` | 筛选个人素材 / 上传并异步解析素材 |
+| `GET/POST` | `/api/bid-assets` | 筛选个人素材（`category`、`keyword`，游标分页）/ 上传并异步解析素材 |
 | `DELETE` | `/api/bid-assets/{assetId}` | 删除当前用户素材 |
-| `GET/POST` | `/api/bids` | 查询我的标书 / 创建标书 |
+| `GET/POST` | `/api/bids` | 查询我的标书（游标分页，最近更新在前）/ 创建标书 |
 | `GET` | `/api/bids/{bidId}` | 完整工作区聚合 |
 | `GET` | `/api/bids/{bidId}/metadata` | 轻量阶段与状态元数据 |
 | `GET` | `/api/bids/{bidId}/outline` | 目录与章节摘要视图 |
