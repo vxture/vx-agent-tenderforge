@@ -24,9 +24,15 @@ public record UsageEvent(
 
     public static UsageEvent of(TenantScope tenant, UsageMetric metric,
                                 String entityId, String endUserId) {
+        return of(tenant, metric, entityId, endUserId, 1L);
+    }
+
+    /** 带数量的一笔：按量计的指标（如字数）用它；按次计的指标用上面那个。 */
+    public static UsageEvent of(TenantScope tenant, UsageMetric metric,
+                                String entityId, String endUserId, long amount) {
         return new UsageEvent(
                 tenant == null ? null : tenant.workspaceId(),
-                metric, 1L, metric.idempotencyKeyFor(entityId),
+                metric, amount, metric.idempotencyKeyFor(entityId),
                 endUserId, TaskContext.current());
     }
 }

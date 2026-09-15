@@ -190,7 +190,8 @@ class BidContentCommandServiceTest {
             this.service = new BidContentCommandService(
                     bidRepository, mock(FileStorage.class), mock(BidAiExecutionService.class),
                     mock(BidDocumentExporter.class), productionRepository, generationOrchestrator,
-                    generationService, support, metered::add);
+                    generationService, support, metered::add,
+                    new ExportUsageMeter(bidRepository, metered::add));
             when(bidRepository.findBid("bid-1", "owner-1", TENANT)).thenReturn(Optional.of(bid));
             when(bidRepository.loadWorkspace(bid)).thenReturn(workspace);
         }
@@ -224,7 +225,8 @@ class BidContentCommandServiceTest {
         private final BidContentCommandService service = new BidContentCommandService(
                 bidRepository, mock(FileStorage.class), mock(BidAiExecutionService.class),
                 mock(BidDocumentExporter.class), productionRepository, generationOrchestrator,
-                generationService, support, usageRecorder);
+                generationService, support, usageRecorder,
+                new ExportUsageMeter(bidRepository, usageRecorder));
 
         /** 取出唯一一条写出去的审计事件；没写或写了多条都让断言失败而不是静默取第一条。 */
         private AuditEvent capturedAudit() {

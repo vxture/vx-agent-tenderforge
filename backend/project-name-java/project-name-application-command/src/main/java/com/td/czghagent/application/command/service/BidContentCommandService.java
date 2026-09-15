@@ -43,6 +43,7 @@ class BidContentCommandService {
     private final BidGenerationService generationService;
     private final BidCommandSupport support;
     private final UsageRecorder usageRecorder;
+    private final ExportUsageMeter exportUsageMeter;
 
     BidContentCommandService(BidRepository bidRepository, FileStorage fileStorage,
                              BidAiExecutionService aiExecutionService,
@@ -51,7 +52,8 @@ class BidContentCommandService {
                              BidGenerationOrchestrator generationOrchestrator,
                              BidGenerationService generationService,
                              BidCommandSupport support,
-                             UsageRecorder usageRecorder) {
+                             UsageRecorder usageRecorder,
+                             ExportUsageMeter exportUsageMeter) {
         this.bidRepository = bidRepository;
         this.fileStorage = fileStorage;
         this.aiExecutionService = aiExecutionService;
@@ -61,6 +63,7 @@ class BidContentCommandService {
         this.generationService = generationService;
         this.support = support;
         this.usageRecorder = usageRecorder;
+        this.exportUsageMeter = exportUsageMeter;
     }
 
     BidWorkspace startGeneration(String bidId, OperationContext context) {
@@ -275,8 +278,7 @@ class BidContentCommandService {
             support.audit(context, bidId, "BID_EXPORT_CREATE", "生成标书DOCX成果V" + version);
             // 写在事务里，和 export 行同生同死：回滚了就没有这笔账。
             // 放到事务外「等成功再记」反而更脆——那之间的任何一次崩溃都会漏计。
-            usageRecorder.record(UsageEvent.of(
-                    bid.tenant(), UsageMetric.DOCUMENT_EXPORTS, exportId, context.user().id()));
+            exportUsageMeter.record(bid, workspace.chapters(), exportId, context.user().id());
         } catch (RuntimeException exception) {
             fileStorage.delete(stored.objectKey());
             throw exception;

@@ -12,6 +12,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.UUID;
 
 final class JdbcBidTaskExportPersistence {
@@ -293,6 +294,25 @@ final class JdbcBidTaskExportPersistence {
                 UPDATE bid_document SET status = 'EXPORTED', updated_at = CURRENT_TIMESTAMP,
                     revision = revision + 1 WHERE id = ?
                 """, export.bidId());
+    }
+
+    /**
+     * 先 {@code FOR UPDATE} 锁行，再判、再写。
+     *
+     * <p>不锁的话，两次并发导出会都读到旧水位：前一个抬到 100 报 100，后一个抬到 150
+     * 却按旧水位 0 报 150——重叠的 100 字被记了两遍，而两笔的幂等键不同，谁也拦不住。
+     * 锁住之后，后到的那个等前一个提交，读到的是 100，只报 50。
+     */
+    OptionalLong raiseMeteredCharacters(String bidId, long characters) {
+        Long previous = jdbcTemplate.queryForObject(
+                "SELECT metered_characters FROM bid_document WHERE id = ? FOR UPDATE",
+                Long.class, bidId);
+        if (previous == null || previous >= characters) {
+            return OptionalLong.empty();
+        }
+        jdbcTemplate.update(
+                "UPDATE bid_document SET metered_characters = ? WHERE id = ?", characters, bidId);
+        return OptionalLong.of(previous);
     }
 
     List<BidExport> listExports(String bidId) {

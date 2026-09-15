@@ -806,9 +806,13 @@ subject），`app_user.id` / `bid_document.id` 是 `UUID`；PostgreSQL 没有 `u
   `bid` 域 schema。外键统一在文件末尾 ALTER（引用关系有环，按依赖排序建表
   会在环上断掉）。
 * `97_service_role.sql` —— 最小权限角色与 `search_path`。
-* `98_column_locks.sql` —— 列级 UPDATE 白名单。19 张表有可写列，
-  20 张追加型表一律不给。
+* `98_column_locks.sql` —— 列级 UPDATE 白名单。17 张表有可写列，
+  22 张追加型表一律不给（数字以 `check_column_locks.py` 的输出为准）。
 * `incr/NNNN_*.sql` —— 结构增量，必须自己幂等（`apply.sh` 会整个重放）。
+
+施加顺序是 **基线 → 增量 → 97 → 98**：权限排在结构之后，增量新加的表拿得到 97 的授权、新加的列
+让得了 98 的 GRANT。2026-09-15 之前增量排在 98 之后——第一个加可写列的增量（`0001` 的
+`metered_characters`）就会让活库上的 98 倒在「列不存在」上，而空库施加看不出来。
 
 2026-09-10 之前这里是 Flyway 的 30 个 `V*.sql`，与治理规范
 「常规部署链不跑 migration/seed」冲突。整改过程与暴露出的四个只有真引擎
@@ -819,18 +823,39 @@ subject），`app_user.id` / `bid_document.id` 是 `UUID`；PostgreSQL 没有 `u
 `platform_usage_event`，主键就是幂等键——重放天然是无操作，并发同键插入撞主键，
 而撞主键正是「这条已经记过了」的正确答案。
 
-计量点两个，都在 `BidContentCommandService`：
+三个指标，挂在正文生成入口与两条导出路径上。**它们都是统计维度，不是配额计量**——配额与计费
+走 token 换算的 credits（推理经 Atlas 计量）；产品报的是 Atlas 看不见的业务量，回答「产出了多少」，
+不回答「还能用多少」。
 
-| 指标 | 触发点 | 幂等键 |
-| --- | --- | --- |
-| `tenderforge.bid.generations` | 正文生成任务**创建成功**之后 | 任务 id |
-| `tenderforge.document.exports` | 导出事务内、`insertExport` 之后 | export id |
+| 指标 | 触发点 | 用量 | 幂等键 |
+| --- | --- | --- | --- |
+| `tenderforge.bid.generations` | `BidContentCommandService`：正文生成任务**创建成功**之后 | 1 | 任务 id |
+| `tenderforge.document.exports` | 两条导出路径（同步导出、正式排版 `BidLayoutProcessor`）写成 export 行之后 | 1 | export id |
+| `tenderforge.document.characters` | 同上，全文字数**超过高水位**时 | 超出高水位的字数 | 标书 id + 新水位 |
 
-两处的键都取被计量那个东西自己的标识，不是随机 UUID。差别在重试上：
+两条导出路径共用 `ExportUsageMeter`，不各写一遍。**正式排版这条此前一次都没计**——只有同步兼容导出在记，
+于是正式排版产出的成果文档全部不在账上，2026-09-15 补上。
+
+**字数按高水位计。** 目标是「最终交付的标书有多少字」（如 40 万字），与 docx 字数基本对应、允许少量偏差，
+不追踪中间反复修改的细节。口径 = 各章标题 + 正文的可见字符（去标签、去空白，与界面「全文正文共 N 字」
+同一套剥离规则）；封面、目录与没有落到章节上的上级标题不计，是与 Word 字数之间可接受的偏差来源。
+
+每次导出算出全文字数 N，与 `bid_document.metered_characters`（已报高水位 H，`incr/0001`）比：
+N > H 才报 N − H 并把 H 抬到 N，否则不报。于是一份标书累计报出的字数 = 它导出过的最大全文字数——
+反复导出不虚增，改短不回退，改长只补差额。
+
+* **行锁。** 抬水位先 `SELECT … FOR UPDATE` 再判再写。不锁时两次并发导出都读到旧水位，重叠的部分被记两遍，
+  而两笔的幂等键不同，谁也拦不住。`ExportCharacterMeteringIntegrationTest` 用真实行锁复现这个交错。
+* **与缓冲同一事务。** `ExportUsageMeter.record` 是 `@Transactional`：同步导出里并入导出事务；正式排版没有
+  外层事务，它自己开一个。分开提交的话，缓冲写失败时水位已经抬过去，那段字数再也不会被报。
+* **幂等键** = 指标名 + 标书 id + 新水位。水位只增不减，同一个值不会被抬到第二次。
+* **不动 `revision`。** 那是界面的乐观锁版本，计量不是用户可见的修改。
+
+键都取被计量那个东西自己的标识，不是随机 UUID。差别在重试上：
 用户连点三次生成只会产生一个任务，账上也只有一笔；换成随机键，
 连点、前端重试、网关重放会各记一次，而它们在日志里长得和三次真实生成一模一样。
 
-导出那条写在**事务里**，和 export 行同生同死——回滚了就没有这笔账，不需要补偿逻辑。
+同步导出那条写在**事务里**，和 export 行同生同死——回滚了就没有这笔账，不需要补偿逻辑。
 这是落库缓冲相对进程内缓冲的实际好处，不只是「重启不丢」。
 
 **没有 token 指标，是刻意的。** 推理用量由 Atlas 作为唯一入口计量，产品再报一次
@@ -1063,7 +1088,7 @@ Spring 的 `RestClient` 把读超时包成普通的 `RestClientException`，
 
 库 `vx_tenderforge_db`、角色 `tenderforge_svc`（ADR-007），最小权限
 （SELECT/INSERT/DELETE，无 DDL，无整表 UPDATE）+ 列级 UPDATE 白名单
-（`98_column_locks.sql`，19 张表 158 个可写列，20 张追加型表一律不给）。
+（`98_column_locks.sql`，2026-09-15 为 17 张表 151 个可写列，22 张追加型表一律不给）。
 
 ### ~~TD-003 · MySQL~~ —— 2026-09-10 已销号
 
