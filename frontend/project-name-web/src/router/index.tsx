@@ -8,6 +8,7 @@ import { createBrowserRouter, Navigate } from 'react-router'
 import { ShellBootScreen } from '@vxture/design-system'
 
 import { SignIn } from '@/app/components/sign-in'
+import { SHELL_TEXT } from '@/app/lib/messages'
 import { SubscriptionGate } from '@/features/entitlement/SubscriptionGate'
 import { MainLayout } from '@/layouts'
 import Forbidden from '@/pages/Forbidden'
@@ -20,8 +21,9 @@ import RouteErrorPage from './RouteErrorPage'
 
 type PageModule = { default: ComponentType }
 
+// 路由表在模块加载时建好，拿不到语言上下文；启动屏只闪一下，用默认词典的产品名。
 const hydrateFallbackElement = (
-  <ShellBootScreen label="TenderAgent" description="正在加载工作台" delayMs={250} />
+  <ShellBootScreen label={SHELL_TEXT.brandName} description="正在加载工作台" delayMs={250} />
 )
 
 const lazyPage = (loader: () => Promise<PageModule>) => async () => ({

@@ -105,7 +105,8 @@ public class OidcLoginService {
                 claims.tenant(), String.join(",", claims.roles()),
                 tokens.accessToken(), tokens.refreshToken(),
                 now.plusSeconds(tokens.expiresInSeconds()),
-                now.plusSeconds(gateway.sessionSeconds())
+                now.plusSeconds(gateway.sessionSeconds()),
+                claims.orgName(), claims.workspaceName()
         );
         sessions.insertSession(session, SessionToken.hash(cookieValue));
 
@@ -148,7 +149,8 @@ public class OidcLoginService {
         return new RpSession(
                 session.id(), session.subject(), session.displayName(), session.email(),
                 session.picture(), session.tenant(), session.rolesCsv(),
-                refreshed.accessToken(), nextRefresh, accessExpiresAt, session.expiresAt());
+                refreshed.accessToken(), nextRefresh, accessExpiresAt, session.expiresAt(),
+                session.orgName(), session.workspaceName());
     }
 
     /**

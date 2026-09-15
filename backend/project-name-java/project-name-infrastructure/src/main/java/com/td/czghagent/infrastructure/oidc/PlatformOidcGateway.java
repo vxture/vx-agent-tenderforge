@@ -60,8 +60,17 @@ public class PlatformOidcGateway implements OidcGateway {
     /**
      * 读出平台声明。
      *
-     * <p>身份声明取自<strong>已验签的 id_token</strong>；租户轴与治理角色取自
-     * access token。后者也是 JWT，但这里<strong>不验它的签名</strong>：
+     * <p>subject 与 nonce 只认<strong>已验签的 id_token</strong>；租户轴与治理角色只认 access token。
+     *
+     * <p><strong>人的名字、邮箱、头像与组织 / 工作空间名取自 access token</strong>，id_token 只作回退。
+     * 平台给租户用户签的 id_token 里只有 {@code sid}、{@code nonce}、{@code auth_time}、{@code userType}：
+     * {@code name}、{@code preferred_username}、{@code email}、{@code picture} 与
+     * {@code active_org_name}、{@code active_workspace_name} 全部签在 access token 里
+     * （auth-bff {@code oidc.service.ts} 的 {@code buildTenantIdentityClaims}——跨域 RP 读的是 access token）。
+     * 此前这里只读 id_token，于是生产上显示名恒为空，门禁页把 {@code usr_<uuid>} 当成了人名，
+     * 工作区一栏只剩兜底文案。
+     *
+     * <p>access token 也是 JWT，但这里<strong>不验它的签名</strong>：
      * 它刚由 IdP 经已认证的 TLS 通道发来，而我们读它只是为了决定本地渲染与查询范围，
      * 不是为了做授权判定——真正的授权判定发生在被调方，那里会验签。
      * 这条界线要说清楚，否则下一个人会以为这里漏了一次校验。
@@ -72,13 +81,19 @@ public class PlatformOidcGateway implements OidcGateway {
         JWTClaimsSet accessClaims = decodeWithoutVerification(tokens.accessToken());
         return new PlatformClaims(
                 idClaims.getSubject(),
-                displayNameOf(idClaims),
-                stringClaim(idClaims, "email"),
-                stringClaim(idClaims, "picture"),
+                firstPresent(displayNameOf(accessClaims), displayNameOf(idClaims)),
+                firstPresent(stringClaim(accessClaims, "email"), stringClaim(idClaims, "email")),
+                firstPresent(stringClaim(accessClaims, "picture"), stringClaim(idClaims, "picture")),
                 stringClaim(accessClaims, "active_org"),
                 stringClaim(accessClaims, "active_workspace"),
-                rolesOf(accessClaims)
+                rolesOf(accessClaims),
+                stringClaim(accessClaims, "active_org_name"),
+                stringClaim(accessClaims, "active_workspace_name")
         );
+    }
+
+    private static String firstPresent(String preferred, String fallback) {
+        return preferred != null && !preferred.isBlank() ? preferred : fallback;
     }
 
     @Override

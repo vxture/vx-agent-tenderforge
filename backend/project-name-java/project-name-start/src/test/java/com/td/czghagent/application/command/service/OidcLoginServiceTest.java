@@ -176,6 +176,37 @@ class OidcLoginServiceTest {
     }
 
     /**
+     * 组织名与工作空间名随会话落库，并带到调用者身份上。
+     *
+     * <p>门禁页「当前工作区」读的就是它；丢在这一步，界面上只剩兜底文案，而登录本身一切正常。
+     */
+    @Test
+    void keepsTheOrganizationAndWorkspaceNamesOnTheSession() {
+        service.beginAuthorization("/");
+
+        OidcLoginService.CallbackResult result = service.completeAuthorization(
+                sessions.onlyAuthorizationRequest().state(), "code-1", "trace-1", "127.0.0.1");
+
+        assertThat(sessions.insertedSessions).singleElement().satisfies(stored -> {
+            assertThat(stored.orgName()).isEqualTo("华东设计院");
+            assertThat(stored.workspaceName()).isEqualTo("投标一部");
+        });
+        assertThat(result.session().toCurrentUser().orgName()).isEqualTo("华东设计院");
+        assertThat(result.session().toCurrentUser().workspaceName()).isEqualTo("投标一部");
+    }
+
+    /** 续期换的是票，不是人：名字原样带过去，不在续期之后变回兜底文案。 */
+    @Test
+    void refreshingKeepsTheOrganizationAndWorkspaceNames() {
+        gateway.nextRefresh = new OidcGateway.Tokens("new-access", "new-refresh", null, 3600);
+
+        RpSession refreshed = service.refreshIfNeeded(sessionExpiringIn(10));
+
+        assertThat(refreshed.orgName()).isEqualTo("华东设计院");
+        assertThat(refreshed.workspaceName()).isEqualTo("投标一部");
+    }
+
+    /**
      * IdP 不轮换刷新令牌时沿用旧的。
      *
      * <p>「没返回新的」是一种合法配置，不是缺失。把它当成缺失会在第一次续期后
@@ -220,7 +251,8 @@ class OidcLoginServiceTest {
         return new RpSession(
                 "s-1", "sub-1", "张三", null, null, null, "",
                 "old-access", "old-refresh",
-                LocalDateTime.now().plusSeconds(seconds), LocalDateTime.now().plusHours(12));
+                LocalDateTime.now().plusSeconds(seconds), LocalDateTime.now().plusHours(12),
+                "华东设计院", "投标一部");
     }
 
     // ── 登出 ────────────────────────────────────────────────────────────────
@@ -281,7 +313,7 @@ class OidcLoginServiceTest {
         public PlatformClaims readClaims(Tokens tokens, String expectedNonce) {
             lastExpectedNonce = expectedNonce;
             return new PlatformClaims("sub-1", "张三", null, null,
-                    "org-1", "ws-1", List.of("workspace:owner"));
+                    "org-1", "ws-1", List.of("workspace:owner"), "华东设计院", "投标一部");
         }
 
         @Override
@@ -321,6 +353,7 @@ class OidcLoginServiceTest {
     private static final class InMemorySessions implements RpSessionRepository {
         private final Map<String, AuthorizationRequest> requests = new HashMap<>();
         private final List<String> storedTokenHashes = new ArrayList<>();
+        private final List<RpSession> insertedSessions = new ArrayList<>();
         private final List<String> updatedRefreshTokens = new ArrayList<>();
         private final List<String> deletedSubjects = new ArrayList<>();
 
@@ -350,6 +383,7 @@ class OidcLoginServiceTest {
         @Override
         public void insertSession(RpSession session, String tokenHash) {
             storedTokenHashes.add(tokenHash);
+            insertedSessions.add(session);
         }
 
         @Override

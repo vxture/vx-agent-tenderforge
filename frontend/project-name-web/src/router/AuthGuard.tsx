@@ -12,6 +12,7 @@ import { hasSignedOutMarker } from '@/app/auth/signed-out-marker'
 import { SignIn } from '@/app/components/sign-in'
 import { SignedOut } from '@/app/components/signed-out'
 import { consoleUrl } from '@/app/lib/console-url'
+import { useMessages } from '@/app/lib/i18n/provider'
 import { useAuthStore } from '@/stores/auth'
 
 interface AuthGuardProps {
@@ -34,6 +35,7 @@ interface AuthGuardProps {
  */
 export default function AuthGuard({ children }: AuthGuardProps) {
   const location = useLocation()
+  const { SHELL_TEXT } = useMessages()
   const [justSignedOut] = useState(hasSignedOutMarker)
   const user = useAuthStore((state) => state.user)
   const setUser = useAuthStore((state) => state.setUser)
@@ -56,7 +58,7 @@ export default function AuthGuard({ children }: AuthGuardProps) {
   if (currentUser.isPending) {
     return (
       <ShellBootScreen
-        label="TenderAgent"
+        label={SHELL_TEXT.brandName}
         description="正在确认登录状态"
         delayMs={250}
       />

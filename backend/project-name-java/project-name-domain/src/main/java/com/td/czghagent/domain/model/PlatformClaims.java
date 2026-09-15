@@ -10,7 +10,8 @@ import java.util.Locale;
  * 从平台 access token 里读出来的声明。
  *
  * <p>token 里<strong>有</strong>的：{@code active_org}、{@code active_workspace}、
- * 治理 {@code roles} —— 四层模型的投影。
+ * 治理 {@code roles} —— 四层模型的投影；还有它们的显示名 {@code active_org_name}、
+ * {@code active_workspace_name}，以及人的 {@code name} / {@code email} / {@code picture}。
  *
  * <p>token 里<strong>没有</strong>的：<strong>entitlement，永远不会有</strong>。
  * token 是签发即冻结的快照，而权益会变；冻进去就只能等过期才失效。
@@ -23,8 +24,16 @@ public record PlatformClaims(
         String picture,
         String orgId,
         String workspaceId,
-        List<String> roles
+        List<String> roles,
+        String orgName,
+        String workspaceName
 ) {
+
+    /** 不带组织名与工作空间名的声明（平台没签发 {@code active_org_name} / {@code active_workspace_name} 时）。 */
+    public PlatformClaims(String subject, String displayName, String email, String picture,
+                          String orgId, String workspaceId, List<String> roles) {
+        this(subject, displayName, email, picture, orgId, workspaceId, roles, null, null);
+    }
 
     /**
      * 角色前缀分隔符。
@@ -75,6 +84,7 @@ public record PlatformClaims(
      */
     public CurrentUser toCurrentUser() {
         String roleCode = hasRole("workspace", "owner") ? "ADMIN" : "PLANNER";
-        return new CurrentUser(subject, subject, displayName, roleCode, picture, tenant());
+        return new CurrentUser(subject, subject, displayName, roleCode, picture, tenant(),
+                orgName, workspaceName);
     }
 }

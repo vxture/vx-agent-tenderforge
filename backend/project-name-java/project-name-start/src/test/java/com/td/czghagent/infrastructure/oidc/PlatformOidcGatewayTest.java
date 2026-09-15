@@ -21,8 +21,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /**
  * 两种票、两种读法。
  *
- * <p>身份声明取自<strong>已验签的 id_token</strong>；租户轴与治理角色取自
- * access token，而 access token 在这里<strong>不验签</strong>——它刚由 IdP 经
+ * <p>subject 与 nonce 取自<strong>已验签的 id_token</strong>；租户轴与治理角色取自
+ * access token，人的名字与组织 / 工作空间名也以 access token 为准（平台签在那里），
+ * id_token 只作回退。access token 在这里<strong>不验签</strong>——它刚由 IdP 经
  * 已认证的 TLS 通道发来，读它只是为了决定本地渲染与查询范围，不是做授权判定。
  *
  * <p>这条界线必须被测试固定住：把它实现反了（信 id_token 里的租户、或者去验
@@ -133,6 +134,57 @@ class PlatformOidcGatewayTest {
         assertThat(claims.orgId()).isEqualTo("org-1");
         assertThat(claims.workspaceId()).isEqualTo("ws-1");
         assertThat(claims.roles()).containsExactly("workspace:owner", "org:member");
+    }
+
+    /**
+     * 平台真实的签发形状：id_token 里没有任何身份声明，名字全在 access token。
+     *
+     * <p>auth-bff 给租户用户签的 id_token 只有 sid / nonce / auth_time / userType；
+     * name、preferred_username、email、picture 与 active_org_name、active_workspace_name
+     * 都签在 access token 里。只读 id_token 时显示名恒为空，门禁页把 usr_ 标识当成了人名。
+     */
+    @Test
+    void readsNamesFromTheAccessTokenWhenTheIdTokenCarriesNone() throws Exception {
+        OidcGateway.Tokens tokens = tokensWith(
+                idClaims().claim("sid", "sid-1").claim("userType", "tenant_user").build(),
+                accessClaims()
+                        .claim("name", "王小明")
+                        .claim("preferred_username", "wangxm")
+                        .claim("email", "w@example.com")
+                        .claim("picture", "https://accounts.example/avatar/usr_1?v=1")
+                        .claim("active_org", "org-1")
+                        .claim("active_org_name", "华东设计院")
+                        .claim("active_workspace", "ws-1")
+                        .claim("active_workspace_name", "投标一部")
+                        .build());
+
+        PlatformClaims claims = gateway.readClaims(tokens, NONCE);
+
+        assertThat(claims.displayName()).isEqualTo("王小明");
+        assertThat(claims.email()).isEqualTo("w@example.com");
+        assertThat(claims.picture()).isEqualTo("https://accounts.example/avatar/usr_1?v=1");
+        assertThat(claims.orgName()).isEqualTo("华东设计院");
+        assertThat(claims.workspaceName()).isEqualTo("投标一部");
+    }
+
+    /** 两张票都带名字时认 access token：那是平台给 RP 签身份的地方，与租户名同一张票。 */
+    @Test
+    void prefersTheAccessTokenNameOverTheIdTokenName() throws Exception {
+        OidcGateway.Tokens tokens = tokensWith(
+                idClaims().claim("name", "旧名字").build(),
+                accessClaims().claim("name", "王小明").build());
+
+        assertThat(gateway.readClaims(tokens, NONCE).displayName()).isEqualTo("王小明");
+    }
+
+    /** 组织名与工作空间名只认 access token，与租户标识同源——id_token 里的一律忽略。 */
+    @Test
+    void ignoresTenantNamesThatAppearOnlyInTheIdToken() throws Exception {
+        OidcGateway.Tokens tokens = tokensWith(
+                idClaims().claim("active_workspace_name", "别处的工作区").build(),
+                accessClaims().claim("active_workspace", "ws-1").build());
+
+        assertThat(gateway.readClaims(tokens, NONCE).workspaceName()).isNull();
     }
 
     /**

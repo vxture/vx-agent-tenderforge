@@ -12,6 +12,7 @@ import { useMessages } from '@/app/lib/i18n/provider'
 import { useAuthStore } from '@/stores/auth'
 
 import { accessState } from './access'
+import { identityLabelOf, workspaceLabelOf } from './identity'
 import { entitlementKeys, useEntitlementQuery } from './queries'
 
 /**
@@ -50,7 +51,7 @@ export function SubscriptionGate({ children }: { children: ReactNode }) {
   }, [blocked, mutate, rechecking])
 
   if (entitlement.isPending) {
-    return <ShellBootScreen label="TenderAgent" description="正在确认订阅状态" delayMs={250} />
+    return <ShellBootScreen label={SHELL_TEXT.brandName} description="正在确认订阅状态" delayMs={250} />
   }
   if (access.kind === 'granted') return <>{children}</>
 
@@ -58,8 +59,8 @@ export function SubscriptionGate({ children }: { children: ReactNode }) {
     <NoSubscription
       access={access}
       subscribeHref={entitlement.data?.subscribeUrl ?? null}
-      userName={user?.displayName || user?.username || ''}
-      workspaceLabel={SHELL_TEXT.workspaceFallback}
+      userName={identityLabelOf(user)}
+      workspaceLabel={workspaceLabelOf(user, SHELL_TEXT.workspaceFallback)}
       onRetry={() => mutate()}
       retrying={rechecking || entitlement.isFetching}
     />
