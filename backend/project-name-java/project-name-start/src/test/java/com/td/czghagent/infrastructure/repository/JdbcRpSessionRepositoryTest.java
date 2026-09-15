@@ -93,6 +93,10 @@ class JdbcRpSessionRepositoryTest extends PostgresBackedTest {
         assertThat(found.displayName()).isEqualTo("张三");
         assertThat(found.tenant()).isEqualTo(new TenantScope("org-1", "ws-1"));
         assertThat(found.accessToken()).isEqualTo("access-1");
+        assertThat(found.orgName()).isEqualTo("华东设计院");
+        assertThat(found.workspaceName())
+                .as("门禁页「当前工作区」读的就是它；读不回来界面只剩兜底文案，而登录一切正常")
+                .isEqualTo("投标一部");
     }
 
     /**
@@ -167,6 +171,6 @@ class JdbcRpSessionRepositoryTest extends PostgresBackedTest {
                 UUID.randomUUID().toString(), subject, "张三", "z@example.com", null,
                 new TenantScope("org-1", "ws-1"), "workspace:owner",
                 "access-1", "refresh-1",
-                LocalDateTime.now().plusMinutes(5), expiresAt);
+                LocalDateTime.now().plusMinutes(5), expiresAt, "华东设计院", "投标一部");
     }
 }

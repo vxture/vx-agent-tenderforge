@@ -26,6 +26,8 @@ const planner: CurrentUser = {
   displayName: '编制员',
   roleCode: 'PLANNER',
   avatarUrl: null,
+  orgName: null,
+  workspaceName: null,
   admin: false,
   consoleProfileUrl: null,
 }

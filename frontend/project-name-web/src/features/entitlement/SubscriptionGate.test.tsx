@@ -12,6 +12,7 @@ import userEvent from '@testing-library/user-event'
 
 import { useAuthStore } from '@/stores/auth'
 import { GateProviders } from '@/test/gate-providers'
+import type { CurrentUser } from '@/types/auth'
 import type { EntitlementView } from '@/types/entitlement'
 
 import { SubscriptionGate } from './SubscriptionGate'
@@ -74,19 +75,25 @@ function renderGate() {
   )
 }
 
+/** 名字取自平台 access token：name、active_org_name、active_workspace_name。 */
+const signedIn = (overrides: Partial<CurrentUser> = {}): CurrentUser => ({
+  id: 'usr-1',
+  username: 'usr-1',
+  displayName: '编制员小王',
+  roleCode: 'PLANNER',
+  avatarUrl: null,
+  orgName: '华东设计院',
+  workspaceName: '投标一部',
+  admin: false,
+  consoleProfileUrl: null,
+  ...overrides,
+})
+
 describe('SubscriptionGate', () => {
   beforeEach(() => {
     api.current.mockReset()
     api.refresh.mockReset()
-    useAuthStore.getState().setUser({
-      id: 'usr-1',
-      username: 'usr-1',
-      displayName: '编制员小王',
-      roleCode: 'PLANNER',
-      avatarUrl: null,
-      admin: false,
-      consoleProfileUrl: null,
-    })
+    useAuthStore.getState().setUser(signedIn())
   })
 
   it('有生效档位时直接放行，看不到门禁页', async () => {
@@ -106,10 +113,21 @@ describe('SubscriptionGate', () => {
     expect(await screen.findByRole('heading', { name: '当前工作区未订阅' })).toBeTruthy()
     expect(screen.queryByText('产品内容')).toBeNull()
     expect(screen.getByText('未订阅')).toBeTruthy()
-    // 只有产品能给的两件事：谁在登录、被拒的是哪个工作区。
-    expect(screen.getByText('编制员小王')).toBeTruthy()
-    // 工作区一栏：标签「当前工作区」与取值（产品拿不到工作区名时的兜底「当前工作区」）各一处。
+    // 只有产品能给的两件事：谁在登录、被拒的是哪个工作区——说的是平台签发的名字，不是标识。
     expect(screen.getByText('登录身份')).toBeTruthy()
+    expect(screen.getByText('编制员小王')).toBeTruthy()
+    expect(screen.getByText('华东设计院 / 投标一部')).toBeTruthy()
+    expect(screen.queryByText('usr-1')).toBeNull()
+  })
+
+  it('会话里没有工作区名时（名字上线之前建立的会话）显示兜底文案，不拿标识凑数', async () => {
+    useAuthStore.getState().setUser(signedIn({ orgName: null, workspaceName: null }))
+    api.current.mockResolvedValue(view())
+
+    renderGate()
+
+    await screen.findByRole('heading', { name: '当前工作区未订阅' })
+    // 标签「当前工作区」与兜底取值各一处。
     expect(screen.getAllByText('当前工作区')).toHaveLength(2)
   })
 

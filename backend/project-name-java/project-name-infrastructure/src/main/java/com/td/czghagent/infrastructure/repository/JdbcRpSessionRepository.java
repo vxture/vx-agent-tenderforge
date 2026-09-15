@@ -34,7 +34,9 @@ public class JdbcRpSessionRepository implements RpSessionRepository {
             rs.getString("access_token"),
             rs.getString("refresh_token"),
             JdbcTimes.localDateTime(rs, "access_expires_at"),
-            JdbcTimes.localDateTime(rs, "expires_at")
+            JdbcTimes.localDateTime(rs, "expires_at"),
+            rs.getString("org_name"),
+            rs.getString("workspace_name")
     );
 
     private static final RowMapper<AuthorizationRequest> AUTHORIZATION_REQUEST =
@@ -108,15 +110,16 @@ public class JdbcRpSessionRepository implements RpSessionRepository {
                 INSERT INTO rp_session(
                     id, token_hash, subject, display_name, email, picture,
                     org_id, workspace_id, roles, access_token, refresh_token,
-                    access_expires_at, expires_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    access_expires_at, expires_at, org_name, workspace_name
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 session.id(), tokenHash, session.subject(), session.displayName(),
                 session.email(), session.picture(),
                 session.tenant() == null ? null : session.tenant().orgId(),
                 session.tenant() == null ? null : session.tenant().workspaceId(),
                 session.rolesCsv(), session.accessToken(), session.refreshToken(),
-                session.accessExpiresAt(), session.expiresAt());
+                session.accessExpiresAt(), session.expiresAt(),
+                session.orgName(), session.workspaceName());
     }
 
     @Override

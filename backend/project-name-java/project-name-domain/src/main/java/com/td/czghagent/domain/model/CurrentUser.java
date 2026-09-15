@@ -16,8 +16,22 @@ public record CurrentUser(
         String displayName,
         String roleCode,
         String avatarUrl,
-        TenantScope tenant
+        TenantScope tenant,
+        String orgName,
+        String workspaceName
 ) {
+
+    /**
+     * 不带组织名与工作空间名的调用者。
+     *
+     * <p>两个名字只用于渲染（门禁页「当前工作区」），业务过滤一律按 {@link TenantScope} 的标识走；
+     * 系统身份与测试构造的调用者没有名字可给，就是 null。
+     */
+    public CurrentUser(String id, String username, String displayName, String roleCode,
+                       String avatarUrl, TenantScope tenant) {
+        this(id, username, displayName, roleCode, avatarUrl, tenant, null, null);
+    }
+
     public boolean isAdmin() {
         return "ADMIN".equals(roleCode);
     }

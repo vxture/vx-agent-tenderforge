@@ -68,7 +68,8 @@ public class MockOidcGateway implements OidcGateway {
         String workspace = "local:" + subject;
         return new PlatformClaims(
                 subject, "本地开发用户", "dev@example.invalid", null,
-                workspace, workspace, List.of("workspace:owner"));
+                workspace, workspace, List.of("workspace:owner"),
+                "本地开发组织", "本地开发工作区");
     }
 
     /**

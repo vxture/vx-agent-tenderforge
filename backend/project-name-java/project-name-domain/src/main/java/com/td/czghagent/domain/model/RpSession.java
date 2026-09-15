@@ -25,8 +25,22 @@ public record RpSession(
         String accessToken,
         String refreshToken,
         LocalDateTime accessExpiresAt,
-        LocalDateTime expiresAt
+        LocalDateTime expiresAt,
+        String orgName,
+        String workspaceName
 ) {
+
+    /**
+     * 不带组织名与工作空间名的会话（access token 没签发这两个名字时）。
+     *
+     * <p>名字取自 access token 的 {@code active_org_name} / {@code active_workspace_name}，只用于渲染。
+     */
+    public RpSession(String id, String subject, String displayName, String email, String picture,
+                     TenantScope tenant, String rolesCsv, String accessToken, String refreshToken,
+                     LocalDateTime accessExpiresAt, LocalDateTime expiresAt) {
+        this(id, subject, displayName, email, picture, tenant, rolesCsv, accessToken, refreshToken,
+                accessExpiresAt, expiresAt, null, null);
+    }
 
     /**
      * 提前续期的余量。
@@ -48,6 +62,7 @@ public record RpSession(
     public CurrentUser toCurrentUser() {
         String roleCode = rolesCsv != null && rolesCsv.toLowerCase(java.util.Locale.ROOT)
                 .contains("workspace:owner") ? "ADMIN" : "PLANNER";
-        return new CurrentUser(subject, subject, displayName, roleCode, picture, tenant);
+        return new CurrentUser(subject, subject, displayName, roleCode, picture, tenant,
+                orgName, workspaceName);
     }
 }
