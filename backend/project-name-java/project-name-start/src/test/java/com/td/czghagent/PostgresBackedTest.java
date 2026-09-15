@@ -189,5 +189,14 @@ public abstract class PostgresBackedTest {
         registry.add("spring.datasource.username", () -> "tenderforge_svc");
         registry.add("spring.datasource.password", () -> SERVICE_PASSWORD);
         registry.add("spring.datasource.driver-class-name", () -> "org.postgresql.Driver");
+        // 每个测试类的上下文配置不同（@Import、properties、@MockitoSpyBean），Spring 就缓存一份
+        // 独立的上下文，各带一个连接池，而且整个测试 JVM 期间都不关。池按生产缺省开到 10，
+        // 11 个上下文就超过容器 Postgres 的 100 个连接（留给 superuser 的 3 个不算）：
+        // 2026-09-15 PR #34 加了一个带 @Import 的测试类，第 11 个池起不来，排在后面的测试一律
+        // 「remaining connection slots are reserved for roles with the SUPERUSER attribute」，
+        // 而报错的测试本身什么都没改。测试里一条语句一个连接足够，并发用例最多同时占几个；
+        // 池压到 5，给后续新增的上下文留出余量。
+        registry.add("spring.datasource.hikari.maximum-pool-size", () -> "5");
+        registry.add("spring.datasource.hikari.minimum-idle", () -> "1");
     }
 }

@@ -147,11 +147,21 @@ public class PlatformS2STokenMinter implements S2STokenMinter {
                 || exception.getStatusCode().value() == 429
                 || "temporarily_unavailable".equals(code);
         if ("invalid_target".equals(code)) {
-            return failure(audience, code,
-                    "平台尚未在当前工作空间为本产品开通 " + audience + " 的调用权限", false);
+            LOGGER.warn("S2S token exchange to {} rejected: {}", audience, code);
+            return new BusinessException(TARGET_NOT_PROVISIONED,
+                    "平台尚未在当前工作空间为本产品开通 " + audience + " 的调用权限", 502, false, null);
         }
         return failure(audience, code, "换票被拒绝", retryable);
     }
+
+    /**
+     * 换票被拒的原因是「平台尚未在该工作空间为本产品开通」。
+     *
+     * <p>单独一个码，不与其他换票失败共用 {@code S2S_EXCHANGE_FAILED}：权益读取要据此区分
+     * 「平台答了：没有」与「没问到」。共用一个码时，一个配错的 client_secret
+     * 会让每个用户都看到「尚未订阅」。
+     */
+    public static final String TARGET_NOT_PROVISIONED = "S2S_TARGET_NOT_PROVISIONED";
 
     /**
      * 取 OAuth 错误码。

@@ -100,7 +100,7 @@ Compose 项目名是 `tenderforge`（`docker-compose.yml` 顶层 `name:`），�
 | 租户轴（`TenantScope`，见 §10.0） | 写入已落地；读过滤待 OIDC 切换 |
 | C1 身份（OIDC 授权码 + PKCE，服务端会话，反向登出验签） | **代码已落地**，等平台凭证做活体验证；未配置时走替身，部署态拒绝以替身启动 |
 | C1b S2S 换票（RFC 8693，每次调用现铸） | **代码已落地**，同上 |
-| C2 权益（`GET /platform/entitlements`，45s 缓存不落库） | **代码已落地**，同上；`GET /api/entitlement` 发能力集与两条门控公式 |
+| C2 权益（`GET /platform/entitlements`，45s 缓存不落库） | **代码已落地**，同上；`GET /api/entitlement` 发能力集与两条门控公式；**命令入口强制判定**（`EntitlementGuard`，见 §11） |
 | C3 上行（`POST /usage/consume`，缓冲 + 冲洗，永远 200） | **代码已落地**，同上；见 §10.4 |
 | C3 下发（provisioning webhook，HMAC 原始字节验签） | **代码已落地**，等平台配置投递地址与密钥；见 §10.5 |
 | Atlas 唯一模型出口 | **代码已落地**，见 §8.3；未配 `ATLAS_API_URL` 时仍直连，部署态拒绝以直连启动 |
@@ -972,6 +972,29 @@ provisioned 才放行」、开通时顺手建默认空间、把权益缓存拉�
   cookie，库里只存它的哈希，默认时长 `RP_SESSION_TTL`（12 小时）。
 - `AuthenticationFilter` 放行登录回路、平台回调、健康、OpenAPI 和错误页；其他 API 必须解析
   有效的平台会话。
+- **C2 权益强制点**（`EntitlementGuard`）：每个用户命令的第一件事是按工作空间权益判定，
+  不足即 403 `NOT_ENTITLED`（`retryable=false`）。能力按 `BidCapability` 划分——
+  `BID_AUTHORING`（新建、编辑、上传招标文件、冻结）、`AI_GENERATION`（解读、目录与正文生成、
+  AI 局部修订）、`CONSISTENCY_REVIEW`、`DOCUMENT_EXPORT`（排版、导出）、`ASSET_LIBRARY`（上传素材）。
+  没有 `BID_AUTHORING` 时产品只读；刻意放行的只有读、暂停生成、删除素材。判定在应用服务入口而非
+  控制器（一处规则、不会漏端点）或活动（不中途打断已放行的任务）。平台不可达时解析器返回空信封，
+  于是拒绝——沿用 fail-closed，不另立放行。**不做配额判定**：`QuotaPool.remaining` 是展示用快照，
+  consume「记账不裁决」（通则 C3），依据应是 consume 的 `gated` 回执。拒绝时前端渲染订阅引导，
+  深链取自 `GET /api/entitlement`，只在点击时打开。`check_entitlement_gates.py` 守着「每个命令方法
+  先判定」，`EntitlementEnforcementIntegrationTest` 对每个端点真发请求。
+- **订阅闸门（界面）**（2026-09-15）：已登录不等于能用。生产上一个未订阅工作空间（`status=null`、
+  `tier=null`）登录后直接进了智能体——权益只在命令被拒时才读。现在主布局内容区与全屏标书页都经
+  `SubscriptionGate`：`allowsProductSurface` 为真**且能力集非空**才放行（未知档位也不放行，与命令判定一致，
+  免得进得去、处处 403）；否则停在订阅页，按从未订阅 / 已失效（带数据保留期）/ 未知档位 / 暂时无法确认
+  四种情形给不同出路。只有个人资料页不挡。深链只在点击时新开窗口；「我已完成订阅」调
+  `POST /api/entitlement/refresh`，服务端先驱逐**本工作空间**的权益缓存再问平台，不让刚付完钱的人再等
+  45 秒；页面切回前台时也会重取。页头账号菜单显示档位徽标（含试用截止）。
+  `tests/business-rules.test.mjs` 逐条核对全屏标书页的挂载方式，漏包闸门即红。
+- **「没问到」不是「没订阅」**：权益信封多一个 `unavailable`。平台超时、5xx、换票暂时失败、票一直被拒时
+  解析器返回 `Entitlement.unavailable`——门控照样拒绝（fail-closed），但命令拒绝码是 503
+  `ENTITLEMENT_UNAVAILABLE`（`retryable=true`），界面说「暂时无法确认」。只有换票被平台明确拒绝
+  （`invalid_target` → `S2S_TARGET_NOT_PROVISIONED`，单独一个码）才算「平台答了：没有开通」。
+  没问到的结果不进缓存，平台恢复后下一次请求就拿到真答案。
 - `/api/admin/**` 强制 `ADMIN`；具体用例仍检查角色。标书与素材的请求路径查询必须同时带
   `owner_id` 与 `workspace_id`（§10.0），越权统一返回 403/404 语义，不泄露对象键。
 - Java 与 Python 使用常量时间比较内部 Token；模型 API Key 只从 `AI_MODEL_API_KEY` 环境变量读取。

@@ -40,7 +40,15 @@ public record Entitlement(
         boolean bundled,
         /** 上限型销售数字，取最大值。<strong>{@code -1} = 无限制</strong>。 */
         Map<String, Long> limits,
-        List<QuotaPool> quotaPools
+        List<QuotaPool> quotaPools,
+        /**
+         * 这份信封是不是<strong>没问到</strong>的结果（平台超时、5xx、换票暂时失败）。
+         *
+         * <p>它与 {@link #none} 在门控上完全相同——都没有 tier，都拒绝（fail-closed）。
+         * 区别只在对人说什么：「尚未订阅」是平台给的答案，「暂时无法确认」是没有答案。
+         * 把后者说成前者，平台抖一下，每个付了钱的用户都会看到「你还没订阅」。
+         */
+        boolean unavailable
 ) {
 
     /** 无限制哨兵。<strong>绝不当数字比较</strong>——那会得到「上限为负」。 */
@@ -51,15 +59,33 @@ public record Entitlement(
         quotaPools = quotaPools == null ? List.of() : List.copyOf(quotaPools);
     }
 
+    /** 平台答了的信封。{@code unavailable} 恒为 {@code false}。 */
+    public Entitlement(String workspaceId, String product, String status, String trialEndsAt,
+                       String currentPeriodEnd, boolean cancelAtPeriodEnd, String dataRetentionUntil,
+                       String tier, boolean bundled, Map<String, Long> limits,
+                       List<QuotaPool> quotaPools) {
+        this(workspaceId, product, status, trialEndsAt, currentPeriodEnd, cancelAtPeriodEnd,
+                dataRetentionUntil, tier, bundled, limits, quotaPools, false);
+    }
+
     /**
-     * 没有订阅时的信封。
+     * 没有订阅时的信封：平台答了，答案是没有。
      *
-     * <p>解析失败也用它——<strong>fail-closed</strong>。把解析失败当成「暂时放行」
-     * 的后果是：平台不可达的那几分钟里，所有人都拿到了完整权限。
+     * <p>换票被平台明确拒绝（本产品在该工作空间没有开通）也是这个答案。
      */
     public static Entitlement none(String workspaceId, String product) {
         return new Entitlement(workspaceId, product, null, null, null, false, null,
                 null, false, Map.of(), List.of());
+    }
+
+    /**
+     * 没问到时的信封——<strong>fail-closed</strong>：没有 tier，门控一律拒绝。
+     *
+     * <p>把没问到当成「暂时放行」的后果是：平台不可达的那几分钟里，所有人都拿到了完整权限。
+     */
+    public static Entitlement unavailable(String workspaceId, String product) {
+        return new Entitlement(workspaceId, product, null, null, null, false, null,
+                null, false, Map.of(), List.of(), true);
     }
 
     /**

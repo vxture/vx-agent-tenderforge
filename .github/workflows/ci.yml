@@ -223,6 +223,11 @@ jobs:
       - name: db-init env reader guardrail (read by key, never execute .env)
         run: python scripts/guardrails/check_db_init_env_reader.py
 
+      # C2 权益：每个用户命令方法的第一条语句是 guard.require(...)，或在放行名单里带理由。
+      # 新加命令却忘了判定不会有任何症状——新功能对未订阅的人照常开放。
+      - name: C2 entitlement gate guardrail (every command checks entitlement first)
+        run: python scripts/guardrails/check_entitlement_gates.py
+
       # IMAGE_* 只在 CI 部署时导出；主机上手工 docker compose 会解析成 :local（2026-09-15）。
       # deploy.sh 把部署的镜像钉进 docker-compose.override.yml。护栏跑 deploy.sh 本身，
       # 对真实的 compose config 断言不导出 IMAGE_* 时四个服务仍解析到部署引用。

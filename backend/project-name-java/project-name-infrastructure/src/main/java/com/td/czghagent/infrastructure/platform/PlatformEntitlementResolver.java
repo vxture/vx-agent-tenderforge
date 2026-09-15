@@ -4,11 +4,13 @@
 package com.td.czghagent.infrastructure.platform;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.td.czghagent.domain.exception.BusinessException;
 import com.td.czghagent.domain.model.Entitlement;
 import com.td.czghagent.domain.model.ProductIdentity;
 import com.td.czghagent.domain.model.QuotaPool;
 import com.td.czghagent.domain.model.S2SToken;
 import com.td.czghagent.domain.port.EntitlementResolver;
+import com.td.czghagent.infrastructure.oidc.PlatformS2STokenMinter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.client.RestClient;
@@ -67,7 +69,11 @@ public class PlatformEntitlementResolver implements EntitlementResolver {
             return cached.entitlement();
         }
         Entitlement fetched = fetch(workspaceId);
-        cache.put(workspaceId, new Cached(fetched, Instant.now()));
+        // 「没问到」不进缓存：缓存它等于把平台的一次抖动延长成 45 秒的「暂时无法确认」，
+        // 平台恢复了用户还得干等。下一次请求直接再问。
+        if (!fetched.unavailable()) {
+            cache.put(workspaceId, new Cached(fetched, Instant.now()));
+        }
         return fetched;
     }
 
@@ -84,9 +90,16 @@ public class PlatformEntitlementResolver implements EntitlementResolver {
     /**
      * 读一次权益。
      *
-     * <p><strong>永不抛出</strong>：读不到就返回空信封（fail-closed）。
-     * 把平台的一次抖动变成产品的错误页面，是把别人的可用性直接接到自己头上；
-     * 而空信封会让界面降级成「未订阅」——一个用户看得懂、且可以刷新重试的状态。
+     * <p><strong>永不抛出</strong>，但分清两种「没拿到 tier」：
+     * <ul>
+     *   <li>平台<strong>答了</strong>——信封里没有 tier，或者换票被明确拒绝
+     *       （{@link PlatformS2STokenMinter#TARGET_NOT_PROVISIONED}：本产品在该工作空间没有开通）。
+     *       这是答案：{@link Entitlement#none}，界面说「尚未订阅」。</li>
+     *   <li>平台<strong>没答上来</strong>——超时、5xx、换票暂时失败、票一直被拒。
+     *       这不是答案：{@link Entitlement#unavailable}。门控照样拒绝（fail-closed），
+     *       但界面说「暂时无法确认」，不对一个付了钱的人说「你没订阅」。</li>
+     * </ul>
+     * 把平台的一次抖动变成产品的错误页面，是把别人的可用性直接接到自己头上——所以仍然不抛。
      */
     private Entitlement fetch(String workspaceId) {
         String url = baseUrl + "/platform/entitlements"
@@ -94,11 +107,16 @@ public class PlatformEntitlementResolver implements EntitlementResolver {
                 + "&product=" + encode(ProductIdentity.PRODUCT_CODE);
         try {
             return parse(workspaceId, get(url, workspaceId, true));
-        } catch (RuntimeException exception) {
-            // 也包括铸不出票：平台答 invalid_target 意味着本产品在该工作空间
-            // 没有有效的订阅或开通，那本来就是「没有权益」。
+        } catch (BusinessException exception) {
+            if (PlatformS2STokenMinter.TARGET_NOT_PROVISIONED.equals(exception.getErrorCode())) {
+                // 平台答了：本产品在该工作空间没有有效的订阅或开通，那本来就是「没有权益」。
+                return Entitlement.none(workspaceId, ProductIdentity.PRODUCT_CODE);
+            }
             LOGGER.warn("Entitlement lookup failed for workspace {}", workspaceId, exception);
-            return Entitlement.none(workspaceId, ProductIdentity.PRODUCT_CODE);
+            return Entitlement.unavailable(workspaceId, ProductIdentity.PRODUCT_CODE);
+        } catch (RuntimeException exception) {
+            LOGGER.warn("Entitlement lookup failed for workspace {}", workspaceId, exception);
+            return Entitlement.unavailable(workspaceId, ProductIdentity.PRODUCT_CODE);
         }
     }
 
