@@ -19,6 +19,9 @@ export interface CurrentUser {
    */
   orgName: string | null
   workspaceName: string | null
+  /** 平台 access token 的 email / phone：门禁页身份块人名下一行（先手机号，没有时邮箱），只用于渲染。 */
+  email: string | null
+  phone: string | null
   admin: boolean
   /**
    * 控制台个人资料页。由服务端按 CONSOLE_BASE_URL 单点拼出——前端不再存第二份地址。

@@ -32,6 +32,7 @@ export default function GateScreensPreview() {
   const identity: GateIdentityProps = {
     userName: GATE_PREVIEW_TEXT.sampleUser,
     avatarSrc: null,
+    contact: '138 0000 1234',
     orgName: GATE_PREVIEW_TEXT.sampleOrg,
     workspaceName: GATE_PREVIEW_TEXT.sampleWorkspace,
   }

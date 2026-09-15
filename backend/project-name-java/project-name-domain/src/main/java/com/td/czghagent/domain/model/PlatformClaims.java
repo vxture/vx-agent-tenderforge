@@ -26,13 +26,21 @@ public record PlatformClaims(
         String workspaceId,
         List<String> roles,
         String orgName,
-        String workspaceName
+        String workspaceName,
+        String phone
 ) {
 
     /** 不带组织名与工作空间名的声明（平台没签发 {@code active_org_name} / {@code active_workspace_name} 时）。 */
     public PlatformClaims(String subject, String displayName, String email, String picture,
                           String orgId, String workspaceId, List<String> roles) {
-        this(subject, displayName, email, picture, orgId, workspaceId, roles, null, null);
+        this(subject, displayName, email, picture, orgId, workspaceId, roles, null, null, null);
+    }
+
+    /** 不带手机号的声明（账号没有手机号时平台不签发 {@code phone}）。 */
+    public PlatformClaims(String subject, String displayName, String email, String picture,
+                          String orgId, String workspaceId, List<String> roles,
+                          String orgName, String workspaceName) {
+        this(subject, displayName, email, picture, orgId, workspaceId, roles, orgName, workspaceName, null);
     }
 
     /**
@@ -85,6 +93,6 @@ public record PlatformClaims(
     public CurrentUser toCurrentUser() {
         String roleCode = hasRole("workspace", "owner") ? "ADMIN" : "PLANNER";
         return new CurrentUser(subject, subject, displayName, roleCode, picture, tenant(),
-                orgName, workspaceName);
+                orgName, workspaceName, email, phone);
     }
 }

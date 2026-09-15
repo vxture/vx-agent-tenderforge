@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { CurrentUser } from '@/types/auth'
 
-import { identityLabelOf, workspaceLinesOf } from './identity'
+import { contactLineOf, formatPhone, identityLabelOf, workspaceLinesOf } from './identity'
 
 const FALLBACK = '当前工作区'
 
@@ -17,6 +17,8 @@ const user = (overrides: Partial<CurrentUser> = {}): CurrentUser => ({
   avatarUrl: null,
   orgName: '华东设计院',
   workspaceName: '投标一部',
+  email: 'wang@example.com',
+  phone: '+8613800001234',
   admin: false,
   consoleProfileUrl: null,
   ...overrides,
@@ -65,5 +67,38 @@ describe('identityLabelOf', () => {
 
   it('还没有用户时为空', () => {
     expect(identityLabelOf(null)).toBe('')
+  })
+})
+
+describe('contactLineOf', () => {
+  it('人名下面显示手机号', () => {
+    expect(contactLineOf(user())).toBe('138 0000 1234')
+  })
+
+  it('账号没有手机号时用邮箱，两边仍是两行', () => {
+    expect(contactLineOf(user({ phone: null }))).toBe('wang@example.com')
+  })
+
+  it('空白手机号等同没给', () => {
+    expect(contactLineOf(user({ phone: '  ' }))).toBe('wang@example.com')
+  })
+
+  it('手机号和邮箱都没有时只显示名字', () => {
+    expect(contactLineOf(user({ phone: null, email: null }))).toBeNull()
+    expect(contactLineOf(null)).toBeNull()
+  })
+})
+
+describe('formatPhone', () => {
+  it('大陆手机号按 3-4-4 分组，去掉国家码', () => {
+    expect(formatPhone('+8613800001234')).toBe('138 0000 1234')
+    expect(formatPhone('8613800001234')).toBe('138 0000 1234')
+    expect(formatPhone('13800001234')).toBe('138 0000 1234')
+    expect(formatPhone('138-0000-1234')).toBe('138 0000 1234')
+  })
+
+  it('其它号码原样显示，不猜格式', () => {
+    expect(formatPhone('+85291234567')).toBe('+85291234567')
+    expect(formatPhone('021-12345678')).toBe('021-12345678')
   })
 })

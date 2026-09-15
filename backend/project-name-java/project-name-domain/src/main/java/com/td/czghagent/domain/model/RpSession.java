@@ -27,7 +27,8 @@ public record RpSession(
         LocalDateTime accessExpiresAt,
         LocalDateTime expiresAt,
         String orgName,
-        String workspaceName
+        String workspaceName,
+        String phone
 ) {
 
     /**
@@ -39,7 +40,16 @@ public record RpSession(
                      TenantScope tenant, String rolesCsv, String accessToken, String refreshToken,
                      LocalDateTime accessExpiresAt, LocalDateTime expiresAt) {
         this(id, subject, displayName, email, picture, tenant, rolesCsv, accessToken, refreshToken,
-                accessExpiresAt, expiresAt, null, null);
+                accessExpiresAt, expiresAt, null, null, null);
+    }
+
+    /** 不带手机号的会话（账号没有手机号时平台不签发 {@code phone}）。 */
+    public RpSession(String id, String subject, String displayName, String email, String picture,
+                     TenantScope tenant, String rolesCsv, String accessToken, String refreshToken,
+                     LocalDateTime accessExpiresAt, LocalDateTime expiresAt,
+                     String orgName, String workspaceName) {
+        this(id, subject, displayName, email, picture, tenant, rolesCsv, accessToken, refreshToken,
+                accessExpiresAt, expiresAt, orgName, workspaceName, null);
     }
 
     /**
@@ -63,6 +73,6 @@ public record RpSession(
         String roleCode = rolesCsv != null && rolesCsv.toLowerCase(java.util.Locale.ROOT)
                 .contains("workspace:owner") ? "ADMIN" : "PLANNER";
         return new CurrentUser(subject, subject, displayName, roleCode, picture, tenant,
-                orgName, workspaceName);
+                orgName, workspaceName, email, phone);
     }
 }

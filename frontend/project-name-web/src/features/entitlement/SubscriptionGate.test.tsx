@@ -84,6 +84,8 @@ const signedIn = (overrides: Partial<CurrentUser> = {}): CurrentUser => ({
   avatarUrl: null,
   orgName: '华东设计院',
   workspaceName: '投标一部',
+  email: 'wang@example.com',
+  phone: '+8613800001234',
   admin: false,
   consoleProfileUrl: null,
   ...overrides,
@@ -116,6 +118,8 @@ describe('SubscriptionGate', () => {
     // 只有产品能给的两件事：谁在登录、在哪个工作区——说的是平台签发的名字，不是标识；不带标签（owner 2026-09-16）。
     const identity = within(screen.getByRole('group', { name: '登录身份与当前工作区' }))
     expect(identity.getByText('编制员小王')).toBeTruthy()
+    // 人名下面是手机号（owner 2026-09-16），与单位一侧两行对齐。
+    expect(identity.getByText('138 0000 1234')).toBeTruthy()
     // 组织一行、工作区一行，各自完整，不拼成一串去被截断。
     expect(identity.getByText('华东设计院')).toBeTruthy()
     expect(identity.getByText('投标一部')).toBeTruthy()

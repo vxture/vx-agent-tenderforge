@@ -190,7 +190,9 @@ class OidcLoginServiceTest {
         assertThat(sessions.insertedSessions).singleElement().satisfies(stored -> {
             assertThat(stored.orgName()).isEqualTo("华东设计院");
             assertThat(stored.workspaceName()).isEqualTo("投标一部");
+            assertThat(stored.phone()).as("门禁页人名下面那一行").isEqualTo("+8613800001234");
         });
+        assertThat(result.session().toCurrentUser().phone()).isEqualTo("+8613800001234");
         assertThat(result.session().toCurrentUser().orgName()).isEqualTo("华东设计院");
         assertThat(result.session().toCurrentUser().workspaceName()).isEqualTo("投标一部");
     }
@@ -351,7 +353,7 @@ class OidcLoginServiceTest {
         public PlatformClaims readClaims(Tokens tokens, String expectedNonce) {
             lastExpectedNonce = expectedNonce;
             return new PlatformClaims("sub-1", "张三", null, null,
-                    "org-1", "ws-1", List.of("workspace:owner"), "华东设计院", "投标一部");
+                    "org-1", "ws-1", List.of("workspace:owner"), "华东设计院", "投标一部", "+8613800001234");
         }
 
         @Override

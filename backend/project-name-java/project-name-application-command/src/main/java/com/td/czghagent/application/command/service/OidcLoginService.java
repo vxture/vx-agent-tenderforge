@@ -106,7 +106,7 @@ public class OidcLoginService {
                 tokens.accessToken(), tokens.refreshToken(),
                 now.plusSeconds(tokens.expiresInSeconds()),
                 now.plusSeconds(gateway.sessionSeconds()),
-                claims.orgName(), claims.workspaceName()
+                claims.orgName(), claims.workspaceName(), claims.phone()
         );
         sessions.insertSession(session, SessionToken.hash(cookieValue));
 
@@ -162,7 +162,7 @@ public class OidcLoginService {
                 current.id(), current.subject(), current.displayName(), current.email(),
                 current.picture(), current.tenant(), current.rolesCsv(),
                 refreshed.accessToken(), nextRefresh, accessExpiresAt, current.expiresAt(),
-                current.orgName(), current.workspaceName());
+                current.orgName(), current.workspaceName(), current.phone());
     }
 
     /**

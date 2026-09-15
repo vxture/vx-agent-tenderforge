@@ -88,7 +88,8 @@ public class PlatformOidcGateway implements OidcGateway {
                 stringClaim(accessClaims, "active_workspace"),
                 rolesOf(accessClaims),
                 stringClaim(accessClaims, "active_org_name"),
-                stringClaim(accessClaims, "active_workspace_name")
+                stringClaim(accessClaims, "active_workspace_name"),
+                firstPresent(stringClaim(accessClaims, "phone"), stringClaim(idClaims, "phone"))
         );
     }
 

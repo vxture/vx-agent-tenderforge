@@ -156,12 +156,14 @@ class PlatformOidcGatewayTest {
                         .claim("active_org_name", "华东设计院")
                         .claim("active_workspace", "ws-1")
                         .claim("active_workspace_name", "投标一部")
+                        .claim("phone", "+8613800001234")
                         .build());
 
         PlatformClaims claims = gateway.readClaims(tokens, NONCE);
 
         assertThat(claims.displayName()).isEqualTo("王小明");
         assertThat(claims.email()).isEqualTo("w@example.com");
+        assertThat(claims.phone()).isEqualTo("+8613800001234");
         assertThat(claims.picture()).isEqualTo("https://accounts.example/avatar/usr_1?v=1");
         assertThat(claims.orgName()).isEqualTo("华东设计院");
         assertThat(claims.workspaceName()).isEqualTo("投标一部");
