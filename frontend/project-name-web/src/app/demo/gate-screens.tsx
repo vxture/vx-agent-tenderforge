@@ -21,7 +21,7 @@ import { useMessages } from '../lib/i18n/provider'
 
 type Screen = 'sign-in' | 'no-subscription' | 'no-roles' | 'signed-out'
 
-const SAMPLE_SUBSCRIBE_URL = 'https://console.vxture.com/subscribe?product=tenderforge&intent=subscribe'
+const SAMPLE_SUBSCRIBE_URL = 'https://vxture.com/zh-CN/pricing?product=tenderforge'
 const SAMPLE_CONSOLE_URL = 'https://console.vxture.com'
 
 export default function GateScreensPreview() {

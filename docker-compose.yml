@@ -202,6 +202,7 @@ services:
       PROVISION_WEBHOOK_SECRET: ${PROVISION_WEBHOOK_SECRET:-}
       PROVISION_WEBHOOK_SECRET_NEXT: ${PROVISION_WEBHOOK_SECRET_NEXT:-}
       CONSOLE_BASE_URL: ${CONSOLE_BASE_URL:-https://console.vxture.com}
+      WEBSITE_BASE_URL: ${WEBSITE_BASE_URL:-https://vxture.com}
       # Atlas 模型出口
       ATLAS_API_URL: ${ATLAS_API_URL:-}
       # 仅本地：驱动权益替身走遍各档位分支（部署态替身根本起不来）
@@ -295,6 +296,7 @@ services:
       PROVISION_WEBHOOK_SECRET: ${PROVISION_WEBHOOK_SECRET:-}
       PROVISION_WEBHOOK_SECRET_NEXT: ${PROVISION_WEBHOOK_SECRET_NEXT:-}
       CONSOLE_BASE_URL: ${CONSOLE_BASE_URL:-https://console.vxture.com}
+      WEBSITE_BASE_URL: ${WEBSITE_BASE_URL:-https://vxture.com}
       # Atlas 模型出口
       ATLAS_API_URL: ${ATLAS_API_URL:-}
       # 仅本地：驱动权益替身走遍各档位分支（部署态替身根本起不来）

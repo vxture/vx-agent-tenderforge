@@ -20,7 +20,8 @@ import { SubscriptionGate } from './SubscriptionGate'
 const api = vi.hoisted(() => ({ current: vi.fn(), refresh: vi.fn() }))
 vi.mock('@/api/modules/entitlement', () => ({ entitlementApi: api }))
 
-const SUBSCRIBE_URL = 'https://console.vxture.com/subscribe?product=tenderforge&intent=subscribe'
+// 官网定价页（owner 2026-09-16）：套餐在那里发布；服务端按请求语言拼好，前端原样打开。
+const SUBSCRIBE_URL = 'https://vxture.com/zh-CN/pricing?product=tenderforge'
 const ALL = ['AI_GENERATION', 'ASSET_LIBRARY', 'BID_AUTHORING', 'CONSISTENCY_REVIEW', 'DOCUMENT_EXPORT']
 
 type Overrides = Omit<Partial<EntitlementView>, 'subscription'> & {

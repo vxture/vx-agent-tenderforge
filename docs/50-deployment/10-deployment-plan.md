@@ -192,7 +192,7 @@ Insights → Dependency graph → Dependabot 手动跑一次 "Check for updates"
 
 **b. 平台线提供（见 §4）**
 `OIDC_*` `PLATFORM_API_URL`
-`PROVISION_WEBHOOK_SECRET(_NEXT)` `ATLAS_API_URL` `CONSOLE_BASE_URL`
+`PROVISION_WEBHOOK_SECRET(_NEXT)` `ATLAS_API_URL` `CONSOLE_BASE_URL` `WEBSITE_BASE_URL`
 
 **c. 部署形态（运维决定）**
 `DEPLOY_STAGE=production` `APP_VERSION` `ALLOW_MOCK_ON_DEPLOY=false`

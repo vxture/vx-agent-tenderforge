@@ -5,7 +5,6 @@ package com.td.czghagent.infrastructure.platform;
 
 import com.td.czghagent.domain.model.BidCapability;
 import com.td.czghagent.domain.model.Entitlement;
-import com.td.czghagent.domain.model.SubscribeDeeplink;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -55,10 +54,8 @@ class MockEntitlementResolverTest {
         Entitlement lapsed = new MockEntitlementResolver("pro", "expired", false).resolve("ws-1");
         Entitlement never = new MockEntitlementResolver("none", "active", false).resolve("ws-1");
 
-        assertThat(SubscribeDeeplink.intentFor(lapsed))
-                .isEqualTo(SubscribeDeeplink.Intent.RENEW);
-        assertThat(SubscribeDeeplink.intentFor(never))
-                .isEqualTo(SubscribeDeeplink.Intent.SUBSCRIBE);
+        assertThat(lapsed.status())
+                .as("失效保留状态，界面据此说「前往续订」").isEqualTo("expired");
         assertThat(never.status())
                 .as("从未订阅没有状态可言").isNull();
     }
