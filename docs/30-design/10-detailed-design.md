@@ -993,9 +993,10 @@ provisioned 才放行」、开通时顺手建默认空间、把权益缓存拉�
   于是拒绝——沿用 fail-closed，不另立放行。**不做配额判定**：`QuotaPool.remaining` 是展示用快照，
   consume「记账不裁决」（通则 C3），依据应是 consume 的 `gated` 回执。拒绝时前端渲染订阅引导，
   深链取自 `GET /api/entitlement`，只在点击时打开。**深链是官网定价页**
-  `{WEBSITE_BASE_URL}/{语言}/pricing?product=tenderforge`（owner 2026-09-16：套餐在官网发布；
+  `{WEBSITE_BASE_URL}/pricing?product=tenderforge`（owner 2026-09-16：套餐在官网发布；
   此前按通则 C2 拼的 console `/subscribe` 不是订阅页面，目录里没有本产品套餐时它降级回订阅首页）。
-  语言取自请求的 `NEXT_LOCALE` cookie，其次 `Accept-Language`，都没有则 zh-CN。
+  **不拼语言段**：官网按访客的 `NEXT_LOCALE` cookie、其次 `Accept-Language` 自己 307 分流到 `/zh-CN/` 或 `/en-US/`；
+  产品侧那个语言 cookie 种在自己域名上，官网读不到，拼进去只是用猜测覆盖访客在官网的选择。
   `check_entitlement_gates.py` 守着「每个命令方法
   先判定」，`EntitlementEnforcementIntegrationTest` 对每个端点真发请求。
 - **订阅闸门（界面）**（2026-09-15）：已登录不等于能用。生产上一个未订阅工作空间（`status=null`、
