@@ -18,7 +18,7 @@ const view = ({ subscription, ...rest }: Overrides = {}): EntitlementView => ({
   allowsProductSurface: false,
   allowsDataPlane: false,
   capabilities: [],
-  subscribeUrl: 'https://vxture.com/zh-CN/pricing?product=tenderforge',
+  subscribeUrl: 'https://vxture.com/pricing?product=tenderforge',
   degraded: false,
   unavailable: false,
   ...rest,

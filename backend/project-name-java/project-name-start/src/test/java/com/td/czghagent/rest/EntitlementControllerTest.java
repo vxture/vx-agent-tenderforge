@@ -5,11 +5,9 @@ package com.td.czghagent.rest;
 
 import com.td.czghagent.domain.model.CurrentUser;
 import com.td.czghagent.domain.model.Entitlement;
-import com.td.czghagent.domain.model.PricingDeeplink;
 import com.td.czghagent.domain.model.TenantScope;
 import com.td.czghagent.domain.port.EntitlementResolver;
 import com.td.czghagent.rest.security.RequestIdentity;
-import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 
@@ -46,6 +44,7 @@ class EntitlementControllerTest {
      *
      * <p>此前拼的是 console 的 subscribe，而那不是订阅页面——目录里没有本产品套餐时，
      * console 把人降级回订阅首页，用户点「前往订阅」看到的与订阅无关。
+     * 语言段不拼：官网按访客偏好自己 307 分流。
      */
     @Test
     void aWorkspaceThatNeverSubscribedIsAnAnswerNotAnOutage() {
@@ -57,25 +56,7 @@ class EntitlementControllerTest {
         assertThat(body.get("unavailable")).isEqualTo(false);
         assertThat(body.get("allowsProductSurface")).isEqualTo(false);
         assertThat(body.get("subscribeUrl"))
-                .isEqualTo("https://vxture.com/zh-CN/pricing?product=tenderforge");
-    }
-
-    /** 界面是哪种语言，定价页就是哪种语言：语言取自平台各产品共用的 {@code NEXT_LOCALE} cookie。 */
-    @Test
-    void takesTheLanguageFromTheRequest() {
-        EntitlementController controller = new EntitlementController(
-                fixed(Entitlement.none("ws-1", "tenderforge")), WEBSITE);
-
-        MockHttpServletRequest chosen = requestFor("ws-1");
-        chosen.setCookies(new Cookie(PricingDeeplink.LOCALE_COOKIE, "en-US"));
-        MockHttpServletRequest browser = requestFor("ws-1");
-        browser.addHeader("Accept-Language", "en-US,en;q=0.9");
-
-        assertThat(controller.current(chosen).get("subscribeUrl"))
-                .isEqualTo("https://vxture.com/en-US/pricing?product=tenderforge");
-        assertThat(controller.current(browser).get("subscribeUrl"))
-                .as("没选过语言时看浏览器偏好")
-                .isEqualTo("https://vxture.com/en-US/pricing?product=tenderforge");
+                .isEqualTo("https://vxture.com/pricing?product=tenderforge");
     }
 
     /** 刷新先驱逐<strong>调用者自己</strong>工作空间的缓存，再问一次——顺序反了等于没刷新。 */
