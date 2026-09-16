@@ -992,7 +992,11 @@ provisioned 才放行」、开通时顺手建默认空间、把权益缓存拉�
   控制器（一处规则、不会漏端点）或活动（不中途打断已放行的任务）。平台不可达时解析器返回空信封，
   于是拒绝——沿用 fail-closed，不另立放行。**不做配额判定**：`QuotaPool.remaining` 是展示用快照，
   consume「记账不裁决」（通则 C3），依据应是 consume 的 `gated` 回执。拒绝时前端渲染订阅引导，
-  深链取自 `GET /api/entitlement`，只在点击时打开。`check_entitlement_gates.py` 守着「每个命令方法
+  深链取自 `GET /api/entitlement`，只在点击时打开。**深链是官网定价页**
+  `{WEBSITE_BASE_URL}/{语言}/pricing?product=tenderforge`（owner 2026-09-16：套餐在官网发布；
+  此前按通则 C2 拼的 console `/subscribe` 不是订阅页面，目录里没有本产品套餐时它降级回订阅首页）。
+  语言取自请求的 `NEXT_LOCALE` cookie，其次 `Accept-Language`，都没有则 zh-CN。
+  `check_entitlement_gates.py` 守着「每个命令方法
   先判定」，`EntitlementEnforcementIntegrationTest` 对每个端点真发请求。
 - **订阅闸门（界面）**（2026-09-15）：已登录不等于能用。生产上一个未订阅工作空间（`status=null`、
   `tier=null`）登录后直接进了智能体——权益只在命令被拒时才读。现在主布局内容区与全屏标书页都经

@@ -6,7 +6,7 @@
  * 产品身份，前端侧的唯一真源。
  *
  * 与后端 `ProductIdentity.PRODUCT_CODE` 是同一个值的两处承载——前端需要它来拼
- * console 深链的 `?product=`，后端需要它走平台四通道。两处必须同时改，
+ * 转化深链（官网定价页）的 `?product=`，后端需要它走平台四通道。两处必须同时改，
  * 一次性重命名脚本负责保证这一点。
  *
  * 不要从 URL、环境变量或 OIDC client id 推导它：beta 的 client 是

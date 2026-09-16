@@ -160,47 +160,10 @@ class EntitlementContractTest {
     }
 
     // ── 转化深链 ────────────────────────────────────────────────────────────
-
-    /**
-     * 意图由订阅状态决定，而 {@code null} 是「从未订阅」。
-     *
-     * <p>混了就会永远显示错的行动号召：对一个从没买过的人说「续费」，
-     * 或者对刚过期的人说「开始订阅」——两者都会把他带到一个不存在的页面。
-     */
-    @Test
-    void picksTheIntentFromWhetherTheyEverSubscribed() {
-        assertThat(SubscribeDeeplink.intentFor(Entitlement.none("ws-1", "p")))
-                .isEqualTo(SubscribeDeeplink.Intent.SUBSCRIBE);
-        assertThat(SubscribeDeeplink.intentFor(statusOnly("expired")))
-                .isEqualTo(SubscribeDeeplink.Intent.RENEW);
-        assertThat(SubscribeDeeplink.intentFor(statusOnly("cancelled")))
-                .isEqualTo(SubscribeDeeplink.Intent.RENEW);
-        assertThat(SubscribeDeeplink.intentFor(entitlement("free", false)))
-                .as("已经在用的人点进来是想升级").isEqualTo(SubscribeDeeplink.Intent.UPGRADE);
-    }
-
-    /** 没见过的状态保守成首购——它至少会把人带到一个能看懂的页面。 */
-    @Test
-    void degradesAnUnknownStatusToTheSubscribeIntent() {
-        assertThat(SubscribeDeeplink.intentFor(statusOnly("some_future_status")))
-                .isEqualTo(SubscribeDeeplink.Intent.SUBSCRIBE);
-    }
-
-    /**
-     * 深链<strong>不带 workspace_id</strong>——console 从会话解析。
-     *
-     * <p>带上它等于让一个可被伪造的查询参数决定给谁开通。
-     */
-    @Test
-    void neverPutsTheWorkspaceIntoTheConversionLink() {
-        String url = SubscribeDeeplink.of(
-                "https://console.vxture.com/", "tenderforge",
-                SubscribeDeeplink.Intent.SUBSCRIBE);
-
-        assertThat(url)
-                .isEqualTo("https://console.vxture.com/subscribe?product=tenderforge&intent=subscribe");
-        assertThat(url).doesNotContain("workspace");
-    }
+    //
+    // 深链本身的形状（官网定价页、语言、只带 product）在 PricingDeeplinkTest；
+    // 这里不再验「按订阅状态选 intent」——定价页只认 product，intent 随 console 深链一起退役
+    // （owner 2026-09-16）。界面上「开始订阅 / 前往续订」的措辞仍按 status 区分，判定在前端 access.ts。
 
     private static Entitlement entitlement(String tier, boolean bundled) {
         return new Entitlement("ws-1", "tenderforge", tier == null ? null : "active",
