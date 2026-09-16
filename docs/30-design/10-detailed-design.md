@@ -1006,6 +1006,13 @@ provisioned 才放行」、开通时顺手建默认空间、把权益缓存拉�
   `POST /api/entitlement/refresh`，服务端先驱逐**本工作空间**的权益缓存再问平台，不让刚付完钱的人再等
   45 秒；页面切回前台时也会重取。页头账号菜单显示档位徽标（含试用截止）。
   `tests/business-rules.test.mjs` 逐条核对全屏标书页的挂载方式，漏包闸门即红。
+- **门禁页身份块**（2026-09-16）：未订阅 / 无角色两页显示的是**平台签发的名字**，不是标识。人员与单位左右两列、
+  各自两行：左 头像 + 姓名 / 手机号（账号没有手机号时退邮箱），右 组织图标 + 组织名 / 工作区名（平台没给工作区名
+  才用兜底文案「当前工作区」，组织与工作区同名只写一行）。名字取自 **access token**——`name`、`phone`、`email`、
+  `active_org_name`、`active_workspace_name`，**不在 id_token 里**：此前只读 id_token，生产上把人显示成
+  `usr_<uuid>`、工作区显示成兜底文案，而登录与租户过滤一切正常。经 `rp_session`（`incr/0003`、`0004`）与
+  `/api/auth/me` 平铺下发，续期原样带过去。名字换行不截断——两列 `LabeledValue` 会把「组织 / 工作区」截掉后半，
+  截掉的正是工作区名。组织图标用设计系统的 `building`：平台的组织 logo 只由控制台在自己的会话里提供，产品取不到。
 - **「没问到」不是「没订阅」**：权益信封多一个 `unavailable`。平台超时、5xx、换票暂时失败、票一直被拒时
   解析器返回 `Entitlement.unavailable`——门控照样拒绝（fail-closed），但命令拒绝码是 503
   `ENTITLEMENT_UNAVAILABLE`（`retryable=true`），界面说「暂时无法确认」。只有换票被平台明确拒绝
